@@ -1,0 +1,696 @@
+# author: bdth
+# email: 2074055628@qq.com
+# 定义 Agent 可调用的全部工具(JSON schema)并把工具调用分发到各执行器
+
+from __future__ import annotations
+
+import threading
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+
+from desktop_pet.docs import docs
+from desktop_pet.eyes.capture import capture_screen, to_data_url
+from desktop_pet.executor import clipboard, fs, net, sysmem, vision, web
+from desktop_pet.executor.pycode import PythonRunner, install_package
+from desktop_pet.executor.shell import run_shell
+from desktop_pet.hands import keyboard, mouse, windows
+from desktop_pet.mcp_hub import mcp_hub
+from desktop_pet.memory.store import store
+from desktop_pet.reminders import reminders
+from desktop_pet.settings import CAPTURE_FULLSCREEN
+from desktop_pet.skills import skills
+
+_python = PythonRunner()
+_DISPATCH_LOCK = threading.Lock()
+
+
+@dataclass
+class ToolResult:
+    text: str
+    image_data_url: str | None = None
+
+
+def _function(name: str, description: str, properties: dict, required: list[str]) -> dict:
+    return {
+        "type": "function",
+        "function": {
+            "name": name,
+            "description": description,
+            "parameters": {
+                "type": "object",
+                "properties": properties,
+                "required": required,
+            },
+        },
+    }
+
+
+_XY = {
+    "x": {"type": "integer", "description": "screen X, pixels"},
+    "y": {"type": "integer", "description": "screen Y, pixels"},
+}
+
+TOOLS = [
+    _function(
+        "run_shell",
+        "Run a PowerShell/cmd command on this machine; returns exit code and output. First choice for files, processes, system settings, launching programs, installing software, etc.",
+        {
+            "command": {"type": "string", "description": "the command to run"},
+            "shell": {"type": "string", "enum": ["powershell", "cmd"], "description": "default powershell"},
+        },
+        ["command"],
+    ),
+    _function(
+        "run_python",
+        "Run code in a persistent Python environment (variables/imports survive across calls); returns stdout. pip-install libraries, call APIs, read/write files, drive automation libraries.",
+        {"code": {"type": "string", "description": "the Python code to run"}},
+        ["code"],
+    ),
+    _function(
+        "read_file",
+        "Read a text file's contents (long files are truncated).",
+        {"path": {"type": "string", "description": "file path"}},
+        ["path"],
+    ),
+    _function(
+        "write_file",
+        "Write content to a file (overwrites; creates parent dirs).",
+        {
+            "path": {"type": "string", "description": "file path"},
+            "content": {"type": "string", "description": "the content to write"},
+        },
+        ["path", "content"],
+    ),
+    _function(
+        "edit_file",
+        "Precisely edit a file: replace the EXACTLY matching `old` string with `new` (surgical — safer than rewriting a whole file with write_file). "
+        "`old` must carry enough context to be unique; if it isn't found, or appears multiple times without replace_all, you get an error to fix.",
+        {
+            "path": {"type": "string", "description": "file path"},
+            "old": {"type": "string", "description": "the original text to replace (including whitespace/indentation; must match exactly)"},
+            "new": {"type": "string", "description": "the replacement text"},
+            "replace_all": {"type": "boolean", "description": "replace all occurrences; default replaces only the first (and requires it to be unique)"},
+        },
+        ["path", "old", "new"],
+    ),
+    _function(
+        "list_dir",
+        "List the files and subdirectories in a directory.",
+        {"path": {"type": "string", "description": "directory path, default current dir"}},
+        [],
+    ),
+    _function(
+        "search_code",
+        "Regex-search the contents of code/text files; returns file:line: content (auto-skips .venv/.git/caches). Use to find code, locate symbols, check usage.",
+        {
+            "pattern": {"type": "string", "description": "regular expression"},
+            "path": {"type": "string", "description": "search root dir or file, default current dir"},
+        },
+        ["pattern"],
+    ),
+    _function(
+        "glob_files",
+        "Find files by name pattern (e.g. *.py, **/test_*.py); returns the matching paths.",
+        {
+            "pattern": {"type": "string", "description": "glob pattern"},
+            "path": {"type": "string", "description": "search root dir, default current dir"},
+        },
+        ["pattern"],
+    ),
+    _function(
+        "http_request",
+        "Make an HTTP request; returns status code and response body (truncated).",
+        {
+            "url": {"type": "string", "description": "request URL"},
+            "method": {"type": "string", "description": "GET/POST etc., default GET"},
+            "body": {"type": "string", "description": "request body, optional"},
+        },
+        ["url"],
+    ),
+    _function(
+        "web_search",
+        "Search the web; returns several results (title/link/snippet). Use for real-time, latest, or uncertain info; "
+        "then web_fetch to open a link you want to read closely.",
+        {"query": {"type": "string", "description": "search query"}},
+        ["query"],
+    ),
+    _function(
+        "web_fetch",
+        "Open a URL and return its main text (navigation/ads stripped; truncated if long). Usually follows web_search to read one result.",
+        {"url": {"type": "string", "description": "web page URL"}},
+        ["url"],
+    ),
+    _function(
+        "install_package",
+        "pip-install a Python package into the runtime; afterwards run_python can import it directly.",
+        {"name": {"type": "string", "description": "package name, e.g. requests"}},
+        ["name"],
+    ),
+    _function(
+        "perform",
+        "Act out a move or a little skit yourself — call this when the user asks you to dance / have a coffee / fish / look at the stars, etc., and your body really performs it. "
+        "Skits (a few-to-ten-second mini-scene): coffee, fish, sleuth, read, music, game, stars. "
+        "One-shot actions: dance, cheer, celebrate, spin, jump_spin, flip, roll, "
+        "hop2, bounce, nod, wobble, stretch, yawn, headbang, puff_up, boing, pop.",
+        {"name": {"type": "string", "description": "the action or skit name (see the list above; use the English key)"}},
+        ["name"],
+    ),
+    _function(
+        "system_memory",
+        "Show this machine's RAM usage: total / used / available, plus the most memory-hungry processes (Task-Manager-style view). "
+        "Use when the user asks 'how much memory is used / which program eats the most memory'. Read-only, safe.",
+        {"top": {"type": "integer", "description": "list the top-N processes by usage, default 12, max 40"}},
+        [],
+    ),
+    _function(
+        "read_process_memory",
+        "Read a process's raw memory bytes (Win32 ReadProcessMemory); returns a hex + ASCII dump. "
+        "For debugging / forensics / inspecting a value in a process's memory — only when the user explicitly asks to view a process's memory. "
+        "Read-only, never modifies; system/protected processes need admin. Find the target pid first with system_memory or list_windows.",
+        {
+            "pid": {"type": "integer", "description": "target process ID"},
+            "address": {"type": "string", "description": "start address, decimal or 0x hex, e.g. 0x7ff6abcd0000"},
+            "size": {"type": "integer", "description": "bytes to read, default 256, max 4096"},
+        },
+        ["pid", "address"],
+    ),
+    _function(
+        "show_image",
+        "Show the user an image beside the pet (pinned as a Polaroid). Use when you found an image online, generated/downloaded one, or the user wants to see a picture. "
+        "source can be a local path or an http(s) image URL (auto-downloaded).",
+        {
+            "source": {"type": "string", "description": "local image path or image URL"},
+            "caption": {"type": "string", "description": "small caption under the photo (optional)"},
+        },
+        ["source"],
+    ),
+    _function(
+        "play_gif",
+        "Play a GIF beside the user (looped in a little TV). source can be a local path or an http(s) .gif URL (auto-downloaded).",
+        {
+            "source": {"type": "string", "description": "local GIF path or GIF URL"},
+            "caption": {"type": "string", "description": "caption (optional)"},
+        },
+        ["source"],
+    ),
+    _function(
+        "screenshot",
+        "Take a screenshot and return the image to you; the text gives the screen resolution, and mouse coordinates follow it. Use only when you must see the GUI. "
+        "Pick the scope: for the whole desktop / locating a window use fullscreen (default); to see the active window clearly use window. "
+        "By default you (the pet) are NOT in the shot; set include_self to true only when you actually want to see yourself.",
+        {
+            "scope": {
+                "type": "string",
+                "enum": ["fullscreen", "window"],
+                "description": "framing: fullscreen = whole screen (default), window = only the active window. Choose by what you need to see.",
+            },
+            "include_self": {
+                "type": "boolean",
+                "description": "whether to include you (the pet window) in the shot. Default false — usually you don't need to see yourself when looking at the screen.",
+            },
+        },
+        [],
+    ),
+    _function(
+        "ocr_screen",
+        "OCR the on-screen text and return each segment's CENTER coordinate — unlike eyeballing a screenshot, this tells you exactly "
+        "where text is so you can click the coordinate directly. Use to read a lot of on-screen text, or to click a specific piece of text. "
+        "Optional region scans just one area.",
+        {"region": {"type": "string", "description": "optional, scan only this area: left,top,width,height (screen pixels); blank = whole screen"}},
+        [],
+    ),
+    _function(
+        "find_on_screen",
+        "Locate a small template image (an icon/button screenshot) on screen; returns its center coordinate (click it directly). "
+        "Use to click elements with no accessibility node — icons in custom-drawn UIs or game screens. Prepare the template image file first.",
+        {
+            "template_path": {"type": "string", "description": "local path of the template image (a small screenshot of the icon/button to find)"},
+            "confidence": {"type": "number", "description": "match threshold 0–1, default 0.8; lower it if not found"},
+        },
+        ["template_path"],
+    ),
+    _function(
+        "screen_elements",
+        "BEST way to operate a GUI: detect all actionable elements on the active screen (accessibility controls + on-screen text), draw NUMBERED boxes on a screenshot, and return it plus a numbered list. "
+        "Then call act_element with the number — you pick a number instead of guessing pixel coordinates, and the click lands exactly. Prefer this over screenshot+click for any normal app/web UI. "
+        "(Won't find much on pure game/canvas surfaces — there fall back to ocr_screen, or raw click/move by coordinate.)",
+        {},
+        [],
+    ),
+    _function(
+        "act_element",
+        "Act on a numbered element from the most recent screen_elements result. Clicks the element's exact coordinate, or — for standard controls — invokes it directly via the accessibility API (no cursor moved, works in the background). "
+        "action: click (default) / double / right / type (type needs text). Re-run screen_elements first if the screen changed.",
+        {
+            "index": {"type": "integer", "description": "the element number from screen_elements"},
+            "action": {"type": "string", "enum": ["click", "double", "right", "type"], "description": "default click"},
+            "text": {"type": "string", "description": "text to type when action=type"},
+        },
+        ["index"],
+    ),
+    _function("list_windows", "List the titles of all currently visible windows.", {}, []),
+    _function(
+        "focus_window",
+        "Activate and bring a title-matching window to the front (do this before clicking its GUI).",
+        {"title": {"type": "string", "description": "window title or part of it"}},
+        ["title"],
+    ),
+    _function(
+        "manage_window",
+        "Manage a window: minimize / maximize / restore / close, or move / resize it. Use to tidy windows or make room.",
+        {
+            "title": {"type": "string", "description": "window title or part of it"},
+            "action": {"type": "string", "enum": ["minimize", "maximize", "restore", "close", "move", "resize"],
+                       "description": "the action to take"},
+            "x": {"type": "integer", "description": "top-left X for move (screen pixels)"},
+            "y": {"type": "integer", "description": "top-left Y for move (screen pixels)"},
+            "width": {"type": "integer", "description": "width for resize (pixels)"},
+            "height": {"type": "integer", "description": "height for resize (pixels)"},
+        },
+        ["title", "action"],
+    ),
+    _function(
+        "read_clipboard",
+        "Read the text on the system clipboard (see what the user just copied).",
+        {},
+        [],
+    ),
+    _function(
+        "recall_clipboard",
+        "Recall the most recent INTERESTING thing the user copied (an error / foreign text / code / link), as noticed by the clipboard sense. Use when they refer to 'this error', 'what I just copied', etc. Returns nothing if the feature is off or nothing notable was copied.",
+        {},
+        [],
+    ),
+    _function(
+        "write_clipboard",
+        "Write text to the system clipboard (the user can then paste it).",
+        {"text": {"type": "string", "description": "text to put on the clipboard"}},
+        ["text"],
+    ),
+    _function("click", "Left-click at a screen coordinate.", _XY, ["x", "y"]),
+    _function("double_click", "Double-click (left) at a screen coordinate.", _XY, ["x", "y"]),
+    _function("right_click", "Right-click at a screen coordinate.", _XY, ["x", "y"]),
+    _function("move_mouse", "Move the mouse to a screen coordinate.", _XY, ["x", "y"]),
+    _function(
+        "scroll",
+        "Scroll the mouse wheel; positive = up, negative = down.",
+        {"amount": {"type": "integer", "description": "scroll amount"}},
+        ["amount"],
+    ),
+    _function(
+        "type_text",
+        "Type text into the focused field — works for ANY language (Chinese / Japanese / emoji etc. are pasted via the clipboard automatically; English/digits are typed as keystrokes). Click/focus the target field first.",
+        {"text": {"type": "string", "description": "the text to type"}},
+        ["text"],
+    ),
+    _function(
+        "press_keys",
+        'Press a key or key combo, e.g. "enter", "ctrl+c", "alt+f4".',
+        {"keys": {"type": "string", "description": "keys; join a combo with +"}},
+        ["keys"],
+    ),
+    _function(
+        "set_preference",
+        "Remember a long-term preference/habit of the user (recalled automatically at each launch).",
+        {
+            "key": {"type": "string", "description": "preference name, e.g. music app"},
+            "value": {"type": "string", "description": "preference value, e.g. NetEase Music"},
+        },
+        ["key", "value"],
+    ),
+    _function(
+        "remember",
+        "Remember an experience, lesson, or important fact for later reference.",
+        {"content": {"type": "string", "description": "what to remember"}},
+        ["content"],
+    ),
+    _function(
+        "recall",
+        "Search long-term memory for preferences, experiences, and environment facts related to a keyword.",
+        {"query": {"type": "string", "description": "search keyword"}},
+        ["query"],
+    ),
+    _function(
+        "note_env",
+        "Remember a CHANGEABLE environment fact — software install paths, runtime locations, window-title patterns, etc. "
+        "Stored separately from set_preference (stable preferences) and remember (lessons); it's a cache that may go stale — "
+        "if acting on it fails, re-verify and note_env again to update it.",
+        {
+            "key": {"type": "string", "description": "env key, e.g. QQMusic.install_path"},
+            "value": {"type": "string", "description": "the value"},
+        },
+        ["key", "value"],
+    ),
+    _function(
+        "forget_memory",
+        "Delete your OWN stored memories matching a keyword — use to correct yourself: when a lesson/preference/env fact you saved turns out WRONG or outdated (you discovered it's false, or the user corrected you). "
+        "Removes the matching entries from long-term memory (experiences / preferences / env facts) and reports what was removed; then remember the corrected version if there is one.",
+        {"query": {"type": "string", "description": "keyword of the memory to remove"}},
+        ["query"],
+    ),
+    _function(
+        "schedule_reminder",
+        "Schedule a reminder: at the time you'll wake yourself and tell the user the thing in your own voice "
+        "(not a popup, not a system notification, not a background script). Use when the user says 'remind me / call me / tell me to do X at <time>'. "
+        "Once you call this it's scheduled — don't write any code to sleep / wait for that time; the system wakes you at the time. "
+        "Give message (what to say) and one of fire_at or in_minutes.",
+        {
+            "message": {"type": "string", "description": "what to tell the user at the time, e.g. time for bed"},
+            "fire_at": {"type": "string", "description": "absolute time, 24h HH:MM or YYYY-MM-DD HH:MM; pick one of this / in_minutes"},
+            "in_minutes": {"type": "number", "description": "remind after this many minutes; pick one of this / fire_at"},
+        },
+        ["message"],
+    ),
+    _function(
+        "ingest_docs",
+        "Ingest a file or folder into the KNOWLEDGE BASE: contents are chunked, embedded, and stored, then searchable with recall_docs. "
+        "Handles text/code/markdown AND PDF (text-layer PDFs are read directly; scanned/image PDFs are OCR'd automatically). "
+        "Use when the user gives you material or says 'remember these documents / read this folder / read this PDF'.",
+        {"path": {"type": "string", "description": "file or folder path (a single .pdf, a file, or a directory)"}},
+        ["path"],
+    ),
+    _function(
+        "recall_docs",
+        "Semantic-search the KNOWLEDGE BASE (documents you've ingested); returns the most relevant passages (with source filenames). Use this first when answering questions about the user's material.",
+        {"query": {"type": "string", "description": "search question / keywords"}},
+        ["query"],
+    ),
+    _function(
+        "list_docs",
+        "List which documents are in the knowledge base (filename + chunk count).",
+        {},
+        [],
+    ),
+    _function(
+        "forget_docs",
+        "Remove documents from the knowledge base: give source (a filename fragment) to delete only matches; omit it to clear the whole base.",
+        {"source": {"type": "string", "description": "filename fragment of the source to remove; omit to clear everything"}},
+        [],
+    ),
+    _function(
+        "schedule_task",
+        "Schedule a TASK: at the time the system has you actually CARRY IT OUT in the background (with the full toolset: run commands / write code / go online / operate the PC, etc.), "
+        "then report the result to the user. Difference from schedule_reminder — that one just SAYS a line at the time; this one DOES the work. "
+        "Use when the user says 'automatically do X / run Y for me at <time> / after <duration>'. Give task (self-contained, stating the wanted outcome) and one of fire_at or in_minutes.",
+        {
+            "task": {"type": "string", "description": "the task to run automatically at the time, self-contained, stating the wanted outcome"},
+            "fire_at": {"type": "string", "description": "absolute time HH:MM or YYYY-MM-DD HH:MM; pick one of this / in_minutes"},
+            "in_minutes": {"type": "number", "description": "after this many minutes; pick one of this / fire_at"},
+        },
+        ["task"],
+    ),
+    _function(
+        "create_skill",
+        "Save a working piece of Python as a reusable skill (call it later with run_skill, no rewriting). Skill code reads params from the variable args (a dict) and outputs via print.",
+        {
+            "name": {"type": "string", "description": "skill name, letters/digits/underscore"},
+            "code": {"type": "string", "description": "Python code: read params from args, output via print"},
+            "desc": {"type": "string", "description": "what this skill does"},
+            "params": {"type": "string", "description": "parameter notes, e.g. path: file path"},
+        },
+        ["name", "code", "desc"],
+    ),
+    _function(
+        "run_skill",
+        "Run a skill you already have.",
+        {
+            "name": {"type": "string", "description": "skill name"},
+            "args": {"type": "object", "description": "dict of params passed to the skill, optional"},
+        },
+        ["name"],
+    ),
+    _function(
+        "edit_skill",
+        "Rewrite an existing skill's code (for self-debugging).",
+        {
+            "name": {"type": "string", "description": "skill name"},
+            "code": {"type": "string", "description": "the new full code"},
+        },
+        ["name", "code"],
+    ),
+    _function("list_skills", "List the skills you already have.", {}, []),
+    _function(
+        "spawn_agent",
+        "Run a sub-agent on ONE specific subtask and WAIT for its result right here — this BLOCKS your current reply until it finishes, so the user can't chat with you meanwhile. "
+        "Use ONLY for a short, self-contained subtask whose result you need RIGHT NOW to continue this same answer. To run several such short subtasks at once, call this multiple times in one turn (they run concurrently, but you still wait for all of them). "
+        "Costs extra compute — not for trifles. For anything that will take a while, use start_background_task instead so you stay free to chat.",
+        {"task": {"type": "string", "description": "the subtask for the sub-agent; make it self-contained and state the wanted outcome."}},
+        ["task"],
+    ),
+    _function(
+        "start_background_task",
+        "Hand a LONG-RUNNING task off to the background and IMMEDIATELY stay free to keep chatting — a sub-agent finishes it on its own and I'll announce the result when it's done (without cutting off whatever you're saying). "
+        "This is the RIGHT choice for slow work the user doesn't need this instant: deep web research, multi-step automation, 'go do X and tell me later'. "
+        "Don't grind long work inline or via the blocking spawn_agent — that freezes the conversation. (Note: a backgrounded task starts fresh without this chat's context, so state everything it needs.)",
+        {"task": {"type": "string", "description": "the task to background; fully self-contained, state the wanted outcome."}},
+        ["task"],
+    ),
+    _function(
+        "plan",
+        "Lay out a checklist for the current MULTI-STEP task and update it as you progress — it shows on the blackboard beside you so the user sees progress. "
+        "Break down a complex task with it before starting, and update each step's status as you finish it. Send the FULL step list each time (it replaces the previous one). Don't plan a one-or-two-step trifle.",
+        {
+            "steps": {
+                "type": "array",
+                "description": "the steps, in order",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "text": {"type": "string", "description": "what this step does"},
+                        "status": {"type": "string", "enum": ["todo", "doing", "done"], "description": "status, default todo"},
+                    },
+                    "required": ["text"],
+                },
+            }
+        },
+        ["steps"],
+    ),
+    _function(
+        "confirm",
+        "Pop an 「执行 / 不执行」(Do it / Don't) button panel beside you and WAIT for the user's click; returns whether they approved. "
+        "Use it (1) BEFORE any irreversible / high-risk action — deleting files/folders, overwriting an important file, git push --force, wiping data, shutting down — never do those without an approved confirm; "
+        "(2) to PROACTIVELY offer a change and let them decide. Give 'action' as one short clear line of exactly what you'll do.",
+        {"action": {"type": "string", "description": "what you're about to do — one short clear line for the user to approve or reject"}},
+        ["action"],
+    ),
+]
+
+
+# 不需要串行锁的工具：各 agent 自带独立 shell/python，网络/只读文件/进程内存读取互不干扰。
+# 注意：ocr_screen / find_on_screen 故意不在此列——它们都调 grab_active() 改写模块级全局 _geom，
+# 与 screenshot / screen_elements / 鼠标点击共用同一份坐标基准；并发跑会让一个工具改 _geom 时
+# 另一个正拿它换算屏幕坐标，导致错点。让所有「读屏 / 算坐标」工具统一走 _DISPATCH_LOCK 串行。
+_CONCURRENT_SAFE = frozenset(
+    {"http_request", "read_file", "list_dir", "run_shell", "run_python", "run_skill",
+     "web_search", "web_fetch", "search_code", "glob_files", "recall_docs", "list_docs",
+     "system_memory", "read_process_memory", "recall_clipboard"}
+)
+
+
+def _resolve_reminder_time(fire_at: str | None, in_minutes: float | None) -> datetime | None:
+    now = datetime.now()
+    if in_minutes is not None:
+        try:
+            return now + timedelta(minutes=float(in_minutes))
+        except (TypeError, ValueError):
+            return None
+    if not fire_at:
+        return None
+    text = fire_at.strip().replace("T", " ")
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y/%m/%d %H:%M"):
+        try:
+            return datetime.strptime(text, fmt)
+        except ValueError:
+            pass
+    for fmt in ("%H:%M:%S", "%H:%M"):
+        try:
+            clock = datetime.strptime(text, fmt).time()
+        except ValueError:
+            continue
+        fire = now.replace(hour=clock.hour, minute=clock.minute, second=clock.second, microsecond=0)
+        if fire < now.replace(second=0, microsecond=0):
+            fire += timedelta(days=1)
+        return fire
+    return None
+
+
+def _schedule_reminder(message: str, fire_at: str | None, in_minutes: float | None) -> str:
+    message = (message or "").strip()
+    if not message:
+        return "(No reminder content given.)"
+    fire = _resolve_reminder_time(fire_at, in_minutes)
+    if fire is None:
+        return "(Couldn't parse the reminder time — give HH:MM or how many minutes from now.)"
+    reminders.add(fire, message)
+    return f"OK, at {fire.strftime('%H:%M')} I'll come tell you myself: {message}"
+
+
+def _schedule_task(task: str, fire_at: str | None, in_minutes: float | None) -> str:
+    task = (task or "").strip()
+    if not task:
+        return "(No task given to run at the time.)"
+    fire = _resolve_reminder_time(fire_at, in_minutes)
+    if fire is None:
+        return "(Couldn't parse the time — give HH:MM or how many minutes from now.)"
+    reminders.add(fire, task, kind="do")
+    return f"OK, at {fire.strftime('%H:%M')} I'll go do it automatically: {task}"
+
+
+def dispatch(
+    name: str, arguments: dict, *, shell_session=None, py_session=None
+) -> ToolResult:
+    try:
+        if name in _CONCURRENT_SAFE:
+            return _dispatch_impl(name, arguments, shell_session=shell_session, py_session=py_session)
+        with _DISPATCH_LOCK:
+            return _dispatch_impl(name, arguments, shell_session=shell_session, py_session=py_session)
+    except KeyError as exc:
+        return ToolResult(f"[tool {name} is missing required argument {exc}; fill it in and retry]")
+    except Exception as exc:  # noqa: BLE001
+        return ToolResult(f"[tool {name} failed: {type(exc).__name__}: {exc}]")
+
+
+def _dispatch_impl(
+    name: str, arguments: dict, *, shell_session=None, py_session=None
+) -> ToolResult:
+    python = py_session or _python
+    if name == "run_shell":
+        return ToolResult(
+            run_shell(arguments["command"], arguments.get("shell", "powershell"), session=shell_session)
+        )
+    if name == "run_python":
+        return ToolResult(python.run(arguments["code"]))
+    if name == "read_file":
+        return ToolResult(fs.read_file(arguments["path"]))
+    if name == "write_file":
+        return ToolResult(fs.write_file(arguments["path"], arguments["content"]))
+    if name == "list_dir":
+        return ToolResult(fs.list_dir(arguments.get("path", ".")))
+    if name == "edit_file":
+        return ToolResult(
+            fs.edit_file(arguments["path"], arguments["old"], arguments["new"], bool(arguments.get("replace_all", False)))
+        )
+    if name == "search_code":
+        return ToolResult(fs.search_code(arguments["pattern"], arguments.get("path", ".")))
+    if name == "glob_files":
+        return ToolResult(fs.glob_files(arguments["pattern"], arguments.get("path", ".")))
+    if name == "http_request":
+        return ToolResult(net.http_request(arguments["url"], arguments.get("method", "GET"), arguments.get("body")))
+    if name == "web_search":
+        return ToolResult(web.web_search(arguments["query"]))
+    if name == "web_fetch":
+        return ToolResult(web.web_fetch(arguments["url"]))
+    if name == "install_package":
+        return ToolResult(install_package(arguments["name"]))
+    if name == "system_memory":
+        return ToolResult(sysmem.system_memory(arguments.get("top", 12)))
+    if name == "read_process_memory":
+        return ToolResult(
+            sysmem.read_process_memory(arguments["pid"], arguments["address"], arguments.get("size", 256))
+        )
+    if name == "screenshot":
+        scope = arguments.get("scope") or CAPTURE_FULLSCREEN
+        cap = capture_screen(scope, include_self=bool(arguments.get("include_self", False)))
+        if cap.focus_title:
+            text = (
+                f"Screenshot taken (showing only the active window \"{cap.focus_title}\"; the rest is hidden), "
+                f"resolution {cap.width}x{cap.height}; coordinates are still full-screen."
+            )
+        else:
+            text = f"Screenshot taken, resolution {cap.width}x{cap.height}."
+        return ToolResult(text, to_data_url(cap.png_bytes))
+    if name == "ocr_screen":
+        return ToolResult(vision.ocr_screen(arguments.get("region", "")))
+    if name == "find_on_screen":
+        return ToolResult(vision.find_on_screen(arguments["template_path"], arguments.get("confidence", 0.8)))
+    if name == "screen_elements":
+        from desktop_pet.eyes import elements
+        jpeg, listing = elements.screen_elements()
+        return ToolResult(listing, to_data_url(jpeg))
+    if name == "act_element":
+        from desktop_pet.eyes import elements
+        return ToolResult(
+            elements.act_element(int(arguments["index"]), arguments.get("action", "click"), arguments.get("text", ""))
+        )
+    if name == "list_windows":
+        return ToolResult(windows.list_windows())
+    if name == "focus_window":
+        return ToolResult(windows.focus_window(arguments["title"]))
+    if name == "manage_window":
+        return ToolResult(windows.manage_window(
+            arguments["title"], arguments["action"],
+            arguments.get("x"), arguments.get("y"),
+            arguments.get("width"), arguments.get("height"),
+        ))
+    if name == "read_clipboard":
+        return ToolResult(clipboard.read_clipboard())
+    if name == "recall_clipboard":
+        from desktop_pet.clipsampler import sampler
+        if not sampler.enabled:
+            return ToolResult("(clipboard sense is off — the user hasn't enabled it)")
+        latest = sampler.latest_interesting()
+        if not latest:
+            return ToolResult("(nothing notable copied recently)")
+        kind, body = latest
+        return ToolResult(f"Most recent copied ({kind}):\n{body[:2000]}")
+    if name == "write_clipboard":
+        return ToolResult(clipboard.write_clipboard(arguments["text"]))
+    if name == "click":
+        return ToolResult(mouse.click(arguments["x"], arguments["y"]))
+    if name == "double_click":
+        return ToolResult(mouse.double_click(arguments["x"], arguments["y"]))
+    if name == "right_click":
+        return ToolResult(mouse.right_click(arguments["x"], arguments["y"]))
+    if name == "move_mouse":
+        return ToolResult(mouse.move(arguments["x"], arguments["y"]))
+    if name == "scroll":
+        return ToolResult(mouse.scroll(arguments["amount"]))
+    if name == "type_text":
+        return ToolResult(keyboard.type_text(arguments["text"]))
+    if name == "press_keys":
+        return ToolResult(keyboard.press_keys(arguments["keys"]))
+    if name == "set_preference":
+        return ToolResult(store.set_preference(arguments["key"], arguments["value"]))
+    if name == "remember":
+        return ToolResult(store.remember(arguments["content"]))
+    if name == "recall":
+        return ToolResult(store.recall(arguments["query"]))
+    if name == "note_env":
+        return ToolResult(store.note_env(arguments["key"], arguments["value"]))
+    if name == "forget_memory":
+        return ToolResult(store.forget(arguments["query"]))
+    if name == "ingest_docs":
+        return ToolResult(docs.ingest(arguments["path"]))
+    if name == "recall_docs":
+        return ToolResult(docs.recall(arguments["query"]))
+    if name == "list_docs":
+        return ToolResult(docs.summary())
+    if name == "forget_docs":
+        return ToolResult(docs.forget(arguments.get("source")))
+    if name == "schedule_reminder":
+        return ToolResult(
+            _schedule_reminder(arguments["message"], arguments.get("fire_at"), arguments.get("in_minutes"))
+        )
+    if name == "schedule_task":
+        return ToolResult(
+            _schedule_task(arguments["task"], arguments.get("fire_at"), arguments.get("in_minutes"))
+        )
+    if name == "create_skill":
+        return ToolResult(
+            skills.create(
+                arguments["name"], arguments["code"], arguments["desc"], arguments.get("params", "")
+            )
+        )
+    if name == "run_skill":
+        code = skills.code(arguments["name"])
+        if code is None:
+            return ToolResult(f"No skill named \"{arguments['name']}\"; use list_skills to see what's available.")
+        script = f"args = {arguments.get('args', {})!r}\n\n{code}"
+        return ToolResult(python.run(script))
+    if name == "edit_skill":
+        return ToolResult(skills.edit(arguments["name"], arguments["code"]))
+    if name == "list_skills":
+        return ToolResult(skills.listing())
+    if name.startswith("mcp__"):
+        return ToolResult(mcp_hub.call(name, arguments))
+    return ToolResult(f"[unknown tool: {name}]")

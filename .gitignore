@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Virtual environment
+.venv/
+
+# Runtime writable data (API keys, memory, logs) — never commit
+/data/
+
+# Personal Claude Code overrides for this project
+/.claude/settings.local.json
+
+# Throwaway visual-preview render
+/_preview.*
+
+# Throwaway pre-comment-strip source backup
+/_backup_pre_comment_strip/
+
+# PyInstaller 打包产物
+/build/
+/dist/
