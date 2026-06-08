@@ -69,8 +69,17 @@ _DUST_GRAVITY = 0.05
 _DUST_DECAY = 0.024
 
 _TABLE_SEP = re.compile(r"^\s*\|?\s*:?-{2,}.*\|")
-_LIST = re.compile(r"^\s*([-*]|\d+\.)\s+\S")
+_LIST = re.compile(r"^\s*(?:[-*+•·‣]\s+|\d+[.)]\s+|\d+、\s*)\S")
 _IMG = re.compile(r"^\s*!\[[^\]]*\]\([^)]+\)\s*$")
+
+
+def _fence(line: str) -> str | None:
+    s = line.strip()
+    if s.startswith("```"):
+        return "```"
+    if s.startswith("~~~"):
+        return "~~~"
+    return None
 
 
 def parse_segments(text: str) -> list[tuple[str, str]]:
@@ -87,10 +96,11 @@ def parse_segments(text: str) -> list[tuple[str, str]]:
     i, n = 0, len(lines)
     while i < n:
         line = lines[i]
-        if line.strip().startswith("```"):
+        fence = _fence(line)
+        if fence:
             block = [line]
             i += 1
-            while i < n and not lines[i].strip().startswith("```"):
+            while i < n and _fence(lines[i]) != fence:
                 block.append(lines[i])
                 i += 1
             if i < n:

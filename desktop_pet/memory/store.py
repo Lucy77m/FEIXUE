@@ -11,7 +11,7 @@ from datetime import datetime
 from difflib import SequenceMatcher
 from pathlib import Path
 
-from desktop_pet.memory.embed import cosine, embed_texts, pack, unpack
+from desktop_pet.memory.embed import cosine, embed_texts, pack, rank_by_cosine, unpack
 from desktop_pet.settings import DATA_DIR
 
 _MEMORY_DIR = DATA_DIR / "memory"
@@ -23,6 +23,7 @@ _INJECT = 6
 _ENV_INJECT = 4
 _DEDUP_COSINE = 0.92
 _DEDUP_RATIO = 0.86
+_DEDUP_SCAN = 600
 
 
 def _read_json(path: Path, default):
@@ -185,15 +186,15 @@ class MemoryStore:
         return True
 
     def _find_duplicate(self, content: str, vector: list[float] | None) -> int | None:
-        rows = self._conn.execute("SELECT id, content, embedding FROM experiences ORDER BY id").fetchall()
+        rows = self._conn.execute(
+            "SELECT id, content, embedding FROM experiences ORDER BY id DESC LIMIT ?", (_DEDUP_SCAN,)
+        ).fetchall()
         if vector is not None:
             for row_id, _text, blob in rows:
                 existing = unpack(blob)
-                # 维度一致才比：换了嵌入模型后旧向量维度不同，cosine 恒 0 反而误判不重复
                 if existing is not None and len(existing) == len(vector) and cosine(vector, existing) >= _DEDUP_COSINE:
                     return row_id
-        # 字符串相似度只比最近 400 条：避免每次插入对全表跑 SequenceMatcher(O(n·m))；重复几乎都在近期
-        for row_id, text, _blob in rows[-400:]:
+        for row_id, text, _blob in rows[:400]:
             if SequenceMatcher(None, content, text).ratio() >= _DEDUP_RATIO:
                 return row_id
         return None
@@ -231,14 +232,9 @@ class MemoryStore:
             return [content for content, _ in rows]
         query_vec = self._query_vector(query)
         if query_vec is not None:
-            scored = [
-                (cosine(query_vec, vector), content)
-                for content, blob in rows
-                if (vector := unpack(blob)) is not None and len(vector) == len(query_vec)
-            ]
-            if scored:
-                scored.sort(key=lambda pair: pair[0], reverse=True)
-                return [content for _, content in scored[:k]]
+            idxs = rank_by_cosine(query_vec, [blob for _, blob in rows], k)
+            if idxs:
+                return [rows[i][0] for i in idxs]
         needle = query.lower()
         hits = [content for content, _ in rows if needle in content.lower()]
         return hits[:k] if hits else [content for content, _ in rows[-k:]]

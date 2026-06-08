@@ -17,7 +17,7 @@ def type_text(text: str) -> str:
     if all(ord(c) < 128 for c in text):
         pyautogui.write(text, interval=0.01)
         return f"typed {len(text)} chars"
-    saved = clipboard.read_clipboard_text()  # str|None：只在原来确有文本时才恢复，正文以 '(' 开头也不会被丢
+    saved = clipboard.read_clipboard_text()
     clipboard.write_clipboard(text)
     time.sleep(0.06)
     pyautogui.hotkey("ctrl", "v")
@@ -28,8 +28,6 @@ def type_text(text: str) -> str:
 
 
 def press_keys(keys: str) -> str:
-    # 空格分隔「依次按下的多个组合键」，每个组合键内用 + 连接「同时按下的键」。
-    # 例：'ctrl+a' = 同时按 Ctrl+A；'ctrl+a delete enter' = 先 Ctrl+A，再 Delete，再 Enter。
     chords = [c for c in (keys or "").split() if c.strip()]
     pressed: list[str] = []
     for chord in chords:

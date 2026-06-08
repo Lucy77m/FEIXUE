@@ -29,6 +29,7 @@ from desktop_pet.mcp_hub import mcp_hub
 from desktop_pet.pet.behavior import selector
 from desktop_pet.pet.blackboard import BlackBoard, has_board, parse_segments
 from desktop_pet.pet.chat import InputBox, SpeechText, ThoughtBubble, ThoughtBubbles
+from desktop_pet.pet.todo_board import TodoBoard
 from desktop_pet.pet.control_panel import ControlPanel
 from desktop_pet.pet.media import MediaFrame
 from desktop_pet.pet.confirm import ConfirmBox
@@ -37,6 +38,7 @@ from desktop_pet.pet.tray import Tray
 from desktop_pet.pet.window import PetWindow
 from desktop_pet.proactive import proactive
 from desktop_pet.reminders import reminders
+from desktop_pet.remote import remote_inbox
 from desktop_pet.settings import Settings
 
 _EMOTION_RE = re.compile(r"^\s*\[(\w+)\]\s*")
@@ -49,11 +51,13 @@ _AWAY_S = 150.0
 _AWAY_NIGHT_S = 75.0
 _REMINDER_POLL_MS = 15_000
 _PROACTIVE_POLL_MS = 60_000
+_WATCH_POLL_MS = 15_000
+_REMOTE_POLL_MS = 8_000
 _PROACTIVE_RAPPORT_GATE = {"安静": 0.45, "正常": 0.30, "话痨": 0.15}
 _PROACTIVE_RAPPORT_GATE_DEFAULT = 0.30
 _CELEBRATE_CHANCE = 0.25
-_EXPLORE_CHANCE = 0.3  # 主动开口时，有这个概率"真去网上瞄一眼"再分享(需开联网)
-_PEEK_MIN_INTERVAL_S = 600.0  # 看屏帮手两次之间至少隔 10 分钟(隐私 + 省成本)
+_EXPLORE_CHANCE = 0.3
+_PEEK_MIN_INTERVAL_S = 600.0
 _PET_MARGIN = 60
 
 _SUPPRESSED_QT_WARNINGS = ("UpdateLayeredWindowIndirect", "iCCP")
@@ -161,6 +165,7 @@ class AgentWorker(QObject):
     perform_requested = Signal(str)
     background_done = Signal(str, str)
     rewrite_ready = Signal(str)
+    analysis_ready = Signal(str)
 
     def __init__(self, agent: Agent) -> None:
         super().__init__()
@@ -185,7 +190,7 @@ class AgentWorker(QObject):
                     on_plan=self.plan_changed.emit, on_media=self.media_requested.emit,
                     on_perform=self.perform_requested.emit,
                 )
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 reply = _friendly_error(exc)
                 ok = False
                 audit.reply(f"{reply}\n{traceback.format_exc()}")
@@ -198,7 +203,7 @@ class AgentWorker(QObject):
             if ok:
                 try:
                     self._agent.reflect()
-                except Exception:  # noqa: BLE001
+                except Exception:
                     pass
         finally:
             self._running = False
@@ -218,15 +223,36 @@ class AgentWorker(QObject):
             reply = self._agent.deliver_reminder(what)
             if reply.strip():
                 self.reply_ready.emit(reply)
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
 
     @Slot(str)
     def run_task(self, task: str) -> None:
         try:
             self._agent.run_background(task)
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
+
+    @Slot(str)
+    def run_timed_task(self, task: str) -> None:
+        # 到点的定时任务走前台主体执行：自管 busy(可被点宠物打断)、全套 UI 回调(有身体)、
+        # 但不 reflect(不把这轮当用户对话沉淀记忆)；finally 无条件复位 busy，保证 _timed_inflight 一定释放。
+        self._running = True
+        self.busy_changed.emit(True)
+        try:
+            try:
+                reply = self._agent.run_timed_task(
+                    task, on_step=self.step.emit, on_think=self.think_text.emit,
+                    on_plan=self.plan_changed.emit, on_media=self.media_requested.emit,
+                    on_perform=self.perform_requested.emit,
+                )
+            except Exception as exc:  # noqa: BLE001
+                reply = _friendly_error(exc)
+            if reply.strip() and not (self._agent.was_cancelled(reply) or self._agent.is_cancelled):
+                self.reply_ready.emit(reply)
+        finally:
+            self.busy_changed.emit(False)
+            self._running = False
 
     @Slot(str, str)
     def speak_spontaneously(self, mode: str, context: str) -> None:
@@ -234,16 +260,15 @@ class AgentWorker(QObject):
             reply = self._agent.speak_spontaneously(mode, context)
             if reply.strip():
                 self.reply_ready.emit(reply)
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
 
     @Slot(str)
     def explore(self, topic: str) -> None:
-        # 在独立 daemon 线程跑临时子代理真去查，绝不阻塞 worker 线程；结果像主动消息一样播报
         def work() -> None:
             try:
                 reply = self._agent.explore_topic(topic)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 reply = ""
             if reply and reply.strip():
                 self.reply_ready.emit(reply)
@@ -251,34 +276,41 @@ class AgentWorker(QObject):
 
     @Slot(str)
     def peek_screen(self, trigger: str = "") -> None:
-        # 看一眼屏幕判断是否卡住，daemon 线程跑、不阻塞 worker；觉得需要帮才出声
         def work() -> None:
             try:
                 reply = self._agent.peek_screen(trigger)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 reply = ""
             if reply and reply.strip():
                 self.reply_ready.emit(reply)
         threading.Thread(target=work, daemon=True, name="mochi-peek").start()
 
     @Slot(str)
+    def analyze_screen(self, focus: str) -> None:
+        def work() -> None:
+            try:
+                reply = self._agent.analyze_screen(focus)
+            except Exception:
+                reply = ""
+            self.analysis_ready.emit(reply or "")
+        threading.Thread(target=work, daemon=True, name="mochi-watch").start()
+
+    @Slot(str)
     def rewrite(self, text: str) -> None:
-        # 「顺手就改」：独立 daemon 线程改写选区，不阻塞 worker、不碰主对话历史
         def work() -> None:
             try:
                 out = self._agent.rewrite_text(text)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 out = ""
             self.rewrite_ready.emit(out)
         threading.Thread(target=work, daemon=True, name="mochi-rewrite").start()
 
     @Slot(str, str)
     def clip_alchemy(self, kind: str, text: str) -> None:
-        # 剪贴板炼金术：独立 daemon 线程处理复制的内容，结果走 speak 播报
         def work() -> None:
             try:
                 out = self._agent.transform_clipboard(kind, text)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 out = ""
             if out and out.strip():
                 self.reply_ready.emit(out)
@@ -288,23 +320,27 @@ class AgentWorker(QObject):
         self._agent.forget_all()
 
 
-_ALCHEMY_MIN_INTERVAL_S = 45.0  # 炼金术最短间隔，免得一直冒泡打扰
+_ALCHEMY_MIN_INTERVAL_S = 45.0
 
 
 class PetApp(QObject):
     request_reminder = Signal(str)
     request_task = Signal(str)
+    request_timed_task = Signal(str)
     request_proactive = Signal(str, str)
     request_explore = Signal(str)
     request_peek = Signal(str)
+    request_analyze = Signal(str)
+    _remote_action = Signal(str, str)
     request_confirm = Signal(str)
     request_rewrite = Signal(str)
     request_clip_alchemy = Signal(str, str)
+    _voice_chunk_done = Signal(int)
 
     def __init__(self) -> None:
         _install_qt_message_filter()
         self._app = QApplication(sys.argv)
-        self._app.setStyle("Fusion")  # 统一渲染，不吃 Windows 深色模式调色板(根治下拉/菜单/tooltip 渗黑)
+        self._app.setStyle("Fusion")
         self._app.setPalette(_light_palette())
         self._app.setQuitOnLastWindowClosed(False)
         self._app.setFont(QFont("Microsoft YaHei UI", 10))
@@ -313,15 +349,21 @@ class PetApp(QObject):
         super().__init__()
 
         self._busy = False
-        self._shown = False  # MOCHI 是否开机(桌宠显示中)；默认关机，启动后需在主页点「开机」
-        self._entered = False  # 是否已经入场过(首次开机播入场动画)
-        self._panel = None  # 控制面板单实例(托盘多次单击只激活同一个)
-        self._relang = False  # 切换界面语言时置位 → 面板用新语言重开
-        self._fired_occasions: set[str] = set()  # 本次运行已庆祝过的节日/生日(避免重复)
-        self._last_peek: datetime | None = None  # 上次看屏时间(看屏帮手的冷却)
-        self._cancelling = False  # 中断时置位；让 UI 忽略迟到的 step/think 信号
-        self._pending_bg: list[tuple[str, str]] = []  # 已完成的后台任务，等空闲时机再播报
-        self._confirm_event = threading.Event()  # worker 线程阻塞在这里，等用户点 执行/不执行
+        self._shown = False
+        self._entered = False
+        self._panel = None
+        self._relang = False
+        self._relang_intro = None
+        self._speak_gen = 0
+        self._fired_occasions: set[str] = set()
+        self._last_peek: datetime | None = None
+        self._watch_inflight = False
+        self._inbox_inflight = False
+        self._cancelling = False
+        self._pending_bg: list[tuple[str, str]] = []
+        self._timed_queue: list[str] = []  # 到点的 do 定时任务，前台主体串行执行；worker 忙时在此排队
+        self._timed_inflight = False
+        self._confirm_event = threading.Event()
         self._confirm_result = False
 
         from desktop_pet.agent.loop import Agent
@@ -335,13 +377,14 @@ class PetApp(QObject):
         self._speech = SpeechText()
         self._input = InputBox()
         self._board = BlackBoard()
+        self._todo = TodoBoard()
         self._media = MediaFrame()
         self._confirm_box = ConfirmBox()
         self._thought = ThoughtBubble()
         self._think = ThoughtBubbles()
 
         from desktop_pet.eyes import capture
-        for _w in (self._pet, self._speech, self._input, self._board, self._media, self._confirm_box, self._thought, self._think):
+        for _w in (self._pet, self._speech, self._input, self._board, self._todo, self._media, self._confirm_box, self._thought, self._think):
             capture.register_own_window(int(_w.winId()))
 
         self._lecturing = False
@@ -350,7 +393,7 @@ class PetApp(QObject):
         self._board_dismiss = QTimer(self)
         self._board_dismiss.setSingleShot(True)
         self._board_dismiss.timeout.connect(self._end_lecture)
-        self._board_next = QTimer(self)  # 每块板停留足够长时间读完，再切下一块
+        self._board_next = QTimer(self)
         self._board_next.setSingleShot(True)
         self._board_next.timeout.connect(self._advance_lecture)
 
@@ -366,6 +409,10 @@ class PetApp(QObject):
         self._reminder_timer.timeout.connect(self._check_reminders)
         self._proactive_timer = QTimer(self)
         self._proactive_timer.timeout.connect(self._check_proactive)
+        self._watch_timer = QTimer(self)
+        self._watch_timer.timeout.connect(self._check_watch)
+        self._remote_timer = QTimer(self)
+        self._remote_timer.timeout.connect(self._check_inbox)
         self._just_returned = False
 
         self._tray = Tray(
@@ -387,6 +434,8 @@ class PetApp(QObject):
         self._pet.hid.connect(self._on_hide)
         self._speech.talking.connect(self._on_speech_talking)
         self._speech.finished.connect(self._on_speech_finished)
+        self._speech.chunk_shown.connect(self._on_chunk_shown)
+        self._voice_chunk_done.connect(self._on_voice_chunk_done)
         self._input.submitted.connect(self._worker.handle)
         self._input.submitted.connect(self._on_submit)
         self._worker.reply_ready.connect(self._on_reply)
@@ -400,9 +449,13 @@ class PetApp(QObject):
         self._worker.background_done.connect(self._on_background_done)
         self.request_reminder.connect(self._worker.deliver_reminder)
         self.request_task.connect(self._worker.run_task)
+        self.request_timed_task.connect(self._worker.run_timed_task)
         self.request_proactive.connect(self._worker.speak_spontaneously)
         self.request_explore.connect(self._worker.explore)
         self.request_peek.connect(self._worker.peek_screen)
+        self.request_analyze.connect(self._worker.analyze_screen)
+        self._worker.analysis_ready.connect(self._on_analysis)
+        self._remote_action.connect(self._on_remote_action)
         self.request_confirm.connect(self._on_confirm_requested)
         self._confirm_box.answered.connect(self._on_confirm_answered)
         self._hotkeys.summon.connect(self._summon)
@@ -420,18 +473,18 @@ class PetApp(QObject):
     def _toggle_input(self) -> None:
         self._wake()
         busy = self._worker.is_running or self._busy or self._speech.is_speaking or self._lecturing
-        # 第一次点才执行中断并弹「停下来了」；已经在取消中（worker 还在收尾）再点就别重复弹，
-        # 直接去开输入框 —— 否则坏 key/坏网卡住时，每点一下都弹一次，看起来像「一直停不下来」。
         if busy and not self._cancelling:
             self._cancelling = True
             self._worker.cancel()
             self._confirm_result = False
-            self._confirm_event.set()  # 若 worker 正卡在等确认，把它放行
+            self._confirm_event.set()
             self._confirm_box.close_box()
             self._on_busy(False)
             self._speech.interrupt()
             voice.flush()
             self._reset_lecture()
+            self._todo.dismiss()
+            self._requeue_timed()
             self._pet.clear_pending()
             self._thought.pop(i18n.t("ui_stopped"), self._pet)
             return
@@ -442,7 +495,7 @@ class PetApp(QObject):
 
     @Slot()
     def _summon(self) -> None:
-        if not self._shown:  # 关机时按热键唤出 = 顺便开机
+        if not self._shown:
             self._power_on()
         if not self._pet.isVisible():
             self._pet.setVisible(True)
@@ -457,7 +510,6 @@ class PetApp(QObject):
 
     @Slot()
     def _on_hotkey_status(self, status: object) -> None:
-        # 热键注册结果只记录、给控制面板看；不再用桌宠动画打扰（尤其关机时）
         if isinstance(status, dict):
             self._hotkey_status = status
 
@@ -466,14 +518,14 @@ class PetApp(QObject):
 
     @Slot()
     def _ask_selection(self) -> None:
-        if not self._shown:  # 关机时选区问答 = 顺便开机
+        if not self._shown:
             self._power_on()
         self._saved_clip = self._app.clipboard().text()
         try:
             import pyautogui
             for mod in ("alt", "ctrl", "shift"):
                 pyautogui.keyUp(mod)
-        except Exception:  # noqa: BLE001
+        except Exception:
             self._summon()
             return
         QTimer.singleShot(70, self._copy_selection)
@@ -482,7 +534,7 @@ class PetApp(QObject):
         try:
             import pyautogui
             pyautogui.hotkey("ctrl", "c")
-        except Exception:  # noqa: BLE001
+        except Exception:
             self._summon()
             return
         QTimer.singleShot(200, self._after_copy)
@@ -498,7 +550,6 @@ class PetApp(QObject):
         self._input.setText(f"关于这个：{snippet}")
         self._input.setFocus()
 
-    # —— 顺手就改：Ctrl+Alt+Q 复制选区 → LLM 改写 → 写回剪贴板并自动粘贴替换 ——
     @Slot()
     def _quick_rewrite(self) -> None:
         if not self._shown:
@@ -508,7 +559,7 @@ class PetApp(QObject):
             import pyautogui
             for mod in ("alt", "ctrl", "shift"):
                 pyautogui.keyUp(mod)
-        except Exception:  # noqa: BLE001
+        except Exception:
             return
         QTimer.singleShot(70, self._quick_copy)
 
@@ -516,7 +567,7 @@ class PetApp(QObject):
         try:
             import pyautogui
             pyautogui.hotkey("ctrl", "c")
-        except Exception:  # noqa: BLE001
+        except Exception:
             return
         QTimer.singleShot(200, self._quick_after_copy)
 
@@ -537,22 +588,21 @@ class PetApp(QObject):
         if not result.strip():
             self._thought.pop(i18n.t("quick_failed"), self._pet)
             return
-        sampler.mark_self_write(result)  # 防回环：别让采样器把自己写回的当新复制
+        sampler.mark_self_write(result)
         self._app.clipboard().setText(result)
         if self._settings.quick_paste_back:
             try:
                 import pyautogui
                 QTimer.singleShot(60, lambda: pyautogui.hotkey("ctrl", "v"))
-            except Exception:  # noqa: BLE001
+            except Exception:
                 pass
         self._thought.pop(i18n.t("quick_done"), self._pet)
 
-    # —— 剪贴板炼金术：感知复制内容，空闲时顺手处理 ——
     @Slot()
     def _on_clipboard_changed(self) -> None:
         try:
             sampler.feed(self._app.clipboard().text())
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
 
     @Slot(str, str)
@@ -565,7 +615,7 @@ class PetApp(QObject):
             return
         if (self._worker.is_running or self._busy or self._lecturing or self._speech.is_speaking
                 or self._input.isVisible() or not self._pet.isVisible() or self._pet.is_asleep):
-            return  # 别打断：忙/说话/输入框开/没显示/睡着 都不触发
+            return
         now = datetime.now()
         last = getattr(self, "_last_alchemy", None)
         if last is not None and (now - last).total_seconds() < _ALCHEMY_MIN_INTERVAL_S:
@@ -580,10 +630,11 @@ class PetApp(QObject):
             tone = appraise_user_message(_text)
             if tone:
                 emotion.apply(tone)
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
         selector.set_emotion(*emotion.snapshot())
         self._wake()
+        self._todo.dismiss()
         self._just_returned = False
         stats.bump_interactions()
         proactive.defer(datetime.now(), self._settings.proactive_level)
@@ -594,17 +645,20 @@ class PetApp(QObject):
         tag, text = _parse_emotion(raw)
         self._pet.express(tag)
         self._reset_lecture()
-        segments = parse_segments(text)  # 只解析一次，复用给 _start_lecture（原来 has_board 已切一遍、命中后又切一遍）
-        voice.speak(" ".join(body for kind, body in segments if kind != "board"))  # 朗读非黑板内容(开了才出声)
+        self._speech.interrupt()
+        voice.flush()
+        segments = parse_segments(text)
+        self._speak_gen += 1
         if any(kind == "board" for kind, _ in segments):
+            voice.speak(" ".join(body for kind, body in segments if kind != "board"))
             self._start_lecture(segments)
         else:
             self._speech.place_below(self._pet)
-            self._speech.speak(_split_sentences(text))
+            sents = _split_sentences(text)
+            self._speech.speak(sents, paced=voice.is_enabled())
 
     @Slot(str, str)
     def _on_background_done(self, task: str, result: str) -> None:
-        # 先排队——绝不打断用户和我正在前台做的事。
         self._pending_bg.append((task, result))
         self._drain_pending_bg()
 
@@ -613,7 +667,14 @@ class PetApp(QObject):
                 or self._lecturing or self._cancelling or self._input.isVisible())
 
     def _drain_pending_bg(self) -> None:
-        if not self._pending_bg or self._foreground_busy() or not self._pet.isVisible():
+        if not self._pending_bg:
+            return
+        if not self._shown or not self._pet.isVisible():
+            for task, result in self._pending_bg:
+                self._tray.notify(i18n.t("tray_tooltip"), f"{task[:24]}：{result[:200]}")
+            self._pending_bg.clear()
+            return
+        if self._foreground_busy():
             return
         task, result = self._pending_bg.pop(0)
         self._pet.wake()
@@ -634,7 +695,6 @@ class PetApp(QObject):
         self._seg_i += 1
         if kind == "board":
             self._board.present(body, self._pet, self._app.primaryScreen().availableGeometry())
-            # 不要立刻跳到下一段——让这块板停留足够长时间读完
             self._board_next.start(self._board.suggested_linger_ms())
         else:
             self._speech.place_below(self._pet)
@@ -665,8 +725,19 @@ class PetApp(QObject):
         self._pet.set_state("speaking" if on else "rest")
 
     @Slot(str)
+    def _on_chunk_shown(self, chunk: str) -> None:
+        gen = self._speak_gen
+        voice.speak_one(chunk, on_done=lambda g=gen: self._voice_chunk_done.emit(g))
+
+    @Slot(int)
+    def _on_voice_chunk_done(self, gen: int) -> None:
+        if gen != self._speak_gen or not self._speech.is_speaking:
+            return
+        self._speech.advance()
+
+    @Slot(str)
     def _on_step(self, label: str) -> None:
-        if self._cancelling:  # 任务被中断——忽略仍在途中的 step 信号
+        if self._cancelling:
             return
         self._pet.note_think_step(label)
         if label == "思考中…":
@@ -681,12 +752,9 @@ class PetApp(QObject):
 
     @Slot(str)
     def _on_plan(self, markdown: str) -> None:
-        if self._cancelling:
+        if self._cancelling or not self._pet.isVisible():
             return
-        self._board.present(
-            markdown, self._pet, self._app.primaryScreen().availableGeometry(),
-            animate=not self._board.isVisible(),
-        )
+        self._todo.set_markdown(markdown, self._pet, self._app.primaryScreen().availableGeometry())
 
     @Slot(str, str, str)
     def _on_media(self, kind: str, path: str, caption: str) -> None:
@@ -706,11 +774,10 @@ class PetApp(QObject):
         self._pet.perform(name)
 
     def _confirm(self, action: str) -> bool:
-        # 由 agent 的 confirm 工具在 WORKER 线程调用：请 UI 弹面板，阻塞等用户点 执行/不执行
         self._confirm_result = False
         self._confirm_event.clear()
-        self.request_confirm.emit(action)  # 入队 → UI 线程的 _on_confirm_requested
-        self._confirm_event.wait(timeout=300)  # 最长 5 分钟；取消也会 set 这个 event
+        self.request_confirm.emit(action)
+        self._confirm_event.wait(timeout=300)
         return self._confirm_result
 
     @Slot(str)
@@ -732,24 +799,24 @@ class PetApp(QObject):
         self._busy = busy
         self._pet.set_busy(busy)
         if busy:
-            self._cancelling = False  # 新一轮开始——信号重新有效
+            self._cancelling = False
             self._wake()
             self._media.dismiss()
             self._pet.set_think_energy(emotion.snapshot()[1])
             self._think.start(self._pet)
         else:
             self._think.stop()
-            self._drain_pending_bg()  # 前台空出来了——排队的后台结果现在可以播报了
+            self._timed_inflight = False
+            self._drain_pending_bg()
+            self._drain_timed()
 
     @Slot(bool)
     def _on_task_finished(self, ok: bool) -> None:
         try:
             emotion.apply("task_done" if ok else "task_failed")
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
         selector.set_emotion(*emotion.snapshot())
-        # 回复时已经触发过一次情绪反应；别再叠第二次
-        # （之前就是这样导致桌宠回完话紧接着「抽动两下」）。
         if not self._lecturing and not self._pet.is_reacting:
             if not ok:
                 self._pet.slump()
@@ -759,10 +826,10 @@ class PetApp(QObject):
     @Slot()
     def _on_presence(self) -> None:
         try:
-            self._drain_pending_bg()  # 兜底：等空下来时把排队的后台结果播报掉
-            radar.observe()  # 维持卡住雷达的窗口停留计时
+            self._drain_pending_bg()
+            radar.observe()
             self._poll_presence()
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
 
     def _poll_presence(self) -> None:
@@ -780,43 +847,122 @@ class PetApp(QObject):
     def _check_reminders(self) -> None:
         try:
             self._drain_reminders()
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
 
-    def _drain_reminders(self) -> None:
-        if not self._shown:  # 关机时不弹提醒(开机后到点的会走迟到宽限补报)
+    @Slot()
+    def _check_inbox(self) -> None:
+        if not self._settings.remote_inbox or self._inbox_inflight:
             return
-        due = reminders.due(datetime.now())
+        self._inbox_inflight = True
+
+        def work() -> None:
+            try:
+                actions = remote_inbox.poll()
+            except Exception:
+                actions = []
+            for kind, content in actions:
+                self._remote_action.emit(kind, content)
+            self._inbox_inflight = False
+        threading.Thread(target=work, daemon=True, name="mochi-inbox").start()
+
+    @Slot(str, str)
+    def _on_remote_action(self, kind: str, content: str) -> None:
+        # task → 走前台主体(复用定时任务队列：有身体/能打断/在场才执行/关机回写不丢)；say → 桌宠说一句(隐藏/全屏转托盘)。
+        if kind == "task":
+            self._timed_queue.append(content)
+            self._drain_timed()
+        elif kind == "say":
+            if not self._shown or not self._pet.isVisible() or self._foreground_is_fullscreen():
+                self._tray.notify(i18n.t("tray_tooltip"), content)
+            else:
+                self._pet.wake()
+                self.request_reminder.emit(content)
+
+    @staticmethod
+    def _foreground_is_fullscreen() -> bool:
+        try:
+            import win32api
+            import win32gui
+            hwnd = win32gui.GetForegroundWindow()
+            if not hwnd:
+                return False
+            cls = win32gui.GetClassName(hwnd)
+            if cls in ("Progman", "WorkerW", "Shell_TrayWnd", "Button"):
+                return False
+            left, top, right, bottom = win32gui.GetWindowRect(hwnd)
+            sw = win32api.GetSystemMetrics(0)
+            sh = win32api.GetSystemMetrics(1)
+            return (right - left) >= sw - 2 and (bottom - top) >= sh - 2
+        except Exception:
+            return False
+
+    def _in_scene(self) -> bool:
+        # do 定时任务"在场可前台执行"的环境：开机、可见、没睡、不在全屏游戏里。
+        # 只有在场才把 do 任务从持久库消费出来——否则留库，绝不"消费却不执行"而丢失。
+        return (self._shown and self._pet.isVisible()
+                and not self._pet.is_asleep and not self._foreground_is_fullscreen())
+
+    def _drain_reminders(self) -> None:
+        in_scene = self._in_scene()
+        due = reminders.due(datetime.now(), take_do=in_scene)  # 不在场时 do 任务留库不消费(免丢失)
         if not due:
             return
         says = [r.what for r in due if r.kind != "do"]
         tasks = [r.what for r in due if r.kind == "do"]
         if says:
-            if not self._pet.isVisible():
-                self._pet.setVisible(True)
-            self._pet.wake()
-            self.request_reminder.emit("；".join(says))
-        for task in tasks:
-            self.request_task.emit(task)
+            text = "；".join(says)
+            if not self._shown or not self._pet.isVisible() or self._foreground_is_fullscreen():
+                self._tray.notify(i18n.t("tray_tooltip"), text)
+            else:
+                self._pet.wake()
+                self.request_reminder.emit(text)
+        if tasks:
+            self._timed_queue.extend(tasks)
+            self._drain_timed()
+
+    def _drain_timed(self) -> None:
+        # 到点的 do 定时任务走前台主体执行：有身体/嘴/人格，能动作能说话能操控能汇报，且点宠物即可打断。
+        # 门控对齐其它自动链路：忙/打断/在念/正打字/不在场时一律"延后不丢"，等条件满足再跑下一个，绝不打断当前对话。
+        if self._timed_inflight or not self._timed_queue:
+            return
+        if (self._worker.is_running or self._busy or self._lecturing or self._cancelling
+                or self._speech.is_speaking or self._input.isVisible() or not self._in_scene()):
+            return
+        task = self._timed_queue.pop(0)
+        self._timed_inflight = True
+        self._pet.wake()  # 到点自己醒来做这件事
+        self.request_timed_task.emit(task)
+
+    def _requeue_timed(self) -> None:
+        # 打断/关机时：把还没执行的定时任务写回持久库(立即到期)，下次在场会重新触发——绝不静默丢弃用户定的任务。
+        now = datetime.now()
+        for task in self._timed_queue:
+            try:
+                reminders.add(now, task, kind="do")
+            except Exception:  # noqa: BLE001
+                pass
+        self._timed_queue.clear()
+        self._timed_inflight = False
 
     @Slot()
     def _check_proactive(self) -> None:
         try:
-            if self._maybe_peek():  # 看屏帮手优先(默认关)
+            if self._maybe_peek():
                 return
-            if not self._maybe_occasion():  # 节日/生日次之；都没命中才走普通主动搭话
+            if not self._maybe_occasion():
                 self._maybe_speak_up()
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
 
     def _maybe_peek(self) -> bool:
         s = self._settings
         if not s.watch_screen or not s.allow_control:
-            return False  # 双开关：必须显式开「看屏」且没关「操控」
+            return False
         if (self._worker.is_running or self._busy or self._lecturing or self._speech.is_speaking
                 or self._input.isVisible() or not self._pet.isVisible() or self._pet.is_asleep):
             return False
-        if presence.idle_seconds() >= 60:  # 人得正在用(idle 很小)，否则不偷看
+        if presence.idle_seconds() >= 60:
             return False
         _val, _aro, rapport = emotion.snapshot()
         if rapport < 0.35:
@@ -825,11 +971,48 @@ class PetApp(QObject):
         if self._last_peek is not None and (now - self._last_peek).total_seconds() < _PEEK_MIN_INTERVAL_S:
             return False
         sig = radar.observe()
-        if not sig.worth_peek:  # 雷达说不值得看(无报错、未久驻)就不偷看——取代原来的随机概率
+        if not sig.worth_peek:
             return False
         self._last_peek = now
         self.request_peek.emit(sig.title)
         return True
+
+    @Slot()
+    def _check_watch(self) -> None:
+        try:
+            self._maybe_watch()
+        except Exception:
+            pass
+
+    def _maybe_watch(self) -> None:
+        from desktop_pet.watcher import watcher
+        if not self._settings.allow_control:
+            return
+        if not self._shown or not self._pet.isVisible() or self._pet.is_asleep:
+            return
+        if (self._watch_inflight or self._worker.is_running or self._busy or self._lecturing
+                or self._speech.is_speaking or self._input.isVisible()):
+            return
+        focus = watcher.due(datetime.now())
+        if not focus:
+            return
+        self._watch_inflight = True
+        self._pet.wake()
+        self.request_analyze.emit(focus)
+
+    @Slot(str)
+    def _on_analysis(self, text: str) -> None:
+        self._watch_inflight = False
+        from desktop_pet.watcher import watcher, WATCH_FAIL
+        if text == WATCH_FAIL:
+            watcher.retry_soon()
+            return
+        if not text or not text.strip():
+            return
+        if (not watcher.enabled or not self._shown or not self._pet.isVisible()
+                or self._pet.is_asleep or self._foreground_busy()):
+            return
+        self._on_reply(text)
 
     def _maybe_occasion(self) -> bool:
         if not self._settings.proactive_enabled:
@@ -837,7 +1020,7 @@ class PetApp(QObject):
         if (self._worker.is_running or self._busy or self._lecturing or self._speech.is_speaking
                 or self._input.isVisible() or not self._pet.isVisible() or self._pet.is_asleep):
             return False
-        if presence.idle_seconds() >= _AWAY_S:  # 人不在就不庆祝(等回来)
+        if presence.idle_seconds() >= _AWAY_S:
             return False
         key = occasions.today_key(datetime.now(), self._settings.birthday)
         if not key or key in self._fired_occasions:
@@ -879,7 +1062,7 @@ class PetApp(QObject):
             return
         proactive.record(now, level)
         if self._settings.allow_web and random.random() < _EXPLORE_CHANCE:
-            self.request_explore.emit(self._pick_explore_topic())  # 真去网上瞄一眼再分享
+            self.request_explore.emit(self._pick_explore_topic())
         else:
             self.request_proactive.emit(self._pick_proactive_mode(now), context)
 
@@ -913,13 +1096,13 @@ class PetApp(QObject):
 
     @Slot()
     def _on_hide(self) -> None:
-        # 宠物贴边藏起来了 → 收起跟随它的浮层(输入框/语音气泡/黑板/思考粒子/拍立得)
         self._input.fade_out()
         self._speech.interrupt()
         voice.flush()
         self._reset_lecture()
         self._think.stop()
         self._media.dismiss()
+        self._todo.dismiss()
 
     @Slot()
     def _follow(self) -> None:
@@ -954,12 +1137,12 @@ class PetApp(QObject):
         def _safe(fn):
             try:
                 return fn()
-            except Exception:  # noqa: BLE001
+            except Exception:
                 return 0
 
         try:
             p_count, p_cap = proactive.today(datetime.now(), self._settings.proactive_level)
-        except Exception:  # noqa: BLE001
+        except Exception:
             p_count, p_cap = 0, 0
         return {
             "shown": self._shown,
@@ -1002,7 +1185,7 @@ class PetApp(QObject):
         def _safe(fn, default):
             try:
                 return fn()
-            except Exception:  # noqa: BLE001
+            except Exception:
                 return default
 
         return {
@@ -1032,6 +1215,7 @@ class PetApp(QObject):
         emotion.apply("returned")
         selector.set_emotion(*emotion.snapshot())
         self._just_returned = True
+        self._drain_reminders()  # 开机补投：关机期间留库的到期 do 任务尽快前台执行(不等下一拍轮询)
 
     def _power_off(self) -> None:
         """关机：收起桌宠动画 + 停掉进行中的一切 + 收起所有浮层；程序仍常驻后台(不退出)。"""
@@ -1041,25 +1225,27 @@ class PetApp(QObject):
         self._cancelling = True
         self._worker.cancel()
         self._confirm_result = False
-        self._confirm_event.set()  # 若 worker 正卡在等确认，放它走
+        self._confirm_event.set()
         self._confirm_box.close_box()
         self._speech.interrupt()
         voice.flush()
         self._reset_lecture()
         self._media.dismiss()
+        self._todo.dismiss()
         self._input.fade_out()
         self._pending_bg.clear()
+        self._requeue_timed()
         self._on_busy(False)
         self._pet.clear_pending()
         radar.reset()
-        self._pet.setVisible(False)  # 收起动画
+        self._pet.setVisible(False)
 
     def _open_panel(self) -> None:
-        if self._panel is not None:  # 单实例：已经开着就激活它，绝不叠出第二个
+        if self._panel is not None:
             self._panel.raise_()
             self._panel.activateWindow()
             return
-        while True:  # 切界面语言时关掉重开，用新语言重建整个面板
+        while True:
             self._relang = False
             self._panel = ControlPanel(
                 self._settings,
@@ -1070,27 +1256,37 @@ class PetApp(QObject):
                 bond_provider=self._bond_snapshot,
                 on_set_language=self._set_language,
                 hotkey_status_provider=self._hotkey_status_snapshot,
+                on_preview_voice=self._preview_voice,
+                intro=self._relang_intro,
             )
+            self._relang_intro = None
             self._panel.exec()
             self._panel = None
             if not self._relang:
                 break
 
     def _set_language(self, lang: str) -> None:
-        # 界面语言即时生效：存盘 + 切 i18n + 重译托盘，然后关掉面板让 _open_panel 用新语言重开
         self._settings.ui_language = lang
         self._settings.save()
         i18n.set_language(lang)
         self._tray.retranslate()
         self._relang = True
         if self._panel is not None:
+            self._relang_intro = self._panel.snapshot_for_transition()
             self._panel.accept()
+
+    def _preview_voice(self, voice_id: str, rate: int) -> None:
+        voice.preview(i18n.t("tts_sample"), voice_id, rate)
 
     def _apply_settings_live(self) -> None:
         i18n.set_language(self._settings.ui_language)
         self._tray.retranslate()
+        voice.set_voice(self._settings.tts_voice)
+        voice.set_rate(self._settings.tts_rate)
         voice.set_enabled(self._settings.tts_enabled)
         sampler.set_enabled(self._settings.clip_sampler or self._settings.clip_alchemy)
+        if self._settings.remote_inbox:
+            remote_inbox.ensure_dir()
         self._hotkeys.restart({
             "summon": self._settings.hotkey_summon,
             "ask": self._settings.hotkey_ask,
@@ -1105,28 +1301,33 @@ class PetApp(QObject):
         self._worker.forget_all()
         emotion.reset()
         reminders.clear()
-        stats.clear()  # 清空记忆=像新生儿，相处统计也归零
+        stats.clear()
         selector.set_emotion(*emotion.snapshot())
         self._pet.express("neutral")
 
     def _quit(self) -> None:
         self._hotkeys.stop()
+        try:
+            voice.shutdown()
+        except Exception:
+            pass
         if self._worker.is_running:
-            self._worker.cancel()  # 让卡在网络/工具里的 agent.run 从下一个检查点尽快退出
-        self._confirm_event.set()  # 万一正卡在等确认面板，放它走
+            self._worker.cancel()
+        self._confirm_event.set()
         self._worker.shutdown()
         try:
-            mcp_hub.shutdown()  # 关 MCP 事件循环 + stdio 子进程；下面 os._exit 会绕过 atexit，故这里显式收
-        except Exception:  # noqa: BLE001
+            mcp_hub.shutdown()
+        except Exception:
             pass
         self._thread.quit()
-        self._thread.wait(3000)  # 给 3 秒优雅退
+        self._thread.wait(3000)
         self._app.quit()
-        os._exit(0)  # 兜底：worker / MCP / 后台线程万一仍卡着，也保证进程立刻退干净、绝不挂死
-        # （子进程在 cancel/shutdown 已 kill，配置/情绪是即时存盘的，强退不丢数据）
+        os._exit(0)
 
     def run(self) -> int:
-        stats.mark_first_seen()  # 记下你们第一次相遇的日子
+        stats.mark_first_seen()
+        voice.set_voice(self._settings.tts_voice)
+        voice.set_rate(self._settings.tts_rate)
         voice.set_enabled(self._settings.tts_enabled)
         self._pet.express("neutral")
         self._thread.start()
@@ -1134,9 +1335,12 @@ class PetApp(QObject):
         self._presence_timer.start(_PRESENCE_POLL_MS)
         self._reminder_timer.start(_REMINDER_POLL_MS)
         self._proactive_timer.start(_PROACTIVE_POLL_MS)
+        self._watch_timer.start(_WATCH_POLL_MS)
+        self._remote_timer.start(_REMOTE_POLL_MS)
+        if self._settings.remote_inbox:
+            remote_inbox.ensure_dir()
         self._hotkeys.start()
         from desktop_pet.executor import vision
         vision.prewarm()
-        # 默认关机：不自动显示桌宠，启动即弹控制面板；必须在主页点「开机」MOCHI 才出现。
         self._open_panel()
         return self._app.exec()

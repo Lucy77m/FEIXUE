@@ -4,13 +4,14 @@
 
 from __future__ import annotations
 
+import json
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from desktop_pet.docs import docs
 from desktop_pet.eyes.capture import capture_screen, to_data_url
-from desktop_pet.executor import clipboard, fs, net, sysmem, vision, web
+from desktop_pet.executor import clipboard, devtools, fs, net, sysmem, vision, web
 from desktop_pet.executor.pycode import PythonRunner, install_package
 from desktop_pet.executor.shell import run_shell
 from desktop_pet.hands import keyboard, mouse, windows
@@ -116,6 +117,28 @@ TOOLS = [
             "path": {"type": "string", "description": "search root dir, default current dir"},
         },
         ["pattern"],
+    ),
+    _function(
+        "review_diff",
+        "Show uncommitted git changes (the working-tree diff). Use this BEFORE touching a code repo to see current state, "
+        "and AFTER editing to self-check what you changed. Pass path = the repo directory you're working in (or a single "
+        "file/subdir to scope it). staged=true shows already-staged changes. Read-only.",
+        {
+            "path": {"type": "string", "description": "repo dir, or a file/subdir within it to limit the diff; default current dir"},
+            "staged": {"type": "boolean", "description": "true = show staged changes (git diff --staged)"},
+        },
+        [],
+    ),
+    _function(
+        "run_tests",
+        "Run the project's tests and return a pass/fail summary — use it after changing code to confirm you didn't break "
+        "anything. Without a command it auto-detects (pytest for Python, npm test for Node). Has its own long timeout "
+        "(5 min), unlike run_shell's 60s. Pass path = the project directory.",
+        {
+            "command": {"type": "string", "description": "optional custom test command; omit to auto-detect"},
+            "path": {"type": "string", "description": "project directory to run tests in; default current dir"},
+        },
+        [],
     ),
     _function(
         "http_request",
@@ -353,11 +376,13 @@ TOOLS = [
         "Schedule a reminder: at the time you'll wake yourself and tell the user the thing in your own voice "
         "(not a popup, not a system notification, not a background script). Use when the user says 'remind me / call me / tell me to do X at <time>'. "
         "Once you call this it's scheduled — don't write any code to sleep / wait for that time; the system wakes you at the time. "
-        "Give message (what to say) and one of fire_at or in_minutes.",
+        "Give message (what to say) and one of fire_at or in_minutes. For a RECURRING reminder ('every day / every Monday / every N hours'), "
+        "also pass repeat, and set fire_at to the FIRST occurrence.",
         {
             "message": {"type": "string", "description": "what to tell the user at the time, e.g. time for bed"},
-            "fire_at": {"type": "string", "description": "absolute time, 24h HH:MM or YYYY-MM-DD HH:MM; pick one of this / in_minutes"},
+            "fire_at": {"type": "string", "description": "absolute time, 24h HH:MM or YYYY-MM-DD HH:MM; for repeats this is the first occurrence; pick one of this / in_minutes"},
             "in_minutes": {"type": "number", "description": "remind after this many minutes; pick one of this / fire_at"},
+            "repeat": {"type": "string", "description": "recurrence: 'daily' (same time each day) / 'weekly' (same weekday+time) / 'interval:N' (every N minutes). Omit for a one-shot reminder."},
         },
         ["message"],
     ),
@@ -389,15 +414,54 @@ TOOLS = [
     ),
     _function(
         "schedule_task",
-        "Schedule a TASK: at the time the system has you actually CARRY IT OUT in the background (with the full toolset: run commands / write code / go online / operate the PC, etc.), "
-        "then report the result to the user. Difference from schedule_reminder — that one just SAYS a line at the time; this one DOES the work. "
-        "Use when the user says 'automatically do X / run Y for me at <time> / after <duration>'. Give task (self-contained, stating the wanted outcome) and one of fire_at or in_minutes.",
+        "Schedule a TASK: at the time the system wakes you to actually CARRY IT OUT yourself in the foreground (with the full toolset: run commands / write code / go online / operate the PC, etc.) — the user sees you do it and can tap you to stop it. "
+        "Difference from schedule_reminder — that one just SAYS a line at the time; this one DOES the work. "
+        "Use when the user says 'automatically do X / run Y for me at <time> / after <duration>'. Give task (self-contained, stating the wanted outcome) and one of fire_at or in_minutes. "
+        "For a RECURRING task ('every day / every N hours back up X'), also pass repeat and set fire_at to the first run.",
         {
             "task": {"type": "string", "description": "the task to run automatically at the time, self-contained, stating the wanted outcome"},
-            "fire_at": {"type": "string", "description": "absolute time HH:MM or YYYY-MM-DD HH:MM; pick one of this / in_minutes"},
+            "fire_at": {"type": "string", "description": "absolute time HH:MM or YYYY-MM-DD HH:MM; for repeats this is the first run; pick one of this / in_minutes"},
             "in_minutes": {"type": "number", "description": "after this many minutes; pick one of this / fire_at"},
+            "repeat": {"type": "string", "description": "recurrence: 'daily' / 'weekly' / 'interval:N' (every N minutes). Omit for a one-shot task."},
         },
         ["task"],
+    ),
+    _function(
+        "list_reminders",
+        "List all pending reminders and scheduled tasks (their id, time, recurrence, and content). Use when the user asks what's scheduled, or before cancelling one.",
+        {},
+        [],
+    ),
+    _function(
+        "cancel_reminder",
+        "Cancel one pending reminder/task by its id (from list_reminders). Use when the user says 'cancel that reminder / don't remind me anymore'.",
+        {"reminder_id": {"type": "number", "description": "the id shown by list_reminders"}},
+        ["reminder_id"],
+    ),
+    _function(
+        "list_background_tasks",
+        "List the background tasks currently running (their id, how long they've run, and what they are). Use when the user asks 'what are you working on / what's running', or before stopping one.",
+        {},
+        [],
+    ),
+    _function(
+        "stop_background_task",
+        "Stop a running background task by its id (from list_background_tasks). It stops cooperatively — after its current step. Use when the user says 'stop that / cancel the background job'.",
+        {"task_id": {"type": "number", "description": "the id shown by list_background_tasks"}},
+        ["task_id"],
+    ),
+    _function(
+        "set_screen_watch",
+        "Start (or stop) WATCHING the screen on a repeating timer: every interval_minutes you automatically glance at "
+        "the user's active window and report what you see about a focus they give you. Use when the user says things like "
+        "'every few minutes look at my screen and tell me X', 'keep an eye on my game and warn me', 'monitor this and report'. "
+        "This is the ONLY way to act on a recurring timer by yourself — do NOT try to sleep/loop in code. "
+        "It runs for this session (resets when the app restarts). To stop, call again with interval_minutes=0 (or when the user says stop).",
+        {
+            "focus": {"type": "string", "description": "what to look at / report each time, in the user's terms, e.g. 'my game situation — warn me of danger or openings'"},
+            "interval_minutes": {"type": "number", "description": "how often to look, in minutes (min 1); use 0 to stop watching"},
+        },
+        ["focus", "interval_minutes"],
     ),
     _function(
         "create_skill",
@@ -432,10 +496,26 @@ TOOLS = [
     _function(
         "spawn_agent",
         "Run a sub-agent on ONE specific subtask and WAIT for its result right here — this BLOCKS your current reply until it finishes, so the user can't chat with you meanwhile. "
-        "Use ONLY for a short, self-contained subtask whose result you need RIGHT NOW to continue this same answer. To run several such short subtasks at once, call this multiple times in one turn (they run concurrently, but you still wait for all of them). "
+        "Use ONLY for a short, self-contained subtask whose result you need RIGHT NOW to continue this same answer. For SEVERAL subtasks at once, prefer spawn_workflow (it reliably parallelizes); calling this multiple times in one turn also runs them concurrently. "
         "Costs extra compute — not for trifles. For anything that will take a while, use start_background_task instead so you stay free to chat.",
-        {"task": {"type": "string", "description": "the subtask for the sub-agent; make it self-contained and state the wanted outcome."}},
+        {
+            "task": {"type": "string", "description": "the subtask for the sub-agent; make it self-contained and state the wanted outcome."},
+            "result_schema": {"type": "string", "description": "optional: describe the JSON shape you want back (e.g. '{\"title\":str,\"score\":number}') so the result is machine-readable; omit for free-text."},
+        },
         ["task"],
+    ),
+    _function(
+        "spawn_workflow",
+        "Orchestrate SEVERAL sub-agents in one call — the reliable way to fan out or pipeline work. mode='fanout' runs all tasks IN PARALLEL "
+        "(up to 4 at once) and returns all results — use for independent subtasks (research N things, review N files). "
+        "mode='pipeline' runs tasks IN ORDER, feeding each one's output into the next — use when a later step builds on an earlier one. "
+        "Blocks until done (use start_background_task for slow work you don't need now). Best for 3-8 sub-tasks; don't use it for a single task (that's spawn_agent).",
+        {
+            "mode": {"type": "string", "enum": ["fanout", "pipeline"], "description": "fanout = parallel & independent; pipeline = sequential, each builds on the previous"},
+            "tasks": {"type": "array", "items": {"type": "string"}, "description": "the subtasks, each self-contained; order matters for pipeline"},
+            "result_schema": {"type": "string", "description": "optional: JSON shape you want each result in (fanout) / the final result in (pipeline)"},
+        },
+        ["mode", "tasks"],
     ),
     _function(
         "start_background_task",
@@ -476,14 +556,11 @@ TOOLS = [
 ]
 
 
-# 不需要串行锁的工具：各 agent 自带独立 shell/python，网络/只读文件/进程内存读取互不干扰。
-# 注意：ocr_screen / find_on_screen 故意不在此列——它们都调 grab_active() 改写模块级全局 _geom，
-# 与 screenshot / screen_elements / 鼠标点击共用同一份坐标基准；并发跑会让一个工具改 _geom 时
-# 另一个正拿它换算屏幕坐标，导致错点。让所有「读屏 / 算坐标」工具统一走 _DISPATCH_LOCK 串行。
 _CONCURRENT_SAFE = frozenset(
     {"http_request", "read_file", "list_dir", "run_shell", "run_python", "run_skill",
      "web_search", "web_fetch", "search_code", "glob_files", "recall_docs", "list_docs",
-     "system_memory", "read_process_memory", "recall_clipboard"}
+     "system_memory", "read_process_memory", "recall_clipboard",
+     "review_diff", "run_tests"}
 )
 
 
@@ -514,26 +591,95 @@ def _resolve_reminder_time(fire_at: str | None, in_minutes: float | None) -> dat
     return None
 
 
-def _schedule_reminder(message: str, fire_at: str | None, in_minutes: float | None) -> str:
+def _parse_repeat(s: str | None) -> str:
+    """把模型给的 repeat 归一成存储格式：daily / weekly / interval:N；认不出当一次性("")。"""
+    s = (s or "").strip().lower()
+    if not s:
+        return ""
+    if s.startswith("interval:"):
+        try:
+            return f"interval:{max(1, int(s.split(':', 1)[1].strip()))}"
+        except (ValueError, IndexError):
+            return ""
+    if any(k in s for k in ("week", "周", "星期", "礼拜")):
+        return "weekly"
+    if any(k in s for k in ("daily", "day", "天", "每日")):
+        return "daily"
+    return ""
+
+
+def _repeat_note(repeat: str) -> str:
+    if repeat == "daily":
+        return "（每天重复）"
+    if repeat == "weekly":
+        return "（每周重复）"
+    if repeat.startswith("interval:"):
+        return f"（每 {repeat.split(':', 1)[1]} 分钟重复）"
+    return ""
+
+
+def _schedule_reminder(message: str, fire_at: str | None, in_minutes: float | None, repeat: str | None = None) -> str:
     message = (message or "").strip()
     if not message:
         return "(No reminder content given.)"
     fire = _resolve_reminder_time(fire_at, in_minutes)
     if fire is None:
         return "(Couldn't parse the reminder time — give HH:MM or how many minutes from now.)"
-    reminders.add(fire, message)
-    return f"OK, at {fire.strftime('%H:%M')} I'll come tell you myself: {message}"
+    rep = _parse_repeat(repeat)
+    reminders.add(fire, message, repeat=rep)
+    return f"OK, at {fire.strftime('%H:%M')} I'll come tell you myself{_repeat_note(rep)}: {message}"
 
 
-def _schedule_task(task: str, fire_at: str | None, in_minutes: float | None) -> str:
+def _schedule_task(task: str, fire_at: str | None, in_minutes: float | None, repeat: str | None = None) -> str:
     task = (task or "").strip()
     if not task:
         return "(No task given to run at the time.)"
     fire = _resolve_reminder_time(fire_at, in_minutes)
     if fire is None:
         return "(Couldn't parse the time — give HH:MM or how many minutes from now.)"
-    reminders.add(fire, task, kind="do")
-    return f"OK, at {fire.strftime('%H:%M')} I'll go do it automatically: {task}"
+    rep = _parse_repeat(repeat)
+    reminders.add(fire, task, kind="do", repeat=rep)
+    return f"OK, at {fire.strftime('%H:%M')} I'll go do it automatically{_repeat_note(rep)}: {task}"
+
+
+def _list_reminders() -> str:
+    items = reminders.list_all()
+    if not items:
+        return "(没有待触发的提醒或任务)"
+    lines = []
+    for r in items:
+        when = r.fire_at.replace("T", " ")
+        tag = "任务" if r.kind == "do" else "提醒"
+        rep = (" " + _repeat_note(r.repeat)) if r.repeat else ""
+        lines.append(f"#{r.id} [{tag}] {when}{rep} — {r.what}")
+    return "\n".join(lines)
+
+
+def _cancel_reminder(reminder_id) -> str:
+    try:
+        rid = int(reminder_id)
+    except (TypeError, ValueError):
+        return "(给我要撤销的提醒编号 id；先用 list_reminders 查。)"
+    return f"已撤销 #{rid} ✓" if reminders.remove(rid) else f"(没有编号 #{rid} 的提醒——可能已经触发，或编号不对。)"
+
+
+def _list_background_tasks() -> str:
+    from desktop_pet.agent.bgtasks import bg_tasks
+    tasks = bg_tasks.snapshot()
+    if not tasks:
+        return "(现在没有在跑的后台任务)"
+    return "\n".join(f"#{tid} 已跑 {int(secs)}s — {task[:60]}" for tid, task, secs in tasks)
+
+
+def _stop_background_task(task_id) -> str:
+    from desktop_pet.agent.bgtasks import bg_tasks
+    try:
+        tid = int(task_id)
+    except (TypeError, ValueError):
+        return "(给我要停的后台任务编号 id；先用 list_background_tasks 查。)"
+    if bg_tasks.stop(tid):
+        return f"已让 #{tid} 停下（它会在当前这步做完后退出）。"
+    return f"(没有编号 #{tid} 的后台任务——可能已经做完了。)"
 
 
 def dispatch(
@@ -546,7 +692,7 @@ def dispatch(
             return _dispatch_impl(name, arguments, shell_session=shell_session, py_session=py_session)
     except KeyError as exc:
         return ToolResult(f"[tool {name} is missing required argument {exc}; fill it in and retry]")
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return ToolResult(f"[tool {name} failed: {type(exc).__name__}: {exc}]")
 
 
@@ -574,6 +720,10 @@ def _dispatch_impl(
         return ToolResult(fs.search_code(arguments["pattern"], arguments.get("path", ".")))
     if name == "glob_files":
         return ToolResult(fs.glob_files(arguments["pattern"], arguments.get("path", ".")))
+    if name == "review_diff":
+        return ToolResult(devtools.review_diff(arguments.get("path", "."), bool(arguments.get("staged", False))))
+    if name == "run_tests":
+        return ToolResult(devtools.run_tests(arguments.get("command", ""), arguments.get("path", ".")))
     if name == "http_request":
         return ToolResult(net.http_request(arguments["url"], arguments.get("method", "GET"), arguments.get("body")))
     if name == "web_search":
@@ -669,12 +819,20 @@ def _dispatch_impl(
         return ToolResult(docs.forget(arguments.get("source")))
     if name == "schedule_reminder":
         return ToolResult(
-            _schedule_reminder(arguments["message"], arguments.get("fire_at"), arguments.get("in_minutes"))
+            _schedule_reminder(arguments["message"], arguments.get("fire_at"), arguments.get("in_minutes"), arguments.get("repeat"))
         )
     if name == "schedule_task":
         return ToolResult(
-            _schedule_task(arguments["task"], arguments.get("fire_at"), arguments.get("in_minutes"))
+            _schedule_task(arguments["task"], arguments.get("fire_at"), arguments.get("in_minutes"), arguments.get("repeat"))
         )
+    if name == "list_reminders":
+        return ToolResult(_list_reminders())
+    if name == "cancel_reminder":
+        return ToolResult(_cancel_reminder(arguments.get("reminder_id")))
+    if name == "list_background_tasks":
+        return ToolResult(_list_background_tasks())
+    if name == "stop_background_task":
+        return ToolResult(_stop_background_task(arguments.get("task_id")))
     if name == "create_skill":
         return ToolResult(
             skills.create(
@@ -685,7 +843,15 @@ def _dispatch_impl(
         code = skills.code(arguments["name"])
         if code is None:
             return ToolResult(f"No skill named \"{arguments['name']}\"; use list_skills to see what's available.")
-        script = f"args = {arguments.get('args', {})!r}\n\n{code}"
+        raw_args = arguments.get("args")
+        if isinstance(raw_args, str):
+            try:
+                raw_args = json.loads(raw_args)
+            except (ValueError, TypeError):
+                raw_args = {}
+        if not isinstance(raw_args, dict):
+            raw_args = {}
+        script = f"args = {raw_args!r}\n\n{code}"
         return ToolResult(python.run(script))
     if name == "edit_skill":
         return ToolResult(skills.edit(arguments["name"], arguments["code"]))

@@ -16,13 +16,13 @@ from desktop_pet import clipclass
 
 _MIN_LEN = 2
 _MAX_LEN = 20000
-_MIN_INTERVAL_S = 1.5   # 同一阵猛复制只取头一条，防抖
+_MIN_INTERVAL_S = 1.5
 _RING = 8
 _SEEN = 16
 
 
 class Sampler(QObject):
-    interesting = Signal(str, str)  # (kind, text)
+    interesting = Signal(str, str)
 
     def __init__(self) -> None:
         super().__init__()
@@ -52,7 +52,7 @@ class Sampler(QObject):
         if not (_MIN_LEN <= len(s) <= _MAX_LEN):
             return
         h = self._hash(s)
-        if h == self._self_mark:  # 自己写回的，别采
+        if h == self._self_mark:
             self._self_mark = ""
             return
         if h in self._seen:

@@ -21,9 +21,9 @@ def _read_registry() -> dict:
         return {}
     try:
         data = json.loads(_REGISTRY.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):  # OSError 不捕获会经顶层 skills=SkillStore() 冒泡崩 agent 启动
+    except (json.JSONDecodeError, OSError):
         return {}
-    return data if isinstance(data, dict) else {}  # 合法 JSON 但非 dict 会让后续 registry[name]= 抛 TypeError
+    return data if isinstance(data, dict) else {}
 
 
 class SkillStore:

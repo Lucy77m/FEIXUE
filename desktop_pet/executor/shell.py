@@ -15,7 +15,6 @@ import uuid
 from desktop_pet.executor.safety import check_blocked
 
 _TIMEOUT = 60
-# 打包成无控制台 GUI 后，子进程(powershell/cmd)启动会被 Windows 分配一个可见黑窗——这个 flag 阻止它
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 _ENCODING_SETUP = (
     "[Console]::OutputEncoding=[Text.Encoding]::UTF8;"
@@ -122,23 +121,23 @@ class _PowerShell:
 
 
 def _kill_proc(proc: subprocess.Popen) -> None:
-    # 必须非阻塞：cancel() 会在 UI 主线程同步调用它，任何 proc.wait() 都会卡住界面。
     try:
         proc.kill()
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
-    try:
-        if proc.stdout is not None:
-            proc.stdout.close()
-    except Exception:  # noqa: BLE001
-        pass
-    threading.Thread(target=_reap, args=(proc,), daemon=True).start()  # 后台回收，免僵尸又不阻塞
+    for pipe in (proc.stdout, proc.stdin):
+        try:
+            if pipe is not None:
+                pipe.close()
+        except Exception:
+            pass
+    threading.Thread(target=_reap, args=(proc,), daemon=True).start()
 
 
 def _reap(proc: subprocess.Popen) -> None:
     try:
         proc.wait(timeout=10)
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
 
 

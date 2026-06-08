@@ -15,7 +15,7 @@ def http_request(url: str, method: str = "GET", body: str | None = None) -> str:
         response = httpx.request(
             method.upper(), url, content=body, timeout=_TIMEOUT, follow_redirects=True
         )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return f"[request failed: {exc}]"
     text = response.text
     if len(text) > _MAX_BODY:

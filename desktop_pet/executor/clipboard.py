@@ -19,7 +19,7 @@ def read_clipboard_text() -> str | None:
                 data = None
         finally:
             win32clipboard.CloseClipboard()
-    except Exception:  # noqa: BLE001
+    except Exception:
         return None
     return data if data else None
 
@@ -40,5 +40,5 @@ def write_clipboard(text: str) -> str:
         finally:
             win32clipboard.CloseClipboard()
         return f"Wrote to the clipboard ({len(str(text))} chars)."
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return f"Couldn't write the clipboard: {type(exc).__name__}: {exc}"

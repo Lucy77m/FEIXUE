@@ -53,7 +53,6 @@ LANGUAGES = ("跟随", "中文", "English", "日本語")
 PROACTIVE_LEVELS = ("安静", "正常", "话痨")
 
 THINK_LEVELS = ("off", "low", "medium", "high", "max")
-# 思考档位 → (enable_thinking, max_tokens)。无=关思考最快；低/中/高=开思考、回复渐长；MAX=开思考且不限长度。
 THINK_PRESETS = {
     "off": (False, 2048),
     "low": (True, 2048),
@@ -82,23 +81,24 @@ class Settings:
     proactive_enabled: bool = True
     proactive_level: str = "正常"
     ui_language: str = "中文"
-    tts_enabled: bool = False  # 朗读(TTS)：默认关，避免突然出声；控制面板「对话」页可开
-    birthday: str = ""  # 你的生日 MM-DD，留空=不过；用于节日/生日特殊表现
-    watch_screen: bool = False  # 看屏主动帮手：默认关(会偶尔截屏判断你是否卡住)
-    clip_sampler: bool = False  # 剪贴板采样器：监听复制内容做本地分类（炼金术/recall 的底座），隐私默认关
-    clip_alchemy: bool = False  # 剪贴板炼金术：复制到报错/外文/代码时主动冒泡帮你解释/翻译/改好
-    clip_alchemy_kinds: str = "error,foreign,code"  # 炼金术处理哪些类别（逗号分隔：error/foreign/code/url）
-    quick_paste_back: bool = True  # 顺手就改：改写后自动 Ctrl+V 粘贴替换（关掉则只放进剪贴板）
-    hotkey_summon: str = "ctrl+alt+s"    # 全局热键：唤出 MOCHI + 输入框
-    hotkey_ask: str = "ctrl+alt+a"       # 全局热键：选中文字问它
-    hotkey_quick: str = "ctrl+shift+q"   # 全局热键：顺手就改（选中文字一键改写）
+    tts_enabled: bool = False
+    tts_voice: str = ""
+    tts_rate: int = 0
+    birthday: str = ""
+    watch_screen: bool = False
+    clip_sampler: bool = False
+    clip_alchemy: bool = False
+    clip_alchemy_kinds: str = "error,foreign,code"
+    quick_paste_back: bool = True
+    remote_inbox: bool = False
+    hotkey_summon: str = "ctrl+alt+s"
+    hotkey_ask: str = "ctrl+alt+a"
+    hotkey_quick: str = "ctrl+shift+q"
 
     @classmethod
     def load(cls) -> Settings:
         if not SETTINGS_PATH.exists():
             return cls()
-        # 损坏/被占用/非 dict 一律退回出厂默认(api_key 空 → 启动会弹控制面板让用户重配)，
-        # 绝不让坏掉的 settings.json 直接崩 PetApp 启动。
         try:
             data = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, ValueError, OSError):
@@ -134,6 +134,6 @@ def build_http_client(proxy: str):
     if proxy:
         try:
             return httpx.Client(proxy=proxy, trust_env=False, timeout=timeout)
-        except TypeError:  # 老版本 httpx 用 proxies=
+        except TypeError:
             return httpx.Client(proxies=proxy, trust_env=False, timeout=timeout)
     return httpx.Client(trust_env=False, timeout=timeout)

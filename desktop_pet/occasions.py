@@ -7,7 +7,6 @@ from __future__ import annotations
 import re
 from datetime import datetime
 
-# 公历节日(农历的春节/中秋等需要历法换算，先不引依赖；以后可加)
 _FESTIVALS = {
     "01-01": "元旦",
     "02-14": "情人节",
@@ -26,7 +25,7 @@ def _norm_md(raw: str) -> str:
     if len(nums) < 2:
         return ""
     try:
-        month, day = int(nums[-2]), int(nums[-1])  # 取末两段，兼容带年份的 YYYY-MM-DD
+        month, day = int(nums[-2]), int(nums[-1])
     except ValueError:
         return ""
     if 1 <= month <= 12 and 1 <= day <= 31:

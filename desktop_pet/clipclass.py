@@ -11,7 +11,7 @@ KINDS = ("error", "foreign", "code", "url", "plain")
 INTERESTING = frozenset({"error", "foreign", "code", "url"})
 
 _URL_RE = re.compile(r"^https?://\S+$", re.IGNORECASE)
-_CJK_RE = re.compile(r"[一-鿿぀-ヿ가-힯]")  # 中/日/韩：母语侧
+_CJK_RE = re.compile(r"[一-鿿぀-ヿ가-힯]")
 _LATIN_RE = re.compile(r"[A-Za-z]")
 _ERR_RE = re.compile(
     r"traceback \(most recent call last\)|\bexception\b|\b\w*error\b|\bpanic:|segmentation fault|"

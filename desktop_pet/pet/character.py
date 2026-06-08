@@ -100,9 +100,9 @@ _ZZZ_ALPHA_MAX = 200
 _ZZZ_INK = QColor(150, 160, 180)
 
 
-_CATNAP_GAP = (45.0, 120.0)   # 空闲这么久后，才有机会打个盹
-_CATNAP_DUR = (4.0, 9.0)      # 盹一下(秒)就自己醒来
-_CATNAP_CHANCE = 0.5          # 到点也只一半概率真打盹，免得太规律
+_CATNAP_GAP = (45.0, 120.0)
+_CATNAP_DUR = (4.0, 9.0)
+_CATNAP_CHANCE = 0.5
 
 
 _DRAG_SWAY_HZ = 5.0
@@ -161,7 +161,7 @@ _THINK_TAP_HZ = 5.0
 _THINK_HAND_R = 0.095
 
 
-_FX_EDGE_FADE = 32.0  # px：浮动特效在距窗口边缘这段距离内淡出，避免被硬裁切
+_FX_EDGE_FADE = 32.0
 
 
 def _edge_alpha(y: float, win_h: float) -> float:
@@ -385,7 +385,7 @@ class BlobPet:
         if self._pondering:
             if self._think_e <= 0.0:
                 self._enter_think()
-            self._think_e = min(1.0, self._think_e + dt)  # 封顶，否则思考越久、回复后退出动画拖越久
+            self._think_e = min(1.0, self._think_e + dt)
             self._advance_think(dt)
         else:
             self._think_e = max(0.0, self._think_e - dt * 2.0)
@@ -428,8 +428,6 @@ class BlobPet:
             self._fidget_timer = random.uniform(14.0, 28.0)
 
     def _advance_catnap(self, dt: float) -> None:
-        # 空闲时偶尔打个小盹：打哈欠→闭眼 Zzz→几秒后自己伸懒腰醒，不用谁来叫。
-        # 复用 fall_asleep/wake，靠 _catnap_left 自动醒；和"离开太久睡着"用 is_catnapping 区分。
         if self._catnap_left > 0.0:
             self._catnap_left -= dt
             if self._catnap_left <= 0.0:
@@ -480,7 +478,7 @@ class BlobPet:
                 return
             stages = _ACTIVITIES[self._activity][3]
             self._stage_left -= dt
-            self._stage_dur = max(0.1, stages[self._stage_i][1])  # 与 _enter_stage 一致地钳制，防 0 时长 stage 除零
+            self._stage_dur = max(0.1, stages[self._stage_i][1])
             self._stage_p = 1.0 - max(0.0, self._stage_left) / self._stage_dur
 
             glyph = stages[self._stage_i][2]

@@ -31,7 +31,7 @@ from desktop_pet.settings import Settings, build_http_client
 from desktop_pet.skills import skills
 
 _MAX_STEPS = 16
-_MAX_STEPS_CEILING = 64  # 用户自定义 max_steps 的硬上限，防止误填超大值近乎无限自调用
+_MAX_STEPS_CEILING = 64
 _RUN_CANCELLED = "\x00cancelled"
 _MAX_SUBAGENT_DEPTH = 1
 _SPAWN_TOOL = "spawn_agent"
@@ -41,9 +41,12 @@ _IMAGE_TOOL = "show_image"
 _GIF_TOOL = "play_gif"
 _PERFORM_TOOL = "perform"
 _CONFIRM_TOOL = "confirm"
+_WATCH_TOOL = "set_screen_watch"
+_WORKFLOW_TOOL = "spawn_workflow"
+_MAX_WORKFLOW_TASKS = 8
 _COSMETIC_TOOLS = frozenset({_PERFORM_TOOL, _PLAN_TOOL, _IMAGE_TOOL, _GIF_TOOL})
 _REFLECT_MIN_CHARS = 50
-_ATTACH_FILE_CHARS = 6000  # 附件文件正文随消息内联的上限；超出截断，全文仍进知识库待召回
+_ATTACH_FILE_CHARS = 6000
 def _perform_names() -> str:
     from desktop_pet.pet.behaviors import registry
     from desktop_pet.pet.behaviors.registry import Category
@@ -61,23 +64,20 @@ def _is_performable(name: str) -> bool:
     spec = registry.get(name)
     return spec is not None and spec.category == Category.REACTION
 _WEB_TOOLS = frozenset({"web_search", "web_fetch", "http_request", "install_package"})
-# 「操控」组：驱动 / 侵入式读取这台机器。read_process_memory 能读任意进程内存（可能含密钥），
-# 之前不属于任何能力组、任何开关都关不掉——归到操控组里，关掉操控就一并关掉它。
 _CONTROL_TOOLS = frozenset({
     "screenshot", "screen_elements", "act_element", "list_windows", "focus_window", "manage_window",
     "click", "double_click", "right_click", "move_mouse", "scroll", "type_text", "press_keys",
     "read_clipboard", "write_clipboard", "read_process_memory", "recall_clipboard",
+    _WATCH_TOOL,
 })
-# 「命令」组：在这台机器上执行代码 / 改动机器。技能本质是存起来的 Python（run_skill 会真执行），
-# 文件写入/编辑也是对机器的改动——它们之前都逃逸了 allow_shell 开关，现在一并归入：
-# 关掉「命令执行」= 不能跑命令/代码/技能、也不能改文件，只剩读取与对话。
 _SHELL_TOOLS = frozenset({
     "run_shell", "run_python", "run_skill", "create_skill", "edit_skill", "write_file", "edit_file",
+    "review_diff", "run_tests",
 })
 _MAX_PARALLEL_SUBAGENTS = 4
 _MAX_BG_TASKS = 3
 _BG_TASK_SEMAPHORE = threading.Semaphore(_MAX_BG_TASKS)
-_BG_ACTIVE = 0  # 当前在跑/排队的后台任务数（含已排队未抢到信号量的），用于给用户诚实反馈
+_BG_ACTIVE = 0
 _BG_ACTIVE_LOCK = threading.Lock()
 _REFLECT_SEMAPHORE = threading.Semaphore(1)
 _HISTORY_TOKEN_BUDGET = 24_000
@@ -87,14 +87,11 @@ _TOKENS_PER_OTHER_CHAR = 0.25
 _TOKENS_PER_MESSAGE = 4
 _TOKENS_PER_IMAGE = 1_200
 
-# 连接 8s 快失败（坏网/坏 base_url 立刻报错，不再苦等）；读 90s 给长回复留足时间
 _REQUEST_TIMEOUT = httpx.Timeout(connect=8.0, read=90.0, write=30.0, pool=8.0)
 _BACKGROUND_TIMEOUT = 45.0
 _MAX_RETRIES = 1
 
 def _is_cjk(ch: str) -> bool:
-    # 覆盖：CJK 扩展A+基本汉字、CJK 兼容、假名+CJK 符号、全角/半角、扩展B 及以上。
-    # 之前只算了基本汉字与部分假名，漏掉扩展A 等，CJK 文本的 token 预算会偏低、裁剪太晚。
     o = ord(ch)
     return (0x3400 <= o <= 0x9FFF or 0x3000 <= o <= 0x30FF or 0xF900 <= o <= 0xFAFF
             or 0xFF00 <= o <= 0xFFEF or 0x20000 <= o <= 0x3FFFF)
@@ -166,7 +163,6 @@ class Agent:
         self._plan: list[dict] = []
         self._on_confirm: Callable[[str], bool] | None = None
         self._tools = self._build_tools()
-        # 子代理复用父级的 cancel event，否则中断父级时子代理会把自己的循环跑到底
         self._cancel = cancel_event or threading.Event()
         self._owns_cancel = cancel_event is None
         self._on_perform: Callable[[str], bool] | None = None
@@ -177,7 +173,7 @@ class Agent:
     def _build_tools(self) -> list[dict]:
         excluded: set[str] = set()
         if self._depth >= _MAX_SUBAGENT_DEPTH:
-            excluded |= {_SPAWN_TOOL, _BACKGROUND_TOOL}
+            excluded |= {_SPAWN_TOOL, _BACKGROUND_TOOL, _WORKFLOW_TOOL, _WATCH_TOOL}
         if self._notify is None:
             excluded.add(_BACKGROUND_TOOL)
         if self._on_confirm is None:
@@ -192,11 +188,10 @@ class Agent:
         return offered + mcp_hub.tool_schemas()
 
     def forget_all(self) -> None:
-        # 逐个 try/except：任一项失败也要把其余都清干净，不能因为前面抛异常就漏清后面的。
         for wipe in (store.wipe, journal.clear, persona.clear, docs.forget):
             try:
                 wipe()
-            except Exception:  # noqa: BLE001
+            except Exception:
                 pass
         self._messages = [self._system_message()]
         self._plan = []
@@ -207,10 +202,10 @@ class Agent:
         self._python.close()
         client = self._oa_client
         if client is not None:
-            self._oa_client = None  # close 后不可复用，置空让 _client() 下次重建
+            self._oa_client = None
             try:
-                client.close()  # 主动断连，打断正卡在建连/等首字节的 create()，不必干等超时
-            except Exception:  # noqa: BLE001
+                client.close()
+            except Exception:
                 pass
 
     @staticmethod
@@ -310,7 +305,7 @@ class Agent:
         self._turn_used_tools = False
         self._hit_step_limit = False
         self._on_perform = on_perform
-        if self._owns_cancel:  # 绝不清掉共享的（父级的）取消事件
+        if self._owns_cancel:
             self._cancel.clear()
         self._prepare(user_message)
         history_mark = len(self._messages)
@@ -351,7 +346,7 @@ class Agent:
                     step(describe_step(c.function.name, a))
                 with ThreadPoolExecutor(max_workers=min(_MAX_PARALLEL_SUBAGENTS, len(spawns))) as pool:
                     futures = {
-                        pool.submit(self._run_subagent, a.get("task", ""), None): c.id
+                        pool.submit(self._run_subagent, a.get("task", ""), None, a.get("result_schema")): c.id
                         for c, a in spawns
                     }
                     for future in as_completed(futures):
@@ -363,7 +358,11 @@ class Agent:
                 if call.function.name != _PERFORM_TOOL:
                     step(describe_step(call.function.name, arguments))
                 if call.function.name == _SPAWN_TOOL:
-                    results[call.id] = tools.ToolResult(self._run_subagent(arguments.get("task", ""), step))
+                    results[call.id] = tools.ToolResult(self._run_subagent(arguments.get("task", ""), step, arguments.get("result_schema")))
+                elif call.function.name == _WORKFLOW_TOOL:
+                    results[call.id] = tools.ToolResult(self._run_workflow(
+                        arguments.get("mode", "fanout"), arguments.get("tasks", []),
+                        arguments.get("result_schema"), step))
                 elif call.function.name == _BACKGROUND_TOOL:
                     results[call.id] = tools.ToolResult(self._start_background_task(arguments.get("task", "")))
                 elif call.function.name == _PLAN_TOOL:
@@ -374,6 +373,8 @@ class Agent:
                     results[call.id] = tools.ToolResult(self._perform(arguments.get("name", "")))
                 elif call.function.name == _CONFIRM_TOOL:
                     results[call.id] = tools.ToolResult(self._confirm(arguments.get("action", "")))
+                elif call.function.name == _WATCH_TOOL:
+                    results[call.id] = tools.ToolResult(self._set_screen_watch(arguments))
                 else:
                     results[call.id] = tools.dispatch(
                         call.function.name, arguments,
@@ -398,14 +399,13 @@ class Agent:
         if self._cancel.is_set():
             del self._messages[history_mark:]
             return _RUN_CANCELLED
-        # 步数用尽：让模型自己用一句话收尾（不再给工具），而非套用固定文案
         step(i18n.thinking_label())
         self._messages.append({"role": "user", "content": prompts.STEP_LIMIT_NUDGE})
         try:
             message = self._complete(think, offer_tools=False)
             self._messages.append(self._as_dict(message))
             reply = _strip_think_leak(message.content or "")
-        except Exception as exc:  # noqa: BLE001 - 绝不让这一轮崩掉；退回一句朴实诚实的话
+        except Exception as exc:
             audit.reply(f"[step-limit 收尾调用失败: {type(exc).__name__}: {exc}]")
             reply = ""
         if not reply:
@@ -467,8 +467,8 @@ class Agent:
             return f"(couldn't get that {noun}: {source})"
         try:
             from PIL import Image
-            Image.open(path).verify()  # 先验证能不能解码，否则 UI 那边静默不显示、agent 误以为成功
-        except Exception:  # noqa: BLE001
+            Image.open(path).verify()
+        except Exception:
             return f"(那个{noun}打不开或格式损坏，没法显示: {source})"
         emit_media(kind, path, caption)
         return f"{'Looped that GIF' if kind == 'gif' else 'Showed that image'} beside the user."
@@ -487,7 +487,7 @@ class Agent:
         action = (action or "").strip()
         if not action:
             return "(No action described — nothing to confirm.)"
-        if self._on_confirm is None:  # 这里没有 UI（后台 / 子代理）——按未批准处理，不盲目执行
+        if self._on_confirm is None:
             return "(No confirm UI available here; treat as NOT approved — skip it, or have the user do it in the foreground.)"
         approved = self._on_confirm(action)
         return ("User tapped 执行 — approved, go ahead." if approved
@@ -502,28 +502,88 @@ class Agent:
             return web.download_to_temp(source)
         return None
 
-    def _run_subagent(self, task: str, step: Callable[[str], None]) -> str:
-        if self._depth >= _MAX_SUBAGENT_DEPTH:  # 调用点强制：分身不得再派分身（防失控递归）
+    def _run_subagent(self, task: str, step: Callable[[str], None] | None, result_schema: str | None = None) -> str:
+        if self._depth >= _MAX_SUBAGENT_DEPTH:
             return "(Sub-agents can't spawn their own sub-agents — do it yourself or report back.)"
         task = (task or "").strip()
         if not task:
             return "(No subtask given — nothing to delegate.)"
         lang = (self._settings.language or "").strip()
-        if lang and lang != "跟随":  # 让子代理的输出跟用户的语言走，而不是任务本身的语言
+        if lang and lang != "跟随":
             task = f"{task}\n\n(Write your final answer in {lang}.)"
+        schema = result_schema.strip() if isinstance(result_schema, str) else ""
+        if schema:
+            task = f"{task}\n\n(Return your final answer as ONLY a JSON object of this shape — no prose, no code fence: {schema})"
         worker = Agent(self._settings, depth=self._depth + 1, cancel_event=self._cancel)
         try:
             return worker.run(task, on_step=step)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             return f"(Sub-agent couldn't finish: {exc})"
         finally:
             worker.close()
 
+    def _run_workflow(self, mode: str, tasks: list, result_schema: str | None, step: Callable[[str], None] | None) -> str:
+        """确定性编排：fanout=并行扇出 N 个子任务(宽度≤_MAX_PARALLEL_SUBAGENTS)；pipeline=顺序把上阶段输出注入下阶段。
+        把现在「靠模型恰好同轮吐多个 spawn 才并行」的偶发，变成一次调用就可靠的原语。深度/取消沿用现有机制。"""
+        if self._depth >= _MAX_SUBAGENT_DEPTH:
+            return "(Can't run a workflow from inside a sub-agent.)"
+        if isinstance(tasks, str):
+            s = tasks.strip()
+            if s.startswith("["):
+                try:
+                    j = json.loads(s)
+                    tasks = j if isinstance(j, list) else [s]
+                except Exception:
+                    tasks = [s]
+            else:
+                tasks = [s]
+        elif not isinstance(tasks, (list, tuple)):
+            tasks = [tasks] if tasks else []
+        clean = [str(t).strip() for t in (tasks or []) if str(t).strip()]
+        if not clean:
+            return "(No tasks given for the workflow.)"
+        if len(clean) > _MAX_WORKFLOW_TASKS:
+            clean = clean[:_MAX_WORKFLOW_TASKS]
+        if (mode or "fanout").strip().lower() == "pipeline":
+            prev = ""
+            for i, t in enumerate(clean, 1):
+                if self._cancel.is_set():
+                    return f"(Workflow stopped at stage {i}.)\n\n{prev}"
+                stage = t if i == 1 else f"{t}\n\n[Previous stage's output to build on]:\n{prev}"
+                prev = self._run_subagent(stage, step, result_schema if i == len(clean) else None)
+            return prev
+        out = [""] * len(clean)
+        with ThreadPoolExecutor(max_workers=min(_MAX_PARALLEL_SUBAGENTS, len(clean))) as pool:
+            futures = {pool.submit(self._run_subagent, t, None, result_schema): idx for idx, t in enumerate(clean)}
+            for future in as_completed(futures):
+                out[futures[future]] = future.result()
+        return "\n\n".join(f"## 子任务 {i + 1}：{clean[i][:48]}\n{out[i]}" for i in range(len(clean)))
+
     def run_background(self, task: str) -> str:
         return self._start_background_task(task)
 
+    def run_timed_task(
+        self,
+        task: str,
+        on_step: Callable[[str], None] | None = None,
+        on_think: Callable[[str], None] | None = None,
+        on_plan: Callable[[str], None] | None = None,
+        on_media: Callable[[str, str, str], None] | None = None,
+        on_perform: Callable[[str], bool] | None = None,
+    ) -> str:
+        # 定时任务到点亲自做：完整工具执行(有身体能动作能说话)，但跑完把这一轮从历史回滚——
+        # 它是自动触发的"它自己做的事"，不该混进用户对话历史、也不该被反思当成用户输入写进长期记忆。
+        snapshot = list(self._messages)
+        try:
+            return self.run(
+                prompts.timed_task_nudge(task), on_step=on_step, on_think=on_think,
+                on_plan=on_plan, on_media=on_media, on_perform=on_perform,
+            )
+        finally:
+            self._messages = snapshot
+
     def _start_background_task(self, task: str) -> str:
-        if self._depth >= _MAX_SUBAGENT_DEPTH:  # 调用点强制：后台任务不得再起后台任务
+        if self._depth >= _MAX_SUBAGENT_DEPTH:
             return "(Can't start a background task from here.)"
         task = (task or "").strip()
         if not task:
@@ -534,33 +594,37 @@ class Agent:
 
         global _BG_ACTIVE
         with _BG_ACTIVE_LOCK:
-            queued = _BG_ACTIVE >= _MAX_BG_TASKS  # 已满员，这个得排队等前面的做完
+            queued = _BG_ACTIVE >= _MAX_BG_TASKS
             _BG_ACTIVE += 1
 
         def work() -> None:
             global _BG_ACTIVE
+            from desktop_pet.agent.bgtasks import bg_tasks
+            cancel = threading.Event()
+            tid = bg_tasks.register(task, cancel)
             try:
-                with _BG_TASK_SEMAPHORE:  # 满 3 个时在这里阻塞排队，直到有空位
-                    worker = Agent(settings, depth=depth + 1)
+                with _BG_TASK_SEMAPHORE:
+                    worker = Agent(settings, depth=depth + 1, cancel_event=cancel)
                     try:
                         result = worker.run(task)
-                    except Exception as exc:  # noqa: BLE001
+                    except Exception as exc:
                         result = f"(Couldn't finish it: {exc})"
                     finally:
                         worker.close()
-                notify(task, result)
+                if not cancel.is_set():
+                    notify(task, result)
             finally:
+                bg_tasks.unregister(tid)
                 with _BG_ACTIVE_LOCK:
                     _BG_ACTIVE -= 1
 
         try:
             threading.Thread(target=work, daemon=True, name="star-bg-task").start()
-        except RuntimeError as exc:  # 线程耗尽等：回滚计数器，别让 _BG_ACTIVE 永久泄漏
+        except RuntimeError as exc:
             with _BG_ACTIVE_LOCK:
                 _BG_ACTIVE -= 1
             return f"(Couldn't start the background task: {exc})"
         if queued:
-            # 不能谎称"已经在做"——信号量满了它其实在排队。如实说。
             return (f"Already running {_MAX_BG_TASKS} background tasks, so \"{task[:30]}\" is queued — "
                     "it'll start once one frees up, and I'll tell you when it's done.")
         return f"OK, working on \"{task[:30]}\" in the background — I'll tell you when it's done."
@@ -579,7 +643,7 @@ class Agent:
                 .message.content
                 or ""
             ).strip()
-        except Exception:  # noqa: BLE001
+        except Exception:
             content = ""
         content = _strip_think_leak(content)
         if not content:
@@ -604,7 +668,7 @@ class Agent:
                 .message.content
                 or ""
             ).strip()
-        except Exception:  # noqa: BLE001
+        except Exception:
             return ""
         content = _strip_think_leak(content)
         if content:
@@ -630,7 +694,7 @@ class Agent:
                 .message.content
                 or ""
             ).strip()
-        except Exception:  # noqa: BLE001
+        except Exception:
             return ""
         return _strip_think_leak(content)
 
@@ -652,7 +716,7 @@ class Agent:
                 .message.content
                 or ""
             ).strip()
-        except Exception:  # noqa: BLE001
+        except Exception:
             return ""
         return _strip_think_leak(content)
 
@@ -661,7 +725,7 @@ class Agent:
         worker = Agent(self._settings, depth=self._depth + 1)
         try:
             return worker.run(prompts.explore_nudge(topic))
-        except Exception:  # noqa: BLE001
+        except Exception:
             return ""
         finally:
             worker.close()
@@ -673,7 +737,7 @@ class Agent:
         from desktop_pet.settings import CAPTURE_WINDOW
         try:
             cap = capture.capture_screen(CAPTURE_WINDOW)
-        except Exception:  # noqa: BLE001
+        except Exception:
             return ""
         if not cap.png_bytes:
             return ""
@@ -684,16 +748,64 @@ class Agent:
             {"type": "text", "text": prompt},
             {"type": "image_url", "image_url": {"url": capture.to_data_url(cap.png_bytes)}},
         ]
-        self._prepare()
-        messages = copy.deepcopy(self._messages) + [{"role": "user", "content": content}]
+        messages = [self._system_message(), {"role": "user", "content": content}]
         try:
             resp = self._client().chat.completions.create(
                 model=self._settings.model, messages=messages, timeout=_BACKGROUND_TIMEOUT
             )
             text = _strip_think_leak((resp.choices[0].message.content or "").strip())
-        except Exception:  # noqa: BLE001
+        except Exception:
             return ""
-        if not text or text.strip().upper().lstrip("[").startswith("NONE"):  # 没事就别打扰
+        if not text or text.strip().upper().lstrip("[").startswith("NONE"):
+            return ""
+        audit.reply(text, proactive=True)
+        return text
+
+    def _set_screen_watch(self, arguments: dict) -> str:
+        """开/关「定时看屏分析」。会话级（不落盘）：app 的定时器会按间隔截图，交给 analyze_screen 分析后播报。"""
+        from desktop_pet.watcher import watcher
+        focus = str(arguments.get("focus") or "").strip()
+        interval = arguments.get("interval_minutes")
+        try:
+            mins = float(interval) if interval is not None else None
+        except (TypeError, ValueError):
+            mins = None
+        stop = (mins is not None and mins <= 0)
+        if not focus or stop:
+            watcher.stop()
+            return "(Stopped the periodic screen-watch. I'll only look again when you ask.)"
+        if mins is None:
+            mins = 5.0
+        _en, foc, real_min = watcher.start(focus, mins)
+        return (f"(Periodic screen-watch is ON: every ~{real_min:.0f} min I'll glance at your screen and report on "
+                f"\"{foc}\". I'll start within a minute. Say 'stop watching' anytime to turn it off.)")
+
+    def analyze_screen(self, focus: str) -> str:
+        """定时看屏：截当前活动窗口，按用户指定的关注点(focus)分析并用自己的口吻报一句。
+        与 peek 区别：peek 判断「是否卡住」且默认沉默；这里是用户主动要的周期汇报，每次都给读数（除非屏上没相关内容→NONE）。"""
+        from desktop_pet.eyes import capture
+        from desktop_pet.settings import CAPTURE_WINDOW
+        from desktop_pet.watcher import WATCH_FAIL
+        try:
+            cap = capture.capture_screen(CAPTURE_WINDOW)
+        except Exception:
+            return WATCH_FAIL
+        if not cap.png_bytes:
+            return WATCH_FAIL
+        content = [
+            {"type": "text", "text": prompts.watch_focus_prompt(focus)},
+            {"type": "image_url", "image_url": {"url": capture.to_data_url(cap.png_bytes)}},
+        ]
+        messages = [self._system_message(), {"role": "user", "content": content}]
+        try:
+            resp = self._client().chat.completions.create(
+                model=self._settings.model, messages=messages, timeout=_BACKGROUND_TIMEOUT
+            )
+            text = _strip_think_leak((resp.choices[0].message.content or "").strip())
+        except Exception:
+            return WATCH_FAIL
+        stripped = re.sub(r"^\s*\[\w+\]\s*", "", text).strip()
+        if not stripped or stripped.upper() == "NONE":
             return ""
         audit.reply(text, proactive=True)
         return text
@@ -706,19 +818,17 @@ class Agent:
         if not _REFLECT_SEMAPHORE.acquire(blocking=False):
             return
         try:
-            # 在调用方（worker 线程）就地深拷贝：随后 worker 还会原地改写 self._messages
-            # （_drop_old_images / _trim_history），不能让后台反思线程读着同一批 dict。
             snapshot = copy.deepcopy(self._messages)
             threading.Thread(
                 target=self._reflect, args=(snapshot,), daemon=True, name="star-reflect"
             ).start()
-        except Exception:  # noqa: BLE001 - 深拷贝或起线程失败都得还回信号量，否则反思永久关闭（初值 1）
+        except Exception:
             _REFLECT_SEMAPHORE.release()
 
     def _reflect(self, snapshot: list[dict]) -> None:
         try:
             reflect_msg = prompts.REFLECT_PROMPT + "\n\n[Your current self-portrait — evolve THIS gently, don't toss it]:\n" + (persona.get() or "(none yet — this is the first one you're forming)")
-            conversation = snapshot + [{"role": "user", "content": reflect_msg}]  # snapshot 已是深拷贝
+            conversation = snapshot + [{"role": "user", "content": reflect_msg}]
             try:
                 content = (
                     self._client().chat.completions.create(
@@ -728,7 +838,7 @@ class Agent:
                     .message.content
                     or ""
                 )
-            except Exception:  # noqa: BLE001
+            except Exception:
                 return
             data = _parse_json(content)
             if not data:
@@ -766,7 +876,6 @@ class Agent:
         self._messages.append({"role": "user", "content": content})
 
     def _drop_old_images(self) -> None:
-        # 老的多模态消息折叠成纯文本：保留用户当时打的字，只丢图（省 token，又不抹掉语义）
         for message in self._messages:
             if message.get("role") == "user" and isinstance(message.get("content"), list):
                 texts = [
@@ -809,7 +918,6 @@ class Agent:
             name = f.get("name") or path
             if not path:
                 continue
-            # 后台入库 → 以后能语义召回；不阻塞这一轮回答（线程起不来就跳过，正文内联照常）
             try:
                 threading.Thread(target=self._safe_ingest, args=(path,), daemon=True, name="mochi-ingest").start()
             except RuntimeError:
@@ -826,7 +934,7 @@ class Agent:
     def _safe_ingest(path: str) -> None:
         try:
             docs.ingest(path)
-        except Exception:  # noqa: BLE001 - 入库失败不该影响这一轮对话
+        except Exception:
             pass
 
     @staticmethod

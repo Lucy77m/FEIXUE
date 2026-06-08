@@ -8,7 +8,7 @@ from collections import deque
 
 try:
     import uiautomation as _auto
-except Exception:  # noqa: BLE001
+except Exception:
     _auto = None
 
 _INTERACTIVE = {
@@ -30,22 +30,22 @@ def _window(title: str | None):
     if not title:
         try:
             return _auto.GetForegroundControl()
-        except Exception:  # noqa: BLE001
+        except Exception:
             return None
     try:
         for child in _auto.GetRootControl().GetChildren():
             try:
                 if title.lower() in (child.Name or "").lower():
                     return child
-            except Exception:  # noqa: BLE001
+            except Exception:
                 continue
-    except Exception:  # noqa: BLE001
+    except Exception:
         return None
     return None
 
 
 def _walk(root):
-    queue = deque([(root, 0)])  # deque.popleft() 是 O(1)；原来 list.pop(0) 出队是 O(n)，400 节点最坏 ~8 万次搬移
+    queue = deque([(root, 0)])
     seen = 0
     while queue and seen < _MAX_NODES:
         ctrl, depth = queue.popleft()
@@ -54,7 +54,7 @@ def _walk(root):
         if depth < _MAX_DEPTH:
             try:
                 queue.extend((child, depth + 1) for child in ctrl.GetChildren())
-            except Exception:  # noqa: BLE001
+            except Exception:
                 pass
 
 
@@ -64,14 +64,14 @@ def _sync_geom(win) -> None:
 
         rect = win.BoundingRectangle
         set_geom_for_point(rect.xcenter(), rect.ycenter())
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
 
 
 def _kind(ctrl) -> str:
     try:
         return ctrl.ControlTypeName.replace("Control", "")
-    except Exception:  # noqa: BLE001
+    except Exception:
         return ""
 
 
@@ -102,7 +102,7 @@ def interactive_elements(title: str | None = None) -> list[dict]:
                     continue
                 box = (rect.left, rect.top, rect.right, rect.bottom)
                 center = (rect.xcenter(), rect.ycenter())
-            except Exception:  # noqa: BLE001
+            except Exception:
                 continue
             out.append({
                 "kind": kind, "name": name, "rect_abs": box, "center_abs": center,
@@ -111,8 +111,6 @@ def interactive_elements(title: str | None = None) -> list[dict]:
             if len(out) >= _MAX_ELEMENTS:
                 break
     finally:
-        # 本函数返回的是绝对坐标；_sync_geom 对全局 _geom 的改动不应泄漏给后续 raw click/move
-        # （多屏下 getActiveWindow 与 GetForegroundControl 分歧时会用错显示器原点）。还原进入时的值。
         set_geom(saved_geom)
     return out
 
@@ -123,14 +121,14 @@ def invoke(ctrl) -> bool:
         if pattern is not None:
             pattern.Invoke()
             return True
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
     try:
         pattern = ctrl.GetTogglePattern()
         if pattern is not None:
             pattern.Toggle()
             return True
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
     return False
 
@@ -141,7 +139,7 @@ def set_value(ctrl, text: str) -> bool:
         if pattern is not None:
             pattern.SetValue(text)
             return True
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
     return False
 

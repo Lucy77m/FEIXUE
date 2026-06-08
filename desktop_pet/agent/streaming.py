@@ -29,14 +29,14 @@ class StreamMessage:
 def _safe_close(stream) -> None:
     try:
         stream.close()
-    except Exception:  # noqa: BLE001 - 取消时底层连接可能已断，关闭报错无所谓
+    except Exception:
         pass
 
 
 def _safe_think(on_think: Callable[[str], None], text: str) -> None:
     try:
         on_think(text)
-    except Exception:  # noqa: BLE001 - 回调（UI 信号）异常不该中断流式接收，丢掉这一片即可
+    except Exception:
         pass
 
 

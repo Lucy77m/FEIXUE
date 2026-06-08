@@ -35,7 +35,7 @@
 Mochi is two things at once:
 
 - 🐾 **A desktop pet with a life of its own** — drawn entirely in code (no sprite assets whatsoever). It blinks, follows your cursor with its eyes, daydreams and hums, goes fishing and sips coffee. Ignore it and it finds its own fun; leave and it dozes off; now and then it strikes up a conversation on its own.
-- 🧠 **A local Agent that can drive your whole computer** — plug in your own LLM (any OpenAI-compatible endpoint) and it can see the screen, click windows, move the mouse and keyboard, run commands, write code, read and write files, search the web, remember things, and look stuff up… turning "chatting with an AI" into "having the AI do it for you."
+- 🧠 **A local Agent that can drive your whole computer** — plug in your own LLM (any OpenAI-compatible endpoint) and it can see the screen, click windows, move the mouse and keyboard, run commands, write code, read and write files, search the web, remember things, and look stuff up; it can also **read its replies aloud, watch your screen on a timer, run tests after it edits code, fan out a team of sub-agents in parallel, remind you on a daily/weekly schedule, and even take orders remotely from your phone**… turning "chatting with an AI" into "having the AI do it for you."
 
 It carries persistent **emotions and rapport**, and slowly grows a **self-portrait (personality evolution)** as you spend time together — so it's "the same one," not a chat box that resets every time.
 
@@ -51,13 +51,15 @@ It carries persistent **emotions and rapport**, and slowly grows a **self-portra
 | --- | --- |
 | **Commands & Code** | PowerShell / cmd, a persistent Python environment (pip-install libraries, call APIs, drive automation) |
 | **Files & Codebase** | Read / write / precisely edit files, regex code search, find files by name |
+| **Engineering Discipline** | View the uncommitted `git diff`, auto-detect and run the test suite (pytest / npm) to verify a change — looks before it leaps, self-checks after editing, like a buddy who actually writes code |
 | **Internet** | Web search, fetch page text, HTTP requests, install packages |
-| **See Screen & Control** | Screenshots, OCR text recognition (RapidOCR), on-screen image matching, reading the accessibility tree to click controls precisely, mouse & keyboard |
+| **See Screen & Control** | Screenshots, OCR (RapidOCR), on-screen image matching, reading the accessibility tree to click controls precisely, mouse & keyboard; plus **watching your screen on the interval you set** (e.g. keep an eye on your game and warn you of danger/openings) |
+| **Read Aloud** | Speaks its replies: online Edge neural voices (multiple zh-CN voices like Xiaoxiao / Yunxi / Xiaobei) or a local offline voice, kept in sync sentence-by-sentence with the bubble; voice / speed / preview all adjustable |
 | **Memory** | Long-term memory (experience / preferences / environment) + episodic journal + knowledge base (document RAG), automatically reflecting and consolidating after every conversation |
 | **Skills** | Save proven approaches as reusable skills and call them directly next time (Voyager-style "stronger the more it's used") |
-| **Extensions** | MCP connectors, spawning sub-agents to handle subtasks, offloading long tasks to async background execution (chat while it runs) |
+| **Orchestration & Extensions** | MCP connectors, deterministic sub-agent orchestration (**fan out in parallel** / chain into a **pipeline**, with structured returns), long tasks offloaded to the background (listable, stoppable anytime) |
 | **Confirmation Guardrails** | Pops an "execute / don't execute" panel before irreversible / high-risk operations — it only proceeds once you click |
-| **Scheduling** | Timed reminders (delivered in its own voice), scheduled automated tasks |
+| **Scheduling & Remote** | Timed reminders / scheduled tasks, with **daily · weekly · every-X** recurrence; falls back to a **system tray notification** when hidden or behind a fullscreen game so nothing is missed; and a **file-inbox remote trigger** (sync it via cloud storage from your phone; off by default, opens no network port) |
 
 ### 🐾 Companionship With Warmth
 
@@ -70,12 +72,13 @@ It carries persistent **emotions and rapport**, and slowly grows a **self-portra
 | **One-Shot Actions** | Dancing, cheering, spinning… each with fitting effects (confetti / musical notes / afterimages) |
 | **Presence Awareness** | It dozes off when you leave and wakes when you return; drag it to a screen edge and it tucks itself away, peeking out from a little corner |
 | **Talking First** | Occasionally speaks up on its own when idle, yet **with restraint** — long cooldowns, a daily cap, and rapport gating mean it never spams |
-| **Structured Expression** | It draws comparisons / lists / code on a little blackboard beside it to explain things; it can also display images / GIFs |
+| **Structured Expression** | It draws comparisons / lists / code on a little blackboard beside it to explain things; multi-step tasks get a **persistent task-list panel** (independent of the blackboard, never wiped by reply content); it can also display images / GIFs |
+| **Screen Helper & Clipboard** | Optional: while idle it occasionally glances at your screen and offers help if you seem stuck; it recognizes when you copy an error / foreign text / code and helps explain / translate on the spot ("Clipboard Alchemy") |
 
 ### ⌨️ Handy Interaction
 
-- **Global Hotkeys**: `Ctrl + Alt + S` summons the input box anywhere; `Ctrl + Alt + A` asks it about selected text directly
-- **Control Panel**: configure the endpoint / model parameters / reply language / capability toggles / proactive frequency (Quiet · Normal · Chatty) / one-click "wipe memory, like a newborn"
+- **Global Hotkeys**: `Ctrl + Alt + S` summons the input box anywhere; `Ctrl + Alt + A` asks it about selected text directly; `Ctrl + Shift + Q` rewrites selected text in place ("quick rewrite," auto-replacing it)
+- **Control Panel**: configure the endpoint / model parameters / reply language / capability toggles / proactive frequency (Quiet · Normal · Chatty) / TTS voice & speed / remote-trigger toggle / one-click "wipe memory, like a newborn"
 
 ---
 
@@ -112,20 +115,24 @@ Once configured, Mochi makes its "entrance" from a corner of the screen. Click i
 desktop_pet/
 ├─ app.py            # Conductor: wires UI / agent / timers / tray / hotkeys, live-gates proactive messages
 ├─ agent/            # The brain
-│   ├─ loop.py       #   Agent loop: model↔tool feedback, streaming, trimming, reflection, personality evolution
-│   ├─ tools.py      #   Tool table (~60 tools) with dispatch, concurrency-safe locks
+│   ├─ loop.py       #   Agent loop: model↔tool feedback, streaming, trimming, reflection, personality evolution, sub-agent orchestration
+│   ├─ tools.py      #   Tool table (62 tools) with dispatch, concurrency-safe locks
+│   ├─ bgtasks.py    #   Background-task registry (listable / cooperatively stoppable)
 │   ├─ streaming.py  #   Folds the delta stream back into a single message, chunks chain-of-thought
-│   ├─ prompts.py    #   All prompts (persona seed, system, reflection) gathered in one place
+│   ├─ prompts.py    #   All prompts (persona seed, system, reflection, code-editing discipline) gathered in one place
 │   └─ progress.py   #   Thinking-pose scheduling and progress hints
-├─ pet/              # The body: window, code-drawn character, speech/input, blackboard, control panel, confirm panel,
-│                    #       hiding, entrance, behavior selector & action library, props & palette
+├─ pet/              # The body: window, code-drawn character, speech/input, blackboard, task-list panel (todo_board),
+│                    #       control panel, confirm panel, hiding, entrance, behavior selector & action library, props & palette
 ├─ emotion/          # Emotion state machine (VA + rapport) and emotion-tag tables
 ├─ persona.py        # Self-portrait evolution layer (persona.json), injected into conversation context
-├─ memory/           # Long-term memory (SQLite) + vector embeddings
-├─ executor/         # Commands / Python / files / network / vision (OCR · image matching) / system memory / safety guardrails
+├─ voice.py          # Read-aloud (TTS): Edge online neural voices + local SAPI fallback, synced sentence-by-sentence with the bubble
+├─ memory/           # Long-term memory (SQLite) + vector embeddings (numpy-vectorized recall)
+├─ executor/         # Commands / Python / files / network / vision (OCR · matching) / system memory / dev tools (diff · tests) / safety guardrails
 ├─ hands/            # Mouse / keyboard / window control
 ├─ eyes/             # Screenshots + accessibility tree (UIA) + on-screen image matching
 ├─ docs.py · reminders.py · proactive.py · journal.py · presence.py
+├─ watcher.py        # Scheduled screen-watching (session-level, e.g. watch your game)
+├─ remote.py         # Remote trigger (file inbox, off by default)
 └─ hotkeys.py · skills.py · mcp_hub.py · settings.py · audit.py · i18n.py
 ```
 
@@ -171,7 +178,8 @@ The authoritative busy check uses the worker's `is_running` (a single bool, safe
 - **Streaming + Chain-of-Thought**: `streaming.py` folds the delta stream back into a single message, feeding `reasoning_content` / `content` chunk by chunk to the thinking bubble; each chunk checks for cancellation, so the network stream can be stopped mid-sentence.
 - **Interruption**: clicking the pet sets a flag + kills subprocesses (so even a stuck long-running command unlocks instantly); the turn is rolled back via history markers, leaving no trace; **an interruption doesn't count as a failure** and plays no dejected animation.
 - **Screenshots & multimodal cost**: only the latest screenshot is kept in history, older ones swapped for placeholders; JPEGs are scaled down to a ≤1600px longest edge, but coordinates always report the real resolution.
-- **Long background tasks**: heavy work is offloaded to `start_background_task` to run asynchronously in the background (semaphore = 3), while the main thread keeps chatting with you and reports back when done — "chat while it runs."
+- **Long background tasks**: heavy work is offloaded to `start_background_task` to run asynchronously in the background (semaphore = 3), while the main thread keeps chatting with you and reports back when done — "chat while it runs"; running ones can be viewed with `list_background_tasks` and cooperatively stopped with `stop_background_task`.
+- **Deterministic sub-agent orchestration**: `spawn_workflow` fans out several subtasks **in parallel** (≤4 concurrent) or chains them into a **pipeline** (each stage's output fed into the next) in a single call, and can require sub-agents to return in a given JSON shape — turning the "parallel only when the model happens to spawn several at once" accident into a reliable primitive; sub-agents / background agents are stripped of the orchestration and screen-watch tools by depth, guarding against runaway recursion and overreach.
 - **Reflection & personality evolution**: after a substantive turn ends, a reflection call kicks off (semaphore = 1, skipped if busy), distilling experience / preferences / environment facts / episodic journal, and **slowly rewriting the self-portrait** (see 4.6); turns that are pure short small talk or used only decorative tools skip reflection.
 
 ### 4.5 Emotion State Machine
@@ -203,9 +211,13 @@ A continuous valence / arousal mood + slowly accumulating rapport, persisted to 
 - **Presence awareness**: it uses the Win32 global last-input time to tell whether you're around, dozing off after a long stretch of no input (a shorter threshold late at night) and waking the moment you move.
 - **Proactive messages**: `proactive.py` manages cooldown / daily-cap tiers (Quiet / Normal / Chatty), `app.py` polls every 60s and only speaks once all gates pass (not busy / present / rapport met / cooldown elapsed); welcome-back greetings have a minimum interval and never interrupt mid-chat.
 - **Memory / knowledge base / episodic journal**: three independently persisted stores — memory is "what it learned about you," the knowledge base is "external documents you fed it (RAG)," the episodic journal is "what it did recently," strictly separated.
-- **Reminders / scheduling**: `say` (speaks in its own voice at the appointed time) / `do` (actually does the work in the background at the appointed time and reports back); both go through a persisted scheduler, never letting the model sleep to wait out time itself.
+- **Reminders / scheduling**: `say` (speaks in its own voice at the appointed time) / `do` (actually does the work in the background and reports back), with **daily / weekly / every-X-minute** recurrence (persistent across restarts; missed-while-off only delivers the most recent occurrence, no flooding); `list_reminders` / `cancel_reminder` to manage them; when Mochi is hidden or behind a fullscreen game, delivery falls back to a **system tray notification**. All goes through a persisted scheduler, never letting the model sleep to wait out time itself.
+- **Read-aloud (TTS)**: `voice.py` speaks replies — online Edge neural voices (multiple zh-CN voices) or a local SAPI offline voice; with TTS on, each sentence "locks" the bubble in sync with the audio, emoji and blackboard content aren't read, and on exit it stops speaking and tears down COM/audio cleanly (so a hard exit doesn't pop an "application error").
+- **Scheduled screen-watching**: `watcher.py` — on the interval you set, it screenshots the active window, analyzes it against the focus you gave (e.g. your game situation) and reports; session-level (not persisted, ends on restart), and on result it re-checks state so it won't intrude after power-off / stop / mid-conversation, and won't burn a cycle on a transient capture failure.
+- **Engineering discipline**: `executor/devtools.py` provides `review_diff` (view the uncommitted diff, scopable to a file/subdir) / `run_tests` (auto-detect pytest · npm, own 5-min timeout, kills the whole process tree on timeout); the system prompt has a "when working in a code repo" section — look before you leap, small surgical edits, **run tests / self-check the diff after editing**, branch first on a default branch, confirm before irreversible git.
+- **Remote trigger**: `remote.py` — when enabled it polls `data/inbox/*.json`, running `{"task":...}` in the background or having it `{"say":...}` a line, then archiving into `inbox/done/`. **Files only, opens no network port**; off by default; to avoid reading a half-synced cloud file it waits until the mtime has been stable for a few seconds, and polls on a background thread so the UI never freezes.
 - **Hiding / entrance**: dragged to a screen edge it shrinks into a corner and occasionally peeks out; every launch picks a random entrance animation and never repeats the previous one.
-- **MCP / hotkeys / skills / audit / i18n**: MCP connectors blend into the tool table as `mcp__{server}__{tool}`; global hotkeys run a Win32 message loop on a dedicated thread; skills save working code as reusable items injected into the prompt; all tool calls are written to an audit log; the control panel UI supports Chinese / English / Japanese.
+- **MCP / hotkeys / skills / audit / i18n**: MCP connectors blend into the tool table as `mcp__{server}__{tool}`; global hotkeys run a Win32 message loop on a dedicated thread (summon / ask selection / quick rewrite); skills save working code as reusable items injected into the prompt; all tool calls are written to an audit log; the control panel UI supports Chinese / English / Japanese.
 
 > 📐 Want to dig into the internals (full state machines / gates / real parameters) → **[Design Doc DESIGN.md](DESIGN.md)**
 
@@ -268,7 +280,7 @@ There are no automated UI tests; verification relies on a **manual walkthrough c
 2. The **control panel** (Endpoint / Chat / Permissions / About — four pages);
 3. The **audit log** `data/logs/audit-YYYYMMDD.jsonl` (use `Get-Content` to view the latest lines).
 
-Walkthrough coverage: basic conversation and expressions, command actions (perform / skits), idle behavior, interruption, proactive messages, memory and episodic journal, global hotkeys, clipboard and windows, control panel, reminders and scheduling, thinking animation, blackboard and images, reflection gating.
+Walkthrough coverage: basic conversation and expressions, command actions (perform / skits), idle behavior, interruption, proactive messages, memory and episodic journal, global hotkeys (incl. quick rewrite), clipboard and windows, control panel, reminders and scheduling (incl. recurrence / system notifications), TTS voice & sentence-sync, scheduled screen-watching, task-list panel, sub-agent orchestration, remote trigger, thinking animation, blackboard and images, reflection gating.
 
 **Common Troubleshooting**:
 
@@ -289,7 +301,8 @@ Mochi **can execute arbitrary commands and code on your machine, control the mou
 - It essentially has **the same computer-operation privileges as you do**.
 - The control panel lets you **turn off capabilities by group** (Internet / Control / Command execution), downgrading privileges for scenarios you're unsure about.
 - **Irreversible / high-risk operations go through the `confirm` panel**, popping "execute / don't execute" and waiting for your nod before acting.
-- The **safety guardrail** (`executor/safety.py`) only hard-blocks an **extremely small, high-precision set of catastrophic, irreversible** operations (formatting disks, `diskpart` / `remove-partition`, `reg delete HKLM /f`, recursive force-deletes against bare drive roots / system directories, etc.); it deliberately doesn't sandbox and doesn't block ordinary file deletion.
+- The **safety guardrail** (`executor/safety.py`) only hard-blocks an **extremely small, high-precision set of catastrophic, irreversible** operations (formatting disks, `diskpart` / `remove-partition`, `reg delete HKLM /f`, recursive force-deletes against bare drive roots / system directories, etc.); it deliberately doesn't sandbox and doesn't block ordinary file deletion — it's a "full-access" buddy, not an assistant locked in a cage.
+- **Remote trigger is off by default**: the file inbox (`remote.py`) is disabled by default and **only reads local files — it listens on no network port**; once enabled, a `task` dropped into `inbox/` runs in the background with full privileges, so only turn it on for devices / clouds you trust.
 - Configuration such as the API Key, and memory / knowledge base / logs are all **stored locally**; the "wipe memory" button erases it all in one click (including the self-portrait, returning to the factory base color).
 
 ---
@@ -300,16 +313,17 @@ Everything lives in `data/` (in-project during development, moved to `%APPDATA%\
 
 | File | Content |
 | --- | --- |
-| `settings.json` | Endpoint / model / language / capability toggles / proactive frequency |
+| `settings.json` | Endpoint / model / language / capability toggles / proactive frequency / TTS voice & speed / remote-trigger toggle |
 | `emotion.json` | valence / arousal / rapport + timestamp |
 | `persona.json` | Self-portrait (personality evolution layer) |
 | `proactive.json` | Cooldown / count state for proactive messages |
-| `reminders.json` | Pending reminders / scheduled tasks |
+| `reminders.json` | Pending reminders / scheduled tasks (incl. recurrence rule) |
 | `journal.json` | Episodic journal (the most recent entries) |
 | `memory/memory.db` | Long-term memory (SQLite) |
 | `docs.db` | Knowledge-base chunks + embeddings |
 | `skills/` | Self-built skill code + registry |
-| `logs/audit-*.jsonl` | Audit log (by day) |
+| `inbox/` | Remote-trigger inbox (off by default; archived into `inbox/done/` after processing) |
+| `logs/audit-*.jsonl` · `logs/crash.log` | Audit log (by day) + crash stack dump |
 | `mcp.json` | MCP connector configuration (optional) |
 
 ---

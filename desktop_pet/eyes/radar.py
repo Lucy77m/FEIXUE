@@ -11,28 +11,27 @@ from dataclasses import dataclass
 
 from desktop_pet import presence
 
-# 标题里出现这些 = 强信号（多半真有问题）
 _ERR_TITLE = re.compile(
     r"error|exception|failed|fail\b|not responding|crash|warning|"
     r"错误|失败|无法|未响应|异常|崩溃|警告",
     re.IGNORECASE,
 )
-_STUCK_DWELL_S = 240.0  # 同一窗口盯了这么久还没换 = 弱信号(可能卡住)，靠后续 OCR 诊断兜底过滤
+_STUCK_DWELL_S = 240.0
 _NORM = re.compile(r"\s+")
 
 
 @dataclass(frozen=True)
 class RadarSignal:
-    title: str        # 当前前台窗口标题原文（给诊断当线索）
-    dwell_s: float    # 在当前窗口连续停留秒数
-    title_hit: bool   # 标题是否命中报错词
-    worth_peek: bool  # 是否值得看一眼（强信号或久驻）
+    title: str
+    dwell_s: float
+    title_hit: bool
+    worth_peek: bool
 
 
 class Radar:
     def __init__(self) -> None:
         self._title = ""
-        self._since = 0.0  # monotonic：当前窗口起始时刻
+        self._since = 0.0
 
     def observe(self) -> RadarSignal:
         """UI 线程每个 presence tick 调一次：更新久驻计时并给出当前信号。"""

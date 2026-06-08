@@ -29,7 +29,7 @@ def prewarm() -> None:
     def _build() -> None:
         try:
             _get_engine()
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
 
     threading.Thread(target=_build, daemon=True, name="ocr-prewarm").start()
@@ -88,7 +88,7 @@ def ocr_boxes(bgr, ox: int, oy: int) -> list[dict]:
         return []
     try:
         result, _ = engine(bgr)
-    except Exception:  # noqa: BLE001
+    except Exception:
         return []
     boxes: list[dict] = []
     for box, text, score in result or []:
@@ -123,21 +123,19 @@ def _match_template_ncc(image, template) -> tuple[float, int, int]:
     n = th * tw
     t0 = template - template.mean()
     t_ss = float(np.sum(t0 * t0))
-    if t_ss <= 1e-9:  # 模板是纯色，没有特征可匹配
+    if t_ss <= 1e-9:
         return 0.0, 0, 0
 
     fh, fw = ih + th - 1, iw + tw - 1
     ones = np.ones((th, tw))
     f_img = np.fft.rfft2(image, s=(fh, fw))
     f_img2 = np.fft.rfft2(image * image, s=(fh, fw))
-    # 互相关 = 与「翻转核」做卷积；FFT 卷积 = irfft(rfft(a)·rfft(b))
     f_t0 = np.fft.rfft2(t0[::-1, ::-1], s=(fh, fw))
-    f_ones = np.fft.rfft2(ones, s=(fh, fw))  # ones 关于中心对称，无需翻转(去掉原多余的 [::-1,::-1])
+    f_ones = np.fft.rfft2(ones, s=(fh, fw))
     num_full = np.fft.irfft2(f_img * f_t0, s=(fh, fw))
     sum_full = np.fft.irfft2(f_img * f_ones, s=(fh, fw))
     sqsum_full = np.fft.irfft2(f_img2 * f_ones, s=(fh, fw))
 
-    # full 卷积里 valid 区域起点在 (th-1, tw-1)，长度 = ih-th+1 / iw-tw+1
     ys, xs = slice(th - 1, ih), slice(tw - 1, iw)
     num = num_full[ys, xs]
     local_sum = sum_full[ys, xs]
@@ -168,7 +166,7 @@ def find_on_screen(template_path: str, confidence: float = 0.8) -> str:
 
     try:
         template = _to_gray(Image.open(template_path))
-    except Exception:  # noqa: BLE001
+    except Exception:
         return f"[couldn't read the template image (unsupported format?): {template_path}]"
     screen = _to_gray(grab_active())
     th, tw = template.shape

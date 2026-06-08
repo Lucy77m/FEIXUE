@@ -78,19 +78,6 @@ def screen_elements() -> tuple[bytes, str]:
             "ctrl": None, "invokable": False,
         })
         idx += 1
-    # 视觉检测器（第3源）暂时停用——先测纯 UIA+OCR；要启用：取消下面注释 + 重新 import detect + 放模型到 data/models/ui_detect.onnx
-    # for box in detect.detect(img):
-    #     l, t, r, b = box[0] + ox, box[1] + oy, box[2] + ox, box[3] + oy
-    #     center = ((l + r) // 2, (t + b) // 2)
-    #     if any(_inside(center, rect) for rect in taken):
-    #         continue
-    #     taken.append((l, t, r, b))
-    #     elements.append({
-    #         "idx": idx, "source": "icon", "kind": "icon", "name": "",
-    #         "rect_abs": (l, t, r, b), "center_abs": center,
-    #         "ctrl": None, "invokable": False,
-    #     })
-    #     idx += 1
 
     _LAST[:] = elements
     annotated = _annotate(img, elements, ox, oy)
@@ -124,7 +111,7 @@ def act_element(index: int, action: str = "click", text: str = "") -> str:
             return f'typed into [{index}] 「{name}」 via accessibility (replaced old value, no cursor)'
         if not mouse.click_screen(ax, ay):
             return oob
-        keyboard.press_keys("ctrl+a")  # 选中残留旧内容，使下一步输入直接替换
+        keyboard.press_keys("ctrl+a")
         keyboard.type_text(text)
         return f'clicked [{index}] 「{name}」, cleared old text, and typed'
 

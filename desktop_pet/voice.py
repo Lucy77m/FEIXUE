@@ -1,29 +1,71 @@
 # author: bdth
 # email: 2074055628@qq.com
-# 语音朗读(TTS):用 Windows SAPI(经 pywin32，零新增依赖)在后台 COM 线程里念出来。
-# 默认关闭；说话/提醒/主动消息时若开启则出声。失败一律静默降级。
+# 语音朗读(TTS)：可切换后端——
+#   · Edge TTS：微软在线神经语音(edge-tts)，30+ 自然中文音色，合成 mp3 后用 winmm(MCI) 播放；需联网。
+#   · 系统 SAPI：本机离线嗓子(经 pywin32)，零依赖兜底。
+# 选了 Edge 音色就走 Edge，合成/播放/联网任一失败这句自动回退 SAPI，保证有声。默认关闭；失败一律静默降级。
 
 from __future__ import annotations
 
+import os
 import queue
 import re
+import tempfile
 import threading
 
-_queue: "queue.Queue[str]" = queue.Queue()
+_queue: "queue.Queue[tuple]" = queue.Queue()
 _enabled = False
 _started = False
 _lock = threading.Lock()
+_stop = threading.Event()
+_shutdown = threading.Event()
+_worker_thread: "threading.Thread | None" = None
 
-_TAG = re.compile(r"^\s*\[(\w+)\]\s*")          # 去掉开头的 [emotion] 标签
-_MD = re.compile(r"[*#`>~_|]+")                 # 去掉常见 markdown 符号
-_LINK = re.compile(r"!?\[([^\]]*)\]\([^)]*\)")  # [文字](链接) → 文字
+_voice = ""
+_rate = 0
+
+SYSTEM_VOICE = ""
+EDGE_VOICES: list[tuple[str, str]] = [
+    ("zh-CN-XiaoxiaoNeural", "晓晓 Xiaoxiao · 温柔"),
+    ("zh-CN-XiaoyiNeural", "晓伊 Xiaoyi · 活泼"),
+    ("zh-CN-YunxiNeural", "云希 Yunxi · 少年"),
+    ("zh-CN-YunyangNeural", "云扬 Yunyang · 播音"),
+    ("zh-CN-YunjianNeural", "云健 Yunjian · 浑厚"),
+    ("zh-CN-YunxiaNeural", "云夏 Yunxia · 童声"),
+    ("zh-CN-liaoning-XiaobeiNeural", "小北 Xiaobei · 东北"),
+    ("zh-CN-shaanxi-XiaoniNeural", "晓妮 Xiaoni · 陕西"),
+]
+
+_TAG = re.compile(r"^\s*\[(\w+)\]\s*")
+_MD = re.compile(r"[*#`>~_|]+")
+_LINK = re.compile(r"!?\[([^\]]*)\]\([^)]*\)")
+_EMOJI = re.compile(
+    "["
+    "\U0001F000-\U0001FAFF"
+    "\U00002600-\U000026FF"
+    "\U00002700-\U000027BF"
+    "\U00002B00-\U00002BFF"
+    "\U00002190-\U000021FF"
+    "\U00002300-\U000023FF"
+    "\U0000FE00-\U0000FE0F"
+    "\U0000200D\U000020E3"
+    "\U00002122\U00002139\U0000203C\U00002049"
+    "\U00003030\U0000303D\U00003297\U00003299"
+    "]+",
+    flags=re.UNICODE,
+)
 
 
 def _clean(text: str) -> str:
     text = _LINK.sub(r"\1", text or "")
     text = _TAG.sub("", text)
     text = _MD.sub("", text)
+    text = _EMOJI.sub("", text)
     return " ".join(text.split())[:600]
+
+
+def is_enabled() -> bool:
+    return _enabled
 
 
 def set_enabled(enabled: bool) -> None:
@@ -35,42 +77,210 @@ def set_enabled(enabled: bool) -> None:
         flush()
 
 
+def set_voice(voice_id: str) -> None:
+    global _voice
+    _voice = voice_id or ""
+
+
+def set_rate(percent) -> None:
+    global _rate
+    try:
+        _rate = max(-50, min(50, int(percent)))
+    except (TypeError, ValueError):
+        _rate = 0
+
+
+def current_voice() -> str:
+    return _voice
+
+
+_edge_ok: "bool | None" = None
+
+
+def edge_available() -> bool:
+    """edge-tts 是否可用(装了包)。结果缓存，供 UI 决定是否展示 Edge 音色。"""
+    global _edge_ok
+    if _edge_ok is None:
+        try:
+            import edge_tts
+            _edge_ok = True
+        except Exception:
+            _edge_ok = False
+    return _edge_ok
+
+
 def _ensure() -> None:
-    global _started
+    global _started, _worker_thread
     with _lock:
         if _started:
             return
         _started = True
-    threading.Thread(target=_worker, daemon=True, name="mochi-tts").start()
+    _worker_thread = threading.Thread(target=_worker, daemon=True, name="mochi-tts")
+    _worker_thread.start()
 
 
 def _select_voice(sp) -> None:
-    # 尽量挑一个中文嗓子(系统装了的话)；挑不到就用默认嗓子
     try:
         for v in sp.GetVoices():
             desc = v.GetDescription() or ""
             if any(k in desc for k in ("Chinese", "中文", "Huihui", "Yaoyao", "Kangkang", "Xiaoxiao")):
                 sp.Voice = v
                 return
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
 
 
-def _worker() -> None:
+def _edge_say(text: str, voice_id: str, rate: int) -> None:
+    """Edge TTS：合成 mp3 → MCI 阻塞播放。任一步失败抛异常，由调用方回退 SAPI。"""
+    import asyncio
+
+    import edge_tts
+
+    path = os.path.join(tempfile.gettempdir(), "mochi_tts.mp3")
+    rate_str = f"+{rate}%" if rate >= 0 else f"{rate}%"
+
+    async def _go() -> None:
+        comm = edge_tts.Communicate(text, voice_id, rate=rate_str)
+        await comm.save(path)
+
+    _mci_close()
+    asyncio.run(_go())
+    _play_file(path)
+
+
+def _mci(cmd: str) -> int:
+    import ctypes
+    return ctypes.windll.winmm.mciSendStringW(cmd, None, 0, 0)
+
+
+def _mci_close() -> None:
     try:
-        import pythoncom
-        import win32com.client
-        pythoncom.CoInitialize()
-        sp = win32com.client.Dispatch("SAPI.SpVoice")
-        _select_voice(sp)
-    except Exception:  # noqa: BLE001 — SAPI 不可用就静默退出，等于没开声音
+        _mci("close mochitts")
+    except Exception:
+        pass
+
+
+def _mci_status(what: str) -> str:
+    import ctypes
+    buf = ctypes.create_unicode_buffer(128)
+    ctypes.windll.winmm.mciSendStringW(f"status mochitts {what}", buf, 128, 0)
+    return buf.value
+
+
+def _play_file(path: str) -> None:
+    """用 winmm(MCI) 播放音频文件——契合 worker 串行模型，零新增播放依赖。
+    异步 play + 轮询播放状态，好让 flush() 能中途打断(_stop)，而不是非等这句播完。"""
+    import time as _t
+
+    if _mci(f'open "{path}" type mpegvideo alias mochitts') != 0:
+        if _mci(f'open "{path}" alias mochitts') != 0:
+            raise RuntimeError("MCI open failed")
+    try:
+        if _mci("play mochitts") != 0:
+            raise RuntimeError("MCI play failed")
+        while _mci_status("mode") == "playing":
+            if _stop.is_set():
+                _mci("stop mochitts")
+                break
+            _t.sleep(0.05)
+    finally:
+        _mci_close()
+
+
+def _apply_sapi_rate(sp, percent: int) -> None:
+    try:
+        sp.Rate = max(-10, min(10, round(percent / 5)))
+    except Exception:
+        pass
+
+
+_SVSF_ASYNC = 1
+_SVSF_PURGE = 3
+
+
+def _sapi_speak(sp, text: str) -> None:
+    """异步念 + 轮询，好让 flush() 能中途打断(_stop)，而不是非等整句念完。
+    WaitUntilDone(ms)：念完返回 True、超时返回 False。老环境若无此方法，退回阻塞 Speak。"""
+    try:
+        sp.Speak(text, _SVSF_ASYNC)
+    except Exception:
         return
-    while True:
-        item = _queue.get()
+    try:
+        while not sp.WaitUntilDone(80):
+            if _stop.is_set():
+                try:
+                    sp.Speak("", _SVSF_PURGE)
+                except Exception:
+                    pass
+                return
+    except Exception:
         try:
-            sp.Speak(item)  # 阻塞到这句念完；flush() 只清队列、不强行打断当前句(避免跨线程 COM)
-        except Exception:  # noqa: BLE001
+            sp.WaitUntilDone(-1)
+        except Exception:
             pass
+
+
+def _worker() -> None:
+    sp = None
+    sapi_ready = False
+
+    def sapi():
+        nonlocal sp, sapi_ready
+        if not sapi_ready:
+            sapi_ready = True
+            try:
+                import pythoncom
+                import win32com.client
+                pythoncom.CoInitialize()
+                sp = win32com.client.Dispatch("SAPI.SpVoice")
+                _select_voice(sp)
+            except Exception:
+                sp = None
+        return sp
+
+    while True:
+        text, on_done, voice, rate = _queue.get()
+        if _shutdown.is_set():
+            try:
+                if sp is not None:
+                    sp.Speak("", _SVSF_PURGE)
+            except Exception:
+                pass
+            _mci_close()
+            if sapi_ready:
+                try:
+                    import pythoncom
+                    pythoncom.CoUninitialize()
+                except Exception:
+                    pass
+            return
+        _stop.clear()
+        if text and not _stop.is_set():
+            played = False
+            if voice and edge_available():
+                try:
+                    _edge_say(text, voice, rate)
+                    played = True
+                except Exception:
+                    played = False
+            if not played:
+                cur = sapi()
+                if cur is not None:
+                    try:
+                        _apply_sapi_rate(cur, rate)
+                        _sapi_speak(cur, text)
+                    except Exception:
+                        pass
+        if on_done is not None:
+            try:
+                on_done()
+            except Exception:
+                pass
+
+
+def _enqueue(cleaned: str, on_done, voice: str, rate: int) -> None:
+    _ensure()
+    _queue.put((cleaned, on_done, voice, rate))
 
 
 def speak(text: str) -> None:
@@ -78,14 +288,72 @@ def speak(text: str) -> None:
         return
     cleaned = _clean(text)
     if cleaned:
-        _ensure()
-        _queue.put(cleaned)
+        _enqueue(cleaned, None, _voice, _rate)
+
+
+def speak_one(text: str, on_done=None) -> None:
+    """念单独一句，念完后回调 on_done()(在 TTS 线程内)——用于让气泡与语音逐句对齐。
+    未开启 / 清洗后为空 时立即回调，保证调用方(气泡)不会卡住等不到回调。"""
+    cleaned = _clean(text) if _enabled else ""
+    if not _enabled or not cleaned:
+        if on_done is not None:
+            try:
+                on_done()
+            except Exception:
+                pass
+        return
+    _enqueue(cleaned, on_done, _voice, _rate)
+
+
+def preview(text: str, voice: str, rate, on_done=None) -> None:
+    """试听：用指定音色/语速念一句，无视开关、也不改动当前设置——给面板选音色用。"""
+    try:
+        rate = max(-50, min(50, int(rate)))
+    except (TypeError, ValueError):
+        rate = 0
+    cleaned = _clean(text)
+    if not cleaned:
+        if on_done is not None:
+            on_done()
+        return
+    _enqueue(cleaned, on_done, voice or "", rate)
 
 
 def flush() -> None:
-    """清掉待播队列(正在念的那句会自然念完)——打断/下线/退出时调。"""
+    """打断/下线/退出时调：置打断信号(停掉正在念的那句) + 清空待播队列。
+    worker 会在念下一句前自动复位该信号，故置位后无需手动清。
+    关键：被丢弃的排队项也要补调它的 on_done——否则逐句锁(paced)气泡正等这句的回调推进时会永久卡死，
+    连带 is_speaking 恒真、阻塞后台/看屏/主动消息播报。"""
+    _stop.set()
+    drained = []
+    try:
+        while True:
+            drained.append(_queue.get_nowait())
+    except queue.Empty:
+        pass
+    for item in drained:
+        on_done = item[1] if isinstance(item, tuple) and len(item) >= 2 else None
+        if on_done is not None:
+            try:
+                on_done()
+            except Exception:
+                pass
+
+
+def shutdown() -> None:
+    """退出前调：停掉正在念的(SAPI purge / MCI stop)、清队列、让 worker 在自己的线程里 CoUninitialize 后退出。
+    显著降低 os._exit 强退时撕裂 SAPI/音频设备导致的「应用程序错误」弹窗。最多等 worker 1.5s。"""
+    _shutdown.set()
+    _stop.set()
     try:
         while True:
             _queue.get_nowait()
     except queue.Empty:
         pass
+    try:
+        _queue.put_nowait((None, None, "", 0))
+    except Exception:
+        pass
+    t = _worker_thread
+    if t is not None and t.is_alive():
+        t.join(timeout=1.5)

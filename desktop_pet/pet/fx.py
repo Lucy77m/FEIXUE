@@ -36,7 +36,7 @@ def raise_topmost(widget: QWidget) -> None:
 
         hwnd = int(widget.winId())
         ctypes.windll.user32.SetWindowPos(hwnd, _HWND_TOPMOST, 0, 0, 0, 0, _SWP_FLAGS)
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
 
 

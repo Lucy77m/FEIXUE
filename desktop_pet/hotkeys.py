@@ -34,10 +34,10 @@ def parse_combo(combo: str) -> tuple[int, int] | None:
         elif len(p) == 1 and ("a" <= p <= "z" or "0" <= p <= "9"):
             vk = ord(p.upper())
         elif p.startswith("f") and p[1:].isdigit() and 1 <= int(p[1:]) <= 24:
-            vk = 0x70 + int(p[1:]) - 1  # F1..F24
+            vk = 0x70 + int(p[1:]) - 1
         else:
             return None
-    if vk is None or mods == 0:  # 必须「修饰键 + 主键」，纯单键不收(太容易误触/抢不到)
+    if vk is None or mods == 0:
         return None
     return (mods, vk)
 
@@ -46,13 +46,13 @@ class GlobalHotkeys(QObject):
     summon = Signal()
     ask_selection = Signal()
     quick_rewrite = Signal()
-    status = Signal(object)  # {"summon": bool, "ask": bool, "quick": bool}：是否注册成功(False=被占/非法)
+    status = Signal(object)
 
     _ACTIONS = ("summon", "ask", "quick")
 
     def __init__(self, keys: dict) -> None:
         super().__init__()
-        self._keys = dict(keys)  # {"summon": "ctrl+alt+s", "ask": ..., "quick": ...}
+        self._keys = dict(keys)
         self._thread: threading.Thread | None = None
         self._tid = 0
         self._status: dict[str, bool] = {}
@@ -121,7 +121,7 @@ class GlobalHotkeys(QObject):
                     action = id_map.get(msg.wParam)
                     if action:
                         sigs[action]()
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
         finally:
             if user32 is not None:

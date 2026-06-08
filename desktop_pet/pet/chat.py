@@ -57,10 +57,10 @@ from desktop_pet import i18n
 from desktop_pet.pet.fx import make_floating as _make_floating
 
 _IMAGE_EXT = frozenset({".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".jfif"})
-_ATTACH_MAX = 8           # 一条消息最多带几个附件，防手滑塞爆
-_IMG_MAX_SIDE = 1568      # 粘贴/拖入的大图先缩到这个边长再编码，控住请求体
-_DATAURL_MAX = 2_000_000  # 单图 base64 字符上限；PNG 超了就转 JPEG 递降质量，免得请求体爆掉
-_FILE_NAME_MAX = 22       # 附件芯片上文件名超长就省略
+_ATTACH_MAX = 8
+_IMG_MAX_SIDE = 1568
+_DATAURL_MAX = 2_000_000
+_FILE_NAME_MAX = 22
 
 _FONT_PX = 14
 _MAX_INNER = 260
@@ -80,7 +80,7 @@ _BUBBLE_MAXW = 280
 _BUBBLE_TEXT_FLAGS = int(Qt.TextFlag.TextWordWrap) | int(Qt.AlignmentFlag.AlignCenter)
 _BUBBLE_DUR = 1.5
 _BUBBLE_RISE = 30
-_BUBBLE_STEP_HOLD = 1.3  # 进度标签在最后一次更新后停留多久才淡出
+_BUBBLE_STEP_HOLD = 1.3
 _BUBBLE_FPS_MS = 1000 // 60
 _BUBBLE_TRAIL_H = 18
 _BUBBLE_MARGIN = 4
@@ -114,9 +114,8 @@ _GLOW = QColor(20, 20, 26, 110)
 _OUTLINE_W = 3.5
 _GLOW_W = 6.0
 
-_INPUT_W = 372  # 输入卡整体宽度（比旧单行框宽不少，放得下多行 + 工具条）
+_INPUT_W = 372
 
-# 多行强力输入框的整卡样式：圆角卡片 + 透明文本域 + 幽灵小按钮 + 强调发送键
 _PANEL_STYLE = """
 #card {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
@@ -167,7 +166,6 @@ QPushButton#chipdel {
 QPushButton#chipdel:hover { color: #e8638c; }
 """
 
-# —— 内联 SVG 矢量图标（替代丑 emoji），QSvgRenderer 渲染成带 hover 变色的 QIcon ——
 _SVG_IMAGE = (
     '<rect x="3" y="3" width="18" height="18" rx="3"/>'
     '<circle cx="8.5" cy="9" r="1.5"/>'
@@ -190,7 +188,7 @@ def _svg_pixmap(body: str, px: int, color: str) -> QPixmap:
         f'stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
         f"{body}</svg>"
     )
-    ratio = 2  # 2x 超采样，小图标也锐利
+    ratio = 2
     pm = QPixmap(px * ratio, px * ratio)
     pm.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pm)
@@ -203,7 +201,7 @@ def _svg_pixmap(body: str, px: int, color: str) -> QPixmap:
 
 def _svg_icon(body: str, px: int, color: str, active: str | None = None) -> QIcon:
     icon = QIcon(_svg_pixmap(body, px, color))
-    if active is not None:  # hover 时 QPushButton 走 Active 模式 → 图标自动换色
+    if active is not None:
         icon.addPixmap(_svg_pixmap(body, px, active), QIcon.Mode.Active)
     return icon
 
@@ -227,6 +225,7 @@ class SpeechText(QWidget):
 
     talking = Signal(bool)
     finished = Signal()
+    chunk_shown = Signal(str)
 
     def __init__(self) -> None:
         super().__init__()
@@ -243,6 +242,9 @@ class SpeechText(QWidget):
         self._lines: list[str] = []
         self._queue: list[str] = []
         self._phase = ""
+        self._paced = False
+        self._awaiting_advance = False
+        self._advance_pending = False
 
         self._type_timer = QTimer(self)
         self._type_timer.timeout.connect(self._reveal)
@@ -254,12 +256,11 @@ class SpeechText(QWidget):
         self._anchor = pet
         self._reposition()
 
-    def speak(self, chunks: list[str]) -> None:
+    def speak(self, chunks: list[str], paced: bool = False) -> None:
         self._stop()
+        self._paced = paced
         self._queue = [c for c in (_clean(s) for s in chunks) if c]
         if not self._queue:
-            # 去标点后全空，但原文可能是"……""。。。"这类纯标点的情绪回应——
-            # 别整条吞掉，退一步保留标点至少让它说出来。
             self._queue = [c for c in (_clean_keep_punct(s) for s in chunks) if c]
         if not self._queue:
             self.hide()
@@ -269,7 +270,8 @@ class SpeechText(QWidget):
 
     @property
     def is_speaking(self) -> bool:
-        return bool(self._queue) or self._type_timer.isActive() or self._phase_timer.isActive()
+        return (bool(self._queue) or self._type_timer.isActive()
+                or self._phase_timer.isActive() or self._awaiting_advance)
 
     def interrupt(self) -> None:
         self._stop()
@@ -280,7 +282,33 @@ class SpeechText(QWidget):
         self._type_timer.stop()
         self._phase_timer.stop()
         self._phase = ""
+        self._paced = False
+        self._awaiting_advance = False
+        self._advance_pending = False
         self.talking.emit(False)
+
+    def advance(self) -> None:
+        """语音念完当前这句时由外部调用：翻到下一句(或末句则停留后收起)。
+        若脉冲早于本句打字完成(短句/语速快/中途关 TTS 同步回调)，先记下，打完立刻翻，避免卡死。"""
+        if not self._paced:
+            return
+        if self._awaiting_advance:
+            self._awaiting_advance = False
+            self._do_advance()
+        else:
+            self._advance_pending = True
+
+    def _do_advance(self) -> None:
+        self._type_timer.stop()
+        if self._queue:
+            self._shown = 0
+            self._phase = "blank"
+            self._phase_timer.start(_BLANK_MS)
+            self.update()
+        else:
+            self.talking.emit(False)
+            self._phase = "linger"
+            self._phase_timer.start(_LINGER_MS)
 
     def _next(self) -> None:
         self._set_text(self._queue.pop(0))
@@ -290,12 +318,22 @@ class SpeechText(QWidget):
         self.talking.emit(True)
         self._type_timer.start(_TYPE_MS)
         self.update()
+        if self._paced:
+            self.chunk_shown.emit(self._full)
 
     def _reveal(self) -> None:
         step = 1 if len(self._full) < _LONG_CHUNK else 2
         self._shown = min(self._shown + step, len(self._full))
         if self._shown >= len(self._full):
             self._type_timer.stop()
+            if self._paced:
+                if self._advance_pending:
+                    self._advance_pending = False
+                    self._do_advance()
+                else:
+                    self._awaiting_advance = True
+                self.update()
+                return
             self.talking.emit(False)
             if self._queue:
                 self._phase = "hold"
@@ -315,6 +353,8 @@ class SpeechText(QWidget):
             self._next()
         elif self._phase == "linger":
             self._phase = ""
+            self._paced = False
+            self._awaiting_advance = False
             self.hide()
             self.finished.emit()
 
@@ -455,14 +495,14 @@ class ThoughtBubble(QWidget):
             if self._t < 0.15:
                 opacity = self._t / 0.15
             elif self._steady_left <= 0.0:
-                opacity = 1.0 + self._steady_left / 0.3  # 停留结束后用 0.3s 淡出
+                opacity = 1.0 + self._steady_left / 0.3
             else:
                 opacity = 1.0
             if opacity <= 0.0:
                 self._timer.stop()
                 self.hide()
                 return
-            self.move(self._base)  # 稳定模式：贴着头部不上升、不复位
+            self.move(self._base)
             self.setWindowOpacity(opacity)
         else:
             p = self._t / _BUBBLE_DUR
@@ -657,7 +697,7 @@ def _image_to_data_url(image: QImage) -> str:
     if len(png) <= _DATAURL_MAX:
         return f"data:image/png;base64,{png}"
     jpg = ""
-    for quality in (85, 70, 55, 40):  # 照片/大截图：PNG 太肥，改 JPEG 逐档压到进预算
+    for quality in (85, 70, 55, 40):
         jpg = _encode_b64(img, "JPEG", quality)
         if len(jpg) <= _DATAURL_MAX:
             break
@@ -683,7 +723,7 @@ class _Editor(QTextEdit):
     focus_changed = Signal(bool)
 
     _MIN_H = 30
-    _MAX_H = 132  # 约 6 行后转滚动
+    _MAX_H = 132
 
     def __init__(self) -> None:
         super().__init__()
@@ -712,7 +752,7 @@ class _Editor(QTextEdit):
             return
         if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
             if event.modifiers() & (Qt.KeyboardModifier.ShiftModifier | Qt.KeyboardModifier.AltModifier):
-                super().keyPressEvent(event)  # 软换行
+                super().keyPressEvent(event)
             else:
                 self.submit.emit()
             return
@@ -796,14 +836,14 @@ class _Chip(QFrame):
 class InputBox(QWidget):
     """点击桌宠弹出的强力输入框：多行自适应 + 粘贴/拖拽图片(多模态) + 附带文件(进知识库)。"""
 
-    submitted = Signal(str, object)  # (文本, 附件列表[dict])
+    submitted = Signal(str, object)
 
     def __init__(self) -> None:
         super().__init__()
         _make_floating(self)
         self.setFixedWidth(_INPUT_W)
         self._attachments: list[dict] = []
-        self._paste_seq = 0  # 粘贴图编号，让多张「粘贴的图片 1/2/3」可区分
+        self._paste_seq = 0
         self._home = QPoint()
         self._hiding = False
 
@@ -818,7 +858,7 @@ class InputBox(QWidget):
         col.setContentsMargins(14, 10, 10, 10)
         col.setSpacing(8)
 
-        self._strip = QWidget()  # 附件条：无附件时整条隐藏
+        self._strip = QWidget()
         self._strip_row = QHBoxLayout(self._strip)
         self._strip_row.setContentsMargins(0, 0, 0, 0)
         self._strip_row.setSpacing(6)
@@ -877,12 +917,11 @@ class InputBox(QWidget):
         btn.setFixedSize(28, 26)
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         btn.setToolTip(tip)
-        btn.setIcon(_svg_icon(svg_body, 17, "#9a8aa0", active="#6a59f5"))  # hover 变紫
+        btn.setIcon(_svg_icon(svg_body, 17, "#9a8aa0", active="#6a59f5"))
         btn.setIconSize(QSize(17, 17))
         btn.clicked.connect(slot)
         return btn
 
-    # —— 兼容旧 QLineEdit 接口（app.py 仍按这些名字直接调用） ——
     def setText(self, text: str) -> None:
         self._editor.setPlainText(text)
         cursor = self._editor.textCursor()
@@ -903,7 +942,6 @@ class InputBox(QWidget):
         self._attachments.clear()
         self._refresh_strip()
 
-    # —— 附件 ——
     def _has_image(self, data_url: str) -> bool:
         return any(a.get("data_url") == data_url for a in self._attachments)
 
@@ -911,7 +949,7 @@ class InputBox(QWidget):
         if len(self._attachments) >= _ATTACH_MAX or image.isNull():
             return
         data_url = _image_to_data_url(image)
-        if self._has_image(data_url):  # 同一张图重复粘贴：跳过，别堆一堆
+        if self._has_image(data_url):
             return
         self._paste_seq += 1
         self._attachments.append({
@@ -939,7 +977,7 @@ class InputBox(QWidget):
                     })
                     continue
             if any(a.get("kind") == "file" and a.get("path") == str(p) for a in self._attachments):
-                continue  # 同一个文件重复拖入：跳过
+                continue
             self._attachments.append({"kind": "file", "path": str(p), "name": p.name})
         self._refresh_strip()
 
@@ -958,7 +996,7 @@ class InputBox(QWidget):
         self._refresh_strip()
 
     def _refresh_strip(self) -> None:
-        while self._strip_row.count() > 1:  # 末尾那个 stretch 留着
+        while self._strip_row.count() > 1:
             taken = self._strip_row.takeAt(0)
             w = taken.widget()
             if w is not None:
@@ -994,13 +1032,12 @@ class InputBox(QWidget):
             self._add_files(paths)
         self._editor.setFocus()
 
-    # —— 发送 ——
     def _emit(self) -> None:
         text = self._editor.toPlainText().strip()
         if not text and not self._attachments:
             return
         payload = [
-            {k: v for k, v in item.items() if k != "thumb"}  # QPixmap 不跨线程，剥掉
+            {k: v for k, v in item.items() if k != "thumb"}
             for item in self._attachments
         ]
         self._editor.clear()
@@ -1008,7 +1045,6 @@ class InputBox(QWidget):
         self._refresh_strip()
         self.submitted.emit(text, payload)
 
-    # —— 定位 / 动画 ——
     def _sync_geometry(self) -> None:
         self.adjustSize()
         if not self._home.isNull() and not self._hiding:

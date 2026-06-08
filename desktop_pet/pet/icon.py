@@ -128,7 +128,6 @@ _ICON_CACHE: QIcon | None = None
 
 
 def mochi_icon() -> QIcon:
-    # 图标静态无参，启动至少被 tray/control_panel/app 调 3 次、每次开面板还重建——缓存成单例，只渲染一次。
     global _ICON_CACHE
     if _ICON_CACHE is None:
         icon = QIcon()
@@ -136,3 +135,21 @@ def mochi_icon() -> QIcon:
             icon.addPixmap(_face_pixmap(size))
         _ICON_CACHE = icon
     return _ICON_CACHE
+
+
+def save_ico(path: str = "mochi.ico", sizes: tuple[int, ...] = (16, 24, 32, 48, 64, 128, 256)) -> str:
+    # 把 Mochi 的脸渲染成多尺寸 Windows .ico,给打包的 exe / 安装程序 / 快捷方式用(需 Pillow + 一个 QApplication)。
+    import io
+
+    from PIL import Image
+    from PySide6.QtCore import QBuffer, QByteArray
+
+    pm = _face_pixmap(max(sizes))
+    ba = QByteArray()
+    buf = QBuffer(ba)
+    buf.open(QBuffer.OpenModeFlag.WriteOnly)
+    pm.save(buf, "PNG")
+    buf.close()
+    img = Image.open(io.BytesIO(bytes(ba))).convert("RGBA")
+    img.save(path, format="ICO", sizes=[(s, s) for s in sizes])
+    return path

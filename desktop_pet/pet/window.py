@@ -40,7 +40,7 @@ class PetWindow(QWidget):
     clicked = Signal()
     moved = Signal()
     grabbed = Signal()
-    hid = Signal()  # 贴边藏起来时发出，让上层收起跟随的浮层(输入框/气泡/黑板…)
+    hid = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -250,7 +250,7 @@ class PetWindow(QWidget):
         if edge is not None:
             self._hideout = Hideout(edge, avail, self.frameGeometry().topLeft(), self.width(), self.height())
             self._blob.set_hidden(True)
-            self.hid.emit()  # 通知上层：我藏到边缘了，把跟随的浮层收起来
+            self.hid.emit()
 
     def _end_hide(self) -> None:
         if self._hideout is not None:

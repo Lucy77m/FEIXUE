@@ -58,7 +58,7 @@ class MediaFrame(QWidget):
         self._pixmap: QPixmap | None = None
         self._movie: QMovie | None = None
         self._chrome: QPixmap | None = None
-        self._src_path = ""  # 原始图片/动图路径，供点击保存
+        self._src_path = ""
         self._screen_rect = QRectF()
         self._scale = 0.0
         self._target = 0.0
@@ -104,9 +104,8 @@ class MediaFrame(QWidget):
         if event.button() != Qt.MouseButton.LeftButton:
             return
         if self._target <= 0.0 or self._scale < 0.95:
-            return  # present 动画未完成 / 正在收起：× 按钮(scale>0.55 才画)还没稳定显示，先别响应点击
+            return
         pos = event.position()
-        # 命中右上角 × 才关闭(坐标与 paintEvent 画的一致，半径留容差);否则点的是图框主体 → 保存
         cx, cy = self.width() - 21.0, 21.0
         if (pos.x() - cx) ** 2 + (pos.y() - cy) ** 2 <= 15.0 ** 2:
             self.dismiss()
@@ -126,7 +125,7 @@ class MediaFrame(QWidget):
         if target:
             try:
                 shutil.copy(self._src_path, target)
-            except OSError as exc:  # 失败别静默：至少写审计，用户也好排查
+            except OSError as exc:
                 audit.system("媒体保存失败", target=target, error=f"{type(exc).__name__}: {exc}")
 
     def _on_frame(self, _index: int) -> None:

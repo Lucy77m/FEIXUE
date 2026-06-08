@@ -28,6 +28,9 @@ binaries += collect_dynamic_libs("uiautomation")
 datas += collect_data_files("uiautomation", includes=["bin/*.dll"])
 # trafilatura 自带配置文件
 datas += collect_data_files("trafilatura")
+# edge-tts（在线神经语音 TTS）：收子模块 + certifi 证书（SSL 握手要用，漏了打包后联网合成必失败）
+hiddenimports += collect_submodules("edge_tts")
+datas += collect_data_files("certifi")
 
 # 易被漏掉的隐藏依赖：pywin32 时区、uiautomation 依赖的 comtypes
 hiddenimports += ["win32timezone", "comtypes", "comtypes.client", "comtypes.stream"]
@@ -63,7 +66,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=None,  # 暂无 .ico；要 exe 图标就把 .ico 路径填这里
+    icon="mochi.ico",  # MoChi 自己的脸(build.ps1 用 icon.save_ico 生成/刷新)
 )
 
 coll = COLLECT(

@@ -23,7 +23,7 @@ def focus_window(title: str) -> str:
         window.restore()
     try:
         window.activate()
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return (f"激活「{window.title}」失败({type(exc).__name__})——Windows 常拦后台程序抢前台；"
                 f"要操作它直接 screen_elements / act_element 即可，不一定非得它在最前")
     time.sleep(0.12)
@@ -70,6 +70,6 @@ def manage_window(
             if width is None or height is None:
                 return "resize needs width and height."
             window.resizeTo(int(width), int(height))
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return f"Couldn't {action} window \"{window.title}\": {type(exc).__name__}: {exc}"
     return f"Did {action} on window \"{window.title}\"."

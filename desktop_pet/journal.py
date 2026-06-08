@@ -16,8 +16,6 @@ _KEEP = 40
 _CONTEXT_N = 6
 _DEDUP_RATIO = 0.86
 _DEDUP_LOOKBACK = 6
-# 写者有两个：反思 daemon 线程（add）与主线程（clear via forget_all）。
-# add 是 load→去重→append→save 的读改写，不加锁两个并发 add 会丢条目。
 _LOCK = threading.RLock()
 
 

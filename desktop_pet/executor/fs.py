@@ -38,7 +38,7 @@ def read_file(path: str) -> str:
         return f"[not a file or doesn't exist: {path}]"
     try:
         text = target.read_text(encoding="utf-8", errors="replace")
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return f"[read failed: {exc}]"
     if len(text) > _MAX_READ:
         return text[:_MAX_READ] + f"\n[truncated; full text is {len(text)} chars]"
@@ -50,7 +50,7 @@ def write_file(path: str, content: str) -> str:
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return f"[write failed: {exc}]"
     return f"Wrote {path} ({len(content)} chars)."
 
@@ -61,7 +61,7 @@ def list_dir(path: str = ".") -> str:
         return f"[not a directory or doesn't exist: {path}]"
     try:
         entries = sorted(target.iterdir(), key=lambda e: (e.is_file(), e.name.lower()))
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return f"[listing failed: {exc}]"
     if not entries:
         return "(empty directory)"
@@ -88,7 +88,7 @@ def edit_file(path: str, old: str, new: str, replace_all: bool = False) -> str:
         return "[old_string can't be empty]"
     try:
         text, encoding = _read_with_encoding(target)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return f"[read failed: {exc}]"
     count = text.count(old)
     if count == 0:
@@ -98,7 +98,7 @@ def edit_file(path: str, old: str, new: str, replace_all: bool = False) -> str:
     updated = text.replace(old, new) if replace_all else text.replace(old, new, 1)
     try:
         target.write_text(updated, encoding=encoding)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return f"[write failed: {exc}]"
     return f"Replaced {count if replace_all else 1} occurrence(s) in {path}."
 
@@ -143,6 +143,6 @@ def glob_files(pattern: str, path: str = ".", max_results: int = _MAX_ENTRIES) -
             if len(matches) >= max_results:
                 matches.append(f"[hit the {max_results}-result cap]")
                 break
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return f"[glob failed: {exc}]"
     return "\n".join(matches) if matches else "(no matching files)"

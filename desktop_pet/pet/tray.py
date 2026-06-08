@@ -28,14 +28,22 @@ class Tray(QSystemTrayIcon):
         menu.addSeparator()
         self._act_quit = self._add(menu, i18n.t("tray_quit"), on_quit)
         self.setContextMenu(menu)
-        self.activated.connect(self._on_activated)  # 左键单击/双击托盘图标 → 打开控制面板
+        self.activated.connect(self._on_activated)
 
     def _on_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
         if reason in (
-            QSystemTrayIcon.ActivationReason.Trigger,      # 单击
-            QSystemTrayIcon.ActivationReason.DoubleClick,  # 双击
+            QSystemTrayIcon.ActivationReason.Trigger,
+            QSystemTrayIcon.ActivationReason.DoubleClick,
         ):
             self._on_open_panel()
+
+    def notify(self, title: str, body: str, msecs: int = 8000) -> None:
+        """系统托盘气泡通知——MoChi 收起/关机/被全屏游戏挡住时，让提醒仍能触达用户。"""
+        try:
+            if QSystemTrayIcon.supportsMessages():
+                self.showMessage(title, body, mochi_icon(), msecs)
+        except Exception:
+            pass
 
     def retranslate(self) -> None:
         self.setToolTip(i18n.t("tray_tooltip"))

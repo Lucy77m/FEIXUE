@@ -8,7 +8,7 @@ import sqlite3
 import threading
 from pathlib import Path
 
-from desktop_pet.memory.embed import cosine, embed_texts, pack, unpack
+from desktop_pet.memory.embed import embed_texts, pack, rank_by_cosine
 from desktop_pet.settings import DATA_DIR
 
 _DB_PATH = DATA_DIR / "docs.db"
@@ -25,7 +25,7 @@ _TEXT_EXT = frozenset(
 )
 _DOC_EXT = _TEXT_EXT | {".pdf"}
 _IGNORE_DIRS = frozenset({".venv", "venv", "__pycache__", ".git", "node_modules", "dist", "build"})
-_PDF_TEXT_MIN = 16  # 一页文字少于这个数就当作扫描件 → 回退走 OCR
+_PDF_TEXT_MIN = 16
 
 
 def _read_text(file: Path) -> str | None:
@@ -50,7 +50,7 @@ def _read_pdf(file: Path) -> str | None:
         return None
     try:
         doc = pymupdf.open(str(file))
-    except Exception:  # noqa: BLE001 — 损坏/加密/非 PDF
+    except Exception:
         return None
     parts: list[str] = []
     try:
@@ -78,11 +78,11 @@ def _ocr_pdf_page(page) -> str:
         pix = page.get_pixmap(dpi=200)
         arr = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)
         if pix.n >= 3:
-            bgr = arr[:, :, 2::-1].copy()  # RGB/RGBA → BGR（丢掉 alpha 通道）
+            bgr = arr[:, :, 2::-1].copy()
         else:
-            bgr = np.repeat(arr[:, :, :1], 3, axis=2).copy()  # 灰度 → BGR
+            bgr = np.repeat(arr[:, :, :1], 3, axis=2).copy()
         boxes = vision.ocr_boxes(bgr, 0, 0)
-    except Exception:  # noqa: BLE001 — OCR 引擎缺失/失败；该页直接当作空内容
+    except Exception:
         return ""
     boxes.sort(key=lambda b: (round(b["center_abs"][1] / 12), b["center_abs"][0]))
     return " ".join(b["text"] for b in boxes)
@@ -162,7 +162,7 @@ class DocStore:
             for start in range(0, len(chunks), _EMBED_BATCH):
                 batch = chunks[start : start + _EMBED_BATCH]
                 vectors = embed_texts(batch)
-                if not vectors or len(vectors) != len(batch):  # 部分返回时别让 zip 静默丢掉尾部 chunk
+                if not vectors or len(vectors) != len(batch):
                     vectors = [None] * len(batch)
                 for offset, (content, vector) in enumerate(zip(batch, vectors)):
                     self._conn.execute(
@@ -183,15 +183,9 @@ class DocStore:
         vectors = embed_texts([query])
         query_vec = vectors[0] if vectors else None
         if query_vec is not None:
-            scored = [
-                (cosine(query_vec, vector), source, content)
-                for source, content, blob in rows
-                if (vector := unpack(blob)) is not None and len(vector) == len(query_vec)
-            ]
-            if scored:
-                scored.sort(key=lambda row: row[0], reverse=True)
-                top = scored[:k]
-                return "\n\n".join(f"【{Path(s).name}】\n{c}" for _, s, c in top)
+            idxs = rank_by_cosine(query_vec, [blob for _, _, blob in rows], k)
+            if idxs:
+                return "\n\n".join(f"【{Path(rows[i][0]).name}】\n{rows[i][1]}" for i in idxs)
         needle = query.lower()
         hits = [(s, c) for s, c, _ in rows if needle in c.lower()]
         if not hits:
@@ -244,7 +238,7 @@ def read_file_text(path: str) -> str | None:
         return None
     if p.suffix.lower() == ".pdf":
         return _read_pdf(p)
-    return _read_text(p)  # 文本类正常读；二进制会解码失败 → None
+    return _read_text(p)
 
 
 docs = DocStore()

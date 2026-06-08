@@ -86,7 +86,7 @@ def _active_monitor_rect() -> tuple[int, int, int, int]:
             rect = _monitor_rect_at(win.left + win.width // 2, win.top + win.height // 2)
             if rect is not None:
                 return rect
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
     try:
         pt = wintypes.POINT()
@@ -190,7 +190,7 @@ def _active_window_box(
 ) -> tuple[int, int, int, int, str] | None:
     try:
         window = gw.getActiveWindow()
-    except Exception:  # noqa: BLE001
+    except Exception:
         return None
     if window is None:
         return None

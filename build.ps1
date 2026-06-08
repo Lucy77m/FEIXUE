@@ -1,24 +1,30 @@
-# Mochi 一键打包（Windows）。产物：dist\Mochi\Mochi.exe
+﻿# Mochi 一键打包（Windows）。
+#   产物 1：dist\Mochi\Mochi.exe        —— 目录版(整个 dist\Mochi\ 一起拷)
+#   产物 2：dist\MochiSetup.exe         —— 安装程序(单文件，双击安装；需先装 Inno Setup)
 # 用法： .\build.ps1
 $ErrorActionPreference = "Stop"
 
-Write-Host "[1/3] 确保依赖（含 pyinstaller）..." -ForegroundColor Cyan
+Write-Host "[1/6] 确保依赖（含 pyinstaller）..." -ForegroundColor Cyan
 uv sync
 
-Write-Host "[2/3] 清理旧产物..." -ForegroundColor Cyan
+Write-Host "[2/6] 清理旧产物..." -ForegroundColor Cyan
 if (Test-Path build) { Remove-Item build -Recurse -Force }
 if (Test-Path dist) { Remove-Item dist -Recurse -Force }
 
-Write-Host "[3/3] 打包中（PyInstaller，首次较慢）..." -ForegroundColor Cyan
+Write-Host "[3/6] 生成应用图标 mochi.ico（Mochi 自己的脸）..." -ForegroundColor Cyan
+$env:QT_QPA_PLATFORM = "offscreen"
+uv run python -c "from PySide6.QtWidgets import QApplication; QApplication([]); from desktop_pet.pet.icon import save_ico; save_ico('mochi.ico')"
+
+Write-Host "[4/6] 打包中（PyInstaller，首次较慢）..." -ForegroundColor Cyan
 uv run pyinstaller mochi.spec --noconfirm
 $built = ($LASTEXITCODE -eq 0)
 
 if ($built) {
-    Write-Host "[4/4] 为 run_python 配独立 Python(embeddable + pip)..." -ForegroundColor Cyan
+    Write-Host "[5/6] 为 run_python 配独立 Python(embeddable + pip)..." -ForegroundColor Cyan
     $pyVer = "3.11.9"
     $rt = "dist\Mochi\pyruntime"
     $zip = Join-Path $env:TEMP "mochi-py-embed.zip"
-    Invoke-WebRequest "https://www.python.org/ftp/python/$pyVer/python-$pyVer-embed-amd64.zip" -OutFile $zip
+    curl.exe -L --ssl-no-revoke -o $zip "https://www.python.org/ftp/python/$pyVer/python-$pyVer-embed-amd64.zip"
     Expand-Archive $zip -DestinationPath $rt -Force
     # embeddable 默认禁用 site-packages，pip 装的库才 import 得到——打开它
     $pth = Get-ChildItem "$rt\python*._pth" | Select-Object -First 1
@@ -26,14 +32,39 @@ if ($built) {
     Add-Content $pth.FullName "Lib\site-packages"
     # 引导 pip
     $getpip = Join-Path $env:TEMP "get-pip.py"
-    Invoke-WebRequest "https://bootstrap.pypa.io/get-pip.py" -OutFile $getpip
+    curl.exe -L --ssl-no-revoke -o $getpip "https://bootstrap.pypa.io/get-pip.py"
     & "$rt\python.exe" $getpip --no-warn-script-location 2>&1 | Out-Null
     $pipOk = (Test-Path "$rt\Scripts\pip.exe") -or (Test-Path "$rt\Lib\site-packages\pip")
     Write-Host ("  pyruntime: python " + $(if (Test-Path "$rt\python.exe") {'OK'} else {'缺失!'}) + " / pip " + $(if ($pipOk) {'OK'} else {'缺失!'})) -ForegroundColor $(if ($pipOk) {'Green'} else {'Yellow'})
 }
 
+$setupMade = $false
 if ($built -and (Test-Path "dist\Mochi\Mochi.exe")) {
-    Write-Host "`n✓ 完成 → dist\Mochi\Mochi.exe（整个 dist\Mochi\ 目录一起分发）" -ForegroundColor Green
+    # 找 Inno Setup 的命令行编译器 ISCC.exe
+    $iscc = $null
+    foreach ($p in @("$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe", "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\Inno Setup 6\ISCC.exe")) {
+        if (Test-Path $p) { $iscc = $p; break }
+    }
+    if (-not $iscc) {
+        $cmd = Get-Command iscc.exe -ErrorAction SilentlyContinue
+        if ($cmd) { $iscc = $cmd.Source }
+    }
+    if ($iscc) {
+        Write-Host "[6/6] 制作安装程序（Inno Setup）..." -ForegroundColor Cyan
+        & $iscc /Q installer.iss
+        $setupMade = (Test-Path "dist\MochiSetup.exe")
+    } else {
+        Write-Host "[6/6] 跳过安装程序：未检测到 Inno Setup。" -ForegroundColor Yellow
+        Write-Host "      想要 setup 安装包，装一次再重跑本脚本：  winget install JRSoftware.InnoSetup" -ForegroundColor Yellow
+    }
+}
+
+Write-Host ""
+if ($built -and (Test-Path "dist\Mochi\Mochi.exe")) {
+    Write-Host "✓ 目录版    → dist\Mochi\Mochi.exe（整个 dist\Mochi\ 目录一起分发）" -ForegroundColor Green
+    if ($setupMade) {
+        Write-Host "✓ 安装程序  → dist\MochiSetup.exe（单文件，发这个给别人双击安装）" -ForegroundColor Green
+    }
 } else {
-    Write-Host "`n✗ 打包失败。最常见原因：正在运行的 Mochi.exe 锁住了 dist\ —— 先彻底关掉它再打。其余按 docs\打包说明.md 补 datas/hiddenimports" -ForegroundColor Red
+    Write-Host "✗ 打包失败。最常见原因：正在运行的 Mochi.exe 锁住了 dist\ —— 先彻底关掉它再打。其余按 docs\打包说明.md 补 datas/hiddenimports" -ForegroundColor Red
 }

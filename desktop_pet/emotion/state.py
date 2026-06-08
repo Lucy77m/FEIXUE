@@ -44,8 +44,6 @@ _SCOLD_CUES = (
 )
 
 
-# 命中线索词后再剔除两类常见假阳性：被否定（"一点都不笨"）、指向用户自己（"我好笨"）。
-# 仍是保守的本地启发式——只看线索词紧邻的前几个字，挡掉最常见的误判，不追求完美语义。
 _NEGATORS = ("不", "没", "别", "勿", "甭", "无须", "毫不", "并不",
              "not ", "n't", "no ", "never")
 _SELF_REF = ("我", "俺", "咱", "自己", "i'm", "i am", "myself")
@@ -70,7 +68,7 @@ def appraise_user_message(text: str) -> str | None:
     low = text.lower()
     scolded = _cue_hit(low, _SCOLD_CUES)
     praised = _cue_hit(low, _PRAISE_CUES)
-    if scolded == praised:  # 两者皆无、或夸骂并存（语义矛盾）→ 当中性，不贸然动情绪
+    if scolded == praised:
         return None
     return "scolded" if scolded else "praised"
 
@@ -111,7 +109,7 @@ class EmotionEngine:
     def apply(self, event: str) -> None:
         dv, da, dr = _APPRAISALS.get(event, (0.0, 0.0, 0.0))
         with self._lock:
-            self._settle_decay()  # 先把随时间的恢复结算进去，再在上面叠加这次事件
+            self._settle_decay()
             state = self._state
             state.valence = _clamp(state.valence + dv * _REACTIVITY, -1.0, 1.0)
             state.arousal = _clamp(state.arousal + da * _REACTIVITY, 0.0, 1.0)
@@ -121,7 +119,6 @@ class EmotionEngine:
             self._save()
 
     def snapshot(self) -> tuple[float, float, float]:
-        # 纯读取：衰减到当前时刻但不持久化、不重新锚定，这样轮询频率不会影响结果。
         with self._lock:
             s = self._decayed()
             return s.valence, s.arousal, s.rapport
@@ -170,9 +167,6 @@ class EmotionEngine:
     def _load(self) -> _State:
         if not _STATE_PATH.exists():
             return _State()
-        # 防御要全：read_text 可能 OSError(占用/坏块/权限);非法 UTF-8 是 UnicodeDecodeError(ValueError 子类);
-        # 顶层是合法 JSON 但非 dict(如 [1,2,3])会让 data.items() 抛 AttributeError。任一都退回出厂态，
-        # 绝不让损坏的 emotion.json 在 import 期(emotion = EmotionEngine())冒泡崩掉整个 app。
         try:
             data = json.loads(_STATE_PATH.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, ValueError, OSError):

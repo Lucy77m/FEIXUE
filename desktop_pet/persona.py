@@ -15,8 +15,7 @@ from datetime import datetime
 from desktop_pet.settings import DATA_DIR, atomic_write_text
 
 _PATH = DATA_DIR / "persona.json"
-_MAX_CHARS = 600  # 重写而非堆积——画像始终是「当下的自己」，不滚雪球
-# 反思 daemon 线程写 update、主线程写 clear；原子写防半截 JSON，锁防两路并发互踩。
+_MAX_CHARS = 600
 _LOCK = threading.RLock()
 
 

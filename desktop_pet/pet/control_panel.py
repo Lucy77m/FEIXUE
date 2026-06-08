@@ -12,10 +12,12 @@ from PySide6.QtGui import QColor, QKeySequence, QMouseEvent
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
+    QComboBox,
     QDialog,
     QFileDialog,
     QFrame,
     QGraphicsDropShadowEffect,
+    QGraphicsOpacityEffect,
     QHBoxLayout,
     QKeySequenceEdit,
     QLabel,
@@ -28,7 +30,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from desktop_pet import i18n
+from desktop_pet import i18n, voice
 from desktop_pet.docs import docs
 from desktop_pet.i18n import UI_LANGUAGES
 from desktop_pet.pet.icon import mochi_icon
@@ -76,6 +78,18 @@ QLineEdit {{
 }}
 QLineEdit:hover {{ border-color: #cdc7ea; }}
 QLineEdit:focus {{ border: 1.5px solid {_ACCENT}; background: #ffffff; }}
+QComboBox {{
+    background: #f7f6fc; border: 1px solid #e6e3f1; border-radius: 10px;
+    padding: 8px 12px; color: #3b3a4d; font-size: 13px; min-width: 150px;
+}}
+QComboBox:hover {{ border-color: #cdc7ea; }}
+QComboBox:focus {{ border: 1.5px solid {_ACCENT}; background: #ffffff; }}
+QComboBox::drop-down {{ border: none; width: 22px; }}
+QComboBox QAbstractItemView {{
+    background: #ffffff; border: 1px solid #e6e3f1; border-radius: 10px; padding: 4px;
+    outline: none; selection-background-color: {_ACCENT}; selection-color: white;
+}}
+QComboBox QAbstractItemView::item {{ padding: 6px 10px; min-height: 22px; }}
 QSlider::groove:horizontal {{ height: 4px; background: #e6e3f1; border-radius: 2px; }}
 QSlider::sub-page:horizontal {{ height: 4px; background: {_ACCENT}; border-radius: 2px; }}
 QSlider::handle:horizontal {{ width: 16px; height: 16px; margin: -7px 0; border-radius: 8px; background: {_ACCENT}; border: 3px solid #ffffff; }}
@@ -101,7 +115,6 @@ QPushButton#reset[armed="true"] {{ background: #ec5d72; color: white; border-col
 """
 
 
-# 开机/关机按钮直接用自身样式表(不靠 objectName + 祖先 QSS——运行时切 objectName 背景常 cascade 不上、变白字白底)
 _TOGGLE_ON_QSS = (
     f"QPushButton {{ background: {_ACCENT}; color: white; border: none; border-radius: 12px;"
     " padding: 13px; font-size: 15px; font-weight: 700; }"
@@ -148,7 +161,7 @@ class _Segmented(QWidget):
             row.addWidget(btn, 1)
             self._btns.append(btn)
         self._group.buttonToggled.connect(lambda btn, on: btn.setStyleSheet(_SEG_ON if on else _SEG_OFF))
-        self._group.buttonClicked.connect(self._on_clicked)  # 仅用户点击触发 on_change(不含 setCurrentData)
+        self._group.buttonClicked.connect(self._on_clicked)
         if self._btns:
             self._btns[0].setChecked(True)
 
@@ -185,7 +198,9 @@ class ControlPanel(QDialog):
                  on_toggle_active: Callable[[], None] | None = None,
                  bond_provider: Callable[[], dict] | None = None,
                  on_set_language: Callable[[str], None] | None = None,
-                 hotkey_status_provider: Callable[[], dict] | None = None) -> None:
+                 hotkey_status_provider: Callable[[], dict] | None = None,
+                 on_preview_voice: Callable[[str, int], None] | None = None,
+                 intro: "tuple | None" = None) -> None:
         super().__init__()
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
@@ -199,6 +214,7 @@ class ControlPanel(QDialog):
         self._has_bond = bond_provider is not None
         self._on_set_language = on_set_language
         self._hotkey_status_provider = hotkey_status_provider
+        self._on_preview_voice = on_preview_voice
         self._drag_offset = QPoint()
         self._lang = settings.ui_language if settings.ui_language in UI_LANGUAGES else "中文"
         self.setWindowTitle(self._t("panel_title"))
@@ -216,9 +232,9 @@ class ControlPanel(QDialog):
         self._build_fields(settings)
 
         page_specs: list[tuple[str, object]] = []
-        if self._has_home:  # 仅在有状态源时挂「主页」(首次配置弹窗也会带上，见 app.run)
+        if self._has_home:
             page_specs.append(("tab_home", self._build_home_page))
-        if self._has_bond:  # 「它眼中的你」羁绊档案
+        if self._has_bond:
             page_specs.append(("tab_bond", self._build_bond_page))
         page_specs += [
             ("tab_docs", self._build_docs_page),
@@ -229,7 +245,6 @@ class ControlPanel(QDialog):
         ]
         self._page_keys = [k for k, _ in page_specs]
 
-        # ── 左侧栏：头像 + 标题 + 竖向导航 ──
         sidebar = QFrame(objectName="sidebar")
         sidebar.setFixedWidth(170)
         side = QVBoxLayout(sidebar)
@@ -249,7 +264,7 @@ class ControlPanel(QDialog):
 
         self._tabs: list[QPushButton] = []
         self._stack = QStackedWidget()
-        self._footerless: set[int] = set()  # 主页/关于页隐藏「保存/取消」页脚
+        self._footerless: set[int] = set()
         for index, (key, builder) in enumerate(page_specs):
             btn = QPushButton(self._t(key), objectName="nav")
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -260,7 +275,6 @@ class ControlPanel(QDialog):
             if key in ("tab_home", "tab_bond", "tab_about", "tab_docs"):
                 self._footerless.add(index)
         side.addStretch(1)
-        # 界面语言常驻侧边栏底部，点选即时切换(无需重启/保存)
         _lang_short = {"中文": "中", "English": "EN", "日本語": "日"}
         side.addWidget(QLabel(self._t("lbl_ui_lang"), objectName="help"))
         self._ui_language = _Segmented(
@@ -270,7 +284,6 @@ class ControlPanel(QDialog):
         self._ui_language.setCurrentData(self._lang)
         side.addWidget(self._ui_language)
 
-        # ── 右侧内容区：关闭按钮 + 页面 + 页脚 ──
         close = QPushButton("×", objectName="close")
         close.setCursor(Qt.CursorShape.PointingHandCursor)
         close.setFixedSize(26, 26)
@@ -311,11 +324,45 @@ class ControlPanel(QDialog):
         outer.addWidget(card)
 
         self._switch(0)
-        if self._has_home:  # 主页状态机信息定时刷新
+        if self._has_home:
             self._status_timer = QTimer(self)
             self._status_timer.timeout.connect(self._refresh_status)
             self._status_timer.start(1500)
             self._refresh_status()
+
+        self._intro_overlay: QLabel | None = None
+        self._intro_started = False
+        if intro is not None:
+            pixmap, geom = intro
+            self.setGeometry(geom)
+            self._intro_overlay = QLabel(self)
+            self._intro_overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            self._intro_overlay.setPixmap(pixmap)
+            self._intro_overlay.setGeometry(self.rect())
+            self._intro_effect = QGraphicsOpacityEffect(self._intro_overlay)
+            self._intro_effect.setOpacity(1.0)
+            self._intro_overlay.setGraphicsEffect(self._intro_effect)
+            self._intro_overlay.raise_()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if self._intro_overlay is None or self._intro_started:
+            return
+        self._intro_started = True
+        self._intro_overlay.setGeometry(self.rect())
+        self._intro_overlay.raise_()
+        anim = QPropertyAnimation(self._intro_effect, b"opacity", self)
+        anim.setDuration(240)
+        anim.setStartValue(1.0)
+        anim.setEndValue(0.0)
+        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        anim.finished.connect(self._intro_overlay.deleteLater)
+        self._intro_anim = anim
+        anim.start()
+
+    def snapshot_for_transition(self) -> "tuple":
+        """切语言关闭前抓当前(旧语言)的一帧 + 窗口位置，交给新面板做交叉淡入。"""
+        return (self.grab(), self.geometry())
 
     def _t(self, key: str) -> str:
         return i18n.t(key, self._lang)
@@ -346,8 +393,11 @@ class ControlPanel(QDialog):
         self._clip_alchemy = QCheckBox(self._t("cb_clip_alchemy"))
         self._clip_alchemy.setChecked(settings.clip_alchemy)
         self._clip_alchemy.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._remote = QCheckBox(self._t("cb_remote"))
+        self._remote.setChecked(settings.remote_inbox)
+        self._remote.setCursor(Qt.CursorShape.PointingHandCursor)
         self._temperature = QSlider(Qt.Orientation.Horizontal)
-        self._temperature.setRange(0, 200)  # 放宽到 2.0：别把外部/手改的 1.5/2.0(接口合法)在加载时静默 clamp 回 1.3
+        self._temperature.setRange(0, 200)
         self._temperature.setValue(int(round(settings.temperature * 100)))
         self._temp_label = QLabel(f"{settings.temperature:.2f}")
         self._temperature.valueChanged.connect(
@@ -363,6 +413,20 @@ class ControlPanel(QDialog):
         self._tts = QCheckBox(self._t("cb_tts"))
         self._tts.setChecked(settings.tts_enabled)
         self._tts.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._tts_voice = QComboBox()
+        self._tts_voice.addItem(self._t("opt_voice_system"), voice.SYSTEM_VOICE)
+        if voice.edge_available():
+            for vid, label in voice.EDGE_VOICES:
+                self._tts_voice.addItem(label, vid)
+        self._tts_voice_orig = settings.tts_voice
+        vidx = self._tts_voice.findData(settings.tts_voice)
+        self._tts_voice.setCurrentIndex(vidx if vidx >= 0 else 0)
+        self._tts_voice.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._tts_rate = QSlider(Qt.Orientation.Horizontal)
+        self._tts_rate.setRange(-50, 50)
+        self._tts_rate.setValue(int(settings.tts_rate))
+        self._tts_rate_label = QLabel(self._fmt_rate(settings.tts_rate))
+        self._tts_rate.valueChanged.connect(lambda v: self._tts_rate_label.setText(self._fmt_rate(v)))
         self._proactive_level = _Segmented([(value, self._t(label_key)) for value, label_key in i18n.PROACTIVE_LABEL_KEYS])
         self._proactive_level.setCurrentData(settings.proactive_level)
         self._hk_summon = QKeySequenceEdit(QKeySequence(settings.hotkey_summon))
@@ -447,7 +511,7 @@ class ControlPanel(QDialog):
         cl.addWidget(self._status_row(self._t("home_interface"), self._home_interface))
         body.addWidget(status_card)
 
-        self._toggle_btn = QPushButton("—")  # 开机/关机 开关；文字+样式随状态变
+        self._toggle_btn = QPushButton("—")
         self._toggle_btn.setStyleSheet(_TOGGLE_ON_QSS)
         self._toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._toggle_btn.setMinimumHeight(48)
@@ -462,7 +526,7 @@ class ControlPanel(QDialog):
             return
         try:
             s = self._status_provider()
-        except Exception:  # noqa: BLE001
+        except Exception:
             return
         self._home_state.setText(self._t("st_" + str(s.get("state", "idle"))))
         mood = self._t("mood_" + str(s.get("mood", "content")))
@@ -477,7 +541,6 @@ class ControlPanel(QDialog):
         cfg = self._t("home_configured") if s.get("configured") else self._t("home_unconfigured")
         self._home_interface.setText(f"{cfg} · {model}")
         shown = bool(s.get("shown", False))
-        # 开机中→「关机」(描边)；关机中→「开机」(醒目 accent)。直接设按钮自身样式，保证一定渲染出来
         self._toggle_btn.setText(self._t("home_power_off") if shown else self._t("home_power_on"))
         self._toggle_btn.setStyleSheet(_TOGGLE_OFF_QSS if shown else _TOGGLE_ON_QSS)
 
@@ -488,7 +551,16 @@ class ControlPanel(QDialog):
 
     def _on_lang_clicked(self, lang: str) -> None:
         if self._on_set_language is not None:
-            self._on_set_language(lang)  # 交给 app：立即保存+切语言+用新语言重开面板
+            self._on_set_language(lang)
+
+    @staticmethod
+    def _fmt_rate(v) -> str:
+        v = int(v)
+        return f"+{v}%" if v >= 0 else f"{v}%"
+
+    def _on_preview(self) -> None:
+        if self._on_preview_voice is not None:
+            self._on_preview_voice(self._tts_voice.currentData() or "", int(self._tts_rate.value()))
 
     def _section_block(self, title: str, value: QLabel) -> QFrame:
         card = QFrame(objectName="statusCard")
@@ -519,7 +591,7 @@ class ControlPanel(QDialog):
             return
         try:
             s = self._bond_provider()
-        except Exception:  # noqa: BLE001
+        except Exception:
             return
         rap = int(round(float(s.get("rapport", 0.0)) * 100))
         self._bond_stat.setText(self._t("bond_stat_fmt").format(
@@ -555,7 +627,7 @@ class ControlPanel(QDialog):
                 w.deleteLater()
         try:
             items = docs.sources()
-        except Exception:  # noqa: BLE001
+        except Exception:
             items = []
         if not items:
             self._docs_box.addWidget(QLabel(self._t("docs_empty"), objectName="help"))
@@ -573,7 +645,7 @@ class ControlPanel(QDialog):
             self._docs_box.addWidget(row)
 
     def _del_doc(self, source: str, btn: QPushButton) -> None:
-        if not btn.property("armed"):  # 两段式：第一次点变红求确认，第二次才真删
+        if not btn.property("armed"):
             btn.setProperty("armed", "true")
             btn.setText(self._t("docs_del_arm"))
             btn.style().unpolish(btn)
@@ -581,7 +653,7 @@ class ControlPanel(QDialog):
             return
         try:
             docs.forget_exact(source)
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
         self._refresh_docs()
 
@@ -592,12 +664,11 @@ class ControlPanel(QDialog):
         )
         if not paths:
             return
-        # ingest 要做向量化、慢，丢后台线程跑，跑完定时刷新（不阻塞 UI）
         def work() -> None:
             for p in paths:
                 try:
                     docs.ingest(p)
-                except Exception:  # noqa: BLE001
+                except Exception:
                     pass
         try:
             threading.Thread(target=work, daemon=True, name="panel-ingest").start()
@@ -629,6 +700,19 @@ class ControlPanel(QDialog):
         body.addWidget(self._check_field(self._proactive_enabled, "help_proactive"))
         body.addWidget(self._field("lbl_proactive_freq", self._proactive_level, "help_proactive_freq"))
         body.addWidget(self._check_field(self._tts, "help_tts"))
+        voice_row = QHBoxLayout()
+        voice_row.setSpacing(8)
+        voice_row.addWidget(self._tts_voice, 1)
+        preview_btn = QPushButton(self._t("tts_preview"), objectName="cancel")
+        preview_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        preview_btn.clicked.connect(self._on_preview)
+        voice_row.addWidget(preview_btn)
+        body.addWidget(self._field("lbl_tts_voice", voice_row, "help_tts_voice"))
+        rate_row = QHBoxLayout()
+        rate_row.setSpacing(10)
+        rate_row.addWidget(self._tts_rate, 1)
+        rate_row.addWidget(self._tts_rate_label)
+        body.addWidget(self._field("lbl_tts_rate", rate_row, "help_tts_rate"))
         body.addWidget(self._build_hotkeys_block())
         body.addStretch(1)
         return page
@@ -668,7 +752,7 @@ class ControlPanel(QDialog):
             return
         try:
             status = self._hotkey_status_provider() or {}
-        except Exception:  # noqa: BLE001
+        except Exception:
             return
         for action, label in self._hk_status_labels.items():
             if action not in status:
@@ -684,6 +768,7 @@ class ControlPanel(QDialog):
         body.addWidget(self._check_field(self._watch, "help_watch"))
         body.addWidget(self._check_field(self._clip_sampler, "help_clip_sampler"))
         body.addWidget(self._check_field(self._clip_alchemy, "help_clip_alchemy"))
+        body.addWidget(self._check_field(self._remote, "help_remote"))
         body.addStretch(1)
         return page
 
@@ -760,7 +845,7 @@ class ControlPanel(QDialog):
             btn.style().polish(btn)
         self._footer.setVisible(index not in self._footerless)
         key = self._page_keys[index] if 0 <= index < len(self._page_keys) else ""
-        if key == "tab_home":  # 切到主页/羁绊立即刷新一次
+        if key == "tab_home":
             self._refresh_status()
         elif key == "tab_bond":
             self._refresh_bond()
@@ -787,7 +872,6 @@ class ControlPanel(QDialog):
         text = text.strip()
         if not text.isdigit():
             return 16
-        # 上限对齐 loop 的 _MAX_STEPS_CEILING=64：别让面板接受 65–99 却被静默截断
         return max(1, min(int(text), 64))
 
     def _on_save(self) -> None:
@@ -806,26 +890,32 @@ class ControlPanel(QDialog):
         s.proactive_enabled = self._proactive_enabled.isChecked()
         s.proactive_level = self._proactive_level.currentData() or "正常"
         s.tts_enabled = self._tts.isChecked()
+        if self._tts_voice.findData(self._tts_voice_orig) < 0:
+            s.tts_voice = self._tts_voice_orig
+        else:
+            s.tts_voice = self._tts_voice.currentData() or ""
+        s.tts_rate = int(self._tts_rate.value())
         s.allow_web = self._allow_web.isChecked()
         s.allow_control = self._allow_control.isChecked()
         s.allow_shell = self._allow_shell.isChecked()
         s.watch_screen = self._watch.isChecked()
         s.clip_sampler = self._clip_sampler.isChecked()
         s.clip_alchemy = self._clip_alchemy.isChecked()
+        s.remote_inbox = self._remote.isChecked()
         s.hotkey_summon = self._hk_summon.keySequence().toString().split(",")[0].strip() or s.hotkey_summon
         s.hotkey_ask = self._hk_ask.keySequence().toString().split(",")[0].strip() or s.hotkey_ask
         s.hotkey_quick = self._hk_quick.keySequence().toString().split(",")[0].strip() or s.hotkey_quick
         try:
             s.save()
-        except Exception:  # noqa: BLE001 - 磁盘满/只读/被占用：别静默、别崩槽，明确告诉用户没存上
+        except Exception:
             self._flash_error()
             return
         if self._on_apply is not None:
             self._on_apply()
         if self._has_home:
             self._refresh_status()
-        self._flash_saved()  # 反馈「已应用 ✓」；面板保留，关闭用 × / 取消
-        QTimer.singleShot(900, self._refresh_hotkey_status)  # 重注册是异步的，稍等再读注册结果
+        self._flash_saved()
+        QTimer.singleShot(900, self._refresh_hotkey_status)
 
     def _flash_saved(self) -> None:
         self._save_btn.setText(self._t("saved_ok"))

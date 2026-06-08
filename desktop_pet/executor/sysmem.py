@@ -49,8 +49,6 @@ def read_process_memory(pid: int, address: int, size: int = 256) -> str:
     except (ValueError, TypeError):
         return f"[can't parse address: {address!r} (use decimal or 0x hex)]"
 
-    # use_last_error=True：否则 ctypes.get_last_error() 拿到的是陈旧缓存(常为 0)，而非
-    # OpenProcess/ReadProcessMemory 的真实失败码(5=拒绝访问、299=部分拷贝)，诊断信息会失真。
     k32 = ctypes.WinDLL("kernel32", use_last_error=True)
     k32.OpenProcess.restype = wintypes.HANDLE
     k32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]

@@ -7,6 +7,20 @@ from __future__ import annotations
 import ctypes as _ctypes
 
 
+def _enable_faulthandler() -> None:
+    try:
+        import faulthandler
+        import os
+        base = os.environ.get("STAR_DATA_DIR") or os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "data")
+        log_dir = os.path.join(base, "logs")
+        os.makedirs(log_dir, exist_ok=True)
+        fh = open(os.path.join(log_dir, "crash.log"), "a", encoding="utf-8")
+        faulthandler.enable(file=fh, all_threads=True)
+    except Exception:
+        pass
+
+
 def _set_dpi_aware() -> None:
     try:
         _ctypes.windll.user32.SetProcessDpiAwarenessContext(_ctypes.c_void_p(-4))
@@ -24,6 +38,7 @@ def _set_dpi_aware() -> None:
         pass
 
 
+_enable_faulthandler()
 _set_dpi_aware()
 
 from desktop_pet.app import PetApp
@@ -32,7 +47,7 @@ from desktop_pet.app import PetApp
 def main() -> int:
     try:
         return PetApp().run()
-    except KeyboardInterrupt:  # Ctrl+C 静默退出,不打印 traceback
+    except KeyboardInterrupt:
         return 0
 
 

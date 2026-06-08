@@ -14,8 +14,6 @@ from desktop_pet.settings import Settings, build_http_client
 
 _client: OpenAI | None = None
 _client_key: tuple[str, str, str] | None = None
-# 之前是个永不复位的布尔：一次失败（缺 key / 限流 / 网络抖）后整个进程永久退化成子串检索，
-# API 恢复也不会自愈。改成冷却时间戳：失败后只静默冷却一段时间，过后自动重试、自己复活。
 _disabled_until = 0.0
 _DISABLE_COOLDOWN_S = 300.0
 
@@ -44,7 +42,7 @@ def embed_texts(texts: list[str]) -> list[list[float]] | None:
     global _disabled_until
     if not texts:
         return None
-    if time.monotonic() < _disabled_until:  # 还在冷却期，先用降级检索，过后再试
+    if time.monotonic() < _disabled_until:
         return None
     settings = Settings.load()
     if not settings.api_key or not settings.embed_model:
@@ -56,7 +54,7 @@ def embed_texts(texts: list[str]) -> list[list[float]] | None:
         return None
     try:
         response = client.embeddings.create(model=settings.embed_model, input=texts)
-    except Exception:  # noqa: BLE001
+    except Exception:
         _disabled_until = time.monotonic() + _DISABLE_COOLDOWN_S
         return None
     return [item.embedding for item in response.data]
@@ -69,6 +67,39 @@ def cosine(a: list[float], b: list[float]) -> float:
     na = math.sqrt(sum(x * x for x in a))
     nb = math.sqrt(sum(y * y for y in b))
     return dot / (na * nb) if na and nb else 0.0
+
+
+def rank_by_cosine(query_vec: list[float], blobs: list[bytes | None], k: int) -> list[int]:
+    """在一堆打包向量(blob)里挑出与 query_vec 余弦最高的前 k 个，返回其下标(降序)。
+    召回是每轮对话的热路径，记忆/知识库变大后逐条纯 Python 余弦明显变慢——优先用 numpy
+    一次性矩阵化算完；numpy 缺失/异常时退回纯 Python(结果一致，只是慢些)。
+    空 blob、维度不符(换过嵌入模型)的向量都跳过，不入选。"""
+    dim = len(query_vec)
+    try:
+        import numpy as np
+
+        rows = [(i, np.frombuffer(b, dtype=np.float32)) for i, b in enumerate(blobs) if b]
+        rows = [(i, v) for i, v in rows if v.shape[0] == dim]
+        if not rows:
+            return []
+        idxs = [i for i, _ in rows]
+        mat = np.vstack([v for _, v in rows])
+        q = np.asarray(query_vec, dtype=np.float32)
+        denom = np.linalg.norm(mat, axis=1) * float(np.linalg.norm(q))
+        sims = np.divide(mat @ q, denom, out=np.zeros(len(idxs), dtype=np.float32), where=denom > 0)
+        order = np.argsort(-sims)[:k]
+        return [idxs[int(j)] for j in order]
+    except Exception:
+        scored = []
+        for i, b in enumerate(blobs):
+            try:
+                v = unpack(b)
+            except Exception:
+                continue
+            if v is not None and len(v) == dim:
+                scored.append((cosine(query_vec, v), i))
+        scored.sort(key=lambda p: p[0], reverse=True)
+        return [i for _, i in scored[:k]]
 
 
 def pack(vector: list[float]) -> bytes:

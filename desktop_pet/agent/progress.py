@@ -55,6 +55,14 @@ _STEPS: dict[str, tuple[str, "object"]] = {
     "list_skills": ("s_list_skills", None),
     "spawn_agent": ("s_spawn", lambda a: a.get("task", "")[:24]),
     "start_background_task": ("s_background", lambda a: a.get("task", "")[:24]),
+    "spawn_workflow": ("s_workflow", lambda a: f"{a.get('mode', '')} ×{len(a.get('tasks', []))}"),
+    "set_screen_watch": ("s_watch", lambda a: str(a.get("focus", ""))[:20]),
+    "review_diff": ("s_review_diff", lambda a: a.get("path", "")),
+    "run_tests": ("s_run_tests", lambda a: a.get("path", "")),
+    "list_reminders": ("s_list_reminders", None),
+    "cancel_reminder": ("s_cancel_reminder", lambda a: f"#{a.get('reminder_id', '')}"),
+    "list_background_tasks": ("s_list_bg", None),
+    "stop_background_task": ("s_stop_bg", lambda a: f"#{a.get('task_id', '')}"),
     "show_image": ("s_show_image", lambda a: (a.get("caption") or a.get("source", ""))[:24]),
     "play_gif": ("s_play_gif", lambda a: (a.get("caption") or a.get("source", ""))[:24]),
 }
@@ -63,7 +71,7 @@ _STEPS: dict[str, tuple[str, "object"]] = {
 def describe_step(name: str, args: dict) -> str:
     try:
         return _describe_step(name, args if isinstance(args, dict) else {})
-    except Exception:  # noqa: BLE001
+    except Exception:
         return name
 
 

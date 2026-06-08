@@ -18,7 +18,6 @@ from desktop_pet.executor.safety import check_blocked
 _EXEC_TIMEOUT = 60
 _INSTALL_TIMEOUT = 300
 _OUTPUT_CAP = 200_000
-# 打包成无控制台 GUI 后，阻止子进程弹出可见的命令行黑窗
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
@@ -147,7 +146,7 @@ class PythonRunner:
             if stripped == self._end:
                 try:
                     text = base64.b64decode("".join(captured)).decode("utf-8", "replace")
-                except Exception:  # noqa: BLE001
+                except Exception:
                     return "[failed to decode output; this result was dropped.]"
                 return text.strip() or "[no output]"
             captured.append(stripped)
@@ -164,24 +163,23 @@ class PythonRunner:
 
 
 def _kill_proc(proc: subprocess.Popen) -> None:
-    # 必须非阻塞：cancel() 会在 UI 主线程同步调用它，任何 proc.wait() 都会卡住界面
-    # （例如子进程卡在 pywinauto 的 UIA/COM 调用里时，一时半会儿杀不掉）。
     try:
         proc.kill()
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
-    try:
-        if proc.stdout is not None:
-            proc.stdout.close()
-    except Exception:  # noqa: BLE001
-        pass
-    threading.Thread(target=_reap, args=(proc,), daemon=True).start()  # 后台回收，免僵尸又不阻塞
+    for pipe in (proc.stdout, proc.stdin):
+        try:
+            if pipe is not None:
+                pipe.close()
+        except Exception:
+            pass
+    threading.Thread(target=_reap, args=(proc,), daemon=True).start()
 
 
 def _reap(proc: subprocess.Popen) -> None:
     try:
         proc.wait(timeout=10)
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
 
 

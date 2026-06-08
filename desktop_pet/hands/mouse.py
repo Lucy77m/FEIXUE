@@ -8,16 +8,14 @@ import pyautogui
 
 from desktop_pet.eyes.capture import image_to_screen
 
-# 关掉 pyautogui 的"鼠标移到屏幕四角即抛 FailSafeException"机制：我们已有自己的 _onscreen 越界保护，
-# 而合法操作经常要点到 (0,0) / 右下角等角点；留着 failsafe 会让点角点稳定抛异常、模型反复重试同坐标。
 pyautogui.FAILSAFE = False
 
 
 def _onscreen(sx: int, sy: int) -> bool:
     try:
         w, h = pyautogui.size()
-    except Exception:  # noqa: BLE001
-        return True  # 拿不到屏幕尺寸就别拦，照常点
+    except Exception:
+        return True
     return 0 <= sx < w and 0 <= sy < h
 
 
@@ -64,7 +62,6 @@ def scroll(amount: int) -> str:
 
 
 def click_screen(ax: int, ay: int, kind: str = "click") -> bool:
-    # 直接用绝对屏幕坐标点击（act_element 走这里）。加越界检查：陈旧/错误坐标不再盲点屏幕。
     if not _onscreen(int(ax), int(ay)):
         return False
     if kind == "double":

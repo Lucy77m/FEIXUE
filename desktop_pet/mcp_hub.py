@@ -94,9 +94,8 @@ class MCPHub:
                         self._connect(stack, name, spec, ClientSession, StdioServerParameters, stdio_client),
                         timeout=_CONNECT_TIMEOUT,
                     )
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     self._errors[name] = f"{type(exc).__name__}: {exc}"
-            # 连接失败原来只存进 _errors dict，工具表静默返回空、谁都不知道。写审计日志让它可见。
             for srv, err in self._errors.items():
                 audit.system("MCP 连接失败", server=srv, error=err)
             if self._sessions:
@@ -125,10 +124,11 @@ class MCPHub:
         for tool in listed.tools:
             base = f"mcp__{_sanitize(name)}__{_sanitize(tool.name)}"[:_NAME_CAP]
             namespaced = base
-            dedup = 0  # 用递增计数器，保证每次产生不同名字并收敛；
-            while namespaced in self._routes:  # 旧写法 len(self._routes)%100 在循环里恒定 → 双重碰撞时死循环冻线程
+            dedup = 0
+            while namespaced in self._routes:
                 dedup += 1
-                namespaced = base[: _NAME_CAP - 4] + f"_{dedup % 1000:03d}"
+                suffix = f"_{dedup}"
+                namespaced = base[: _NAME_CAP - len(suffix)] + suffix
             self._routes[namespaced] = (name, tool.name)
             schema = tool.inputSchema if isinstance(tool.inputSchema, dict) else {}
             if schema.get("type") != "object":
@@ -168,7 +168,7 @@ class MCPHub:
                 session.call_tool(tool, arguments or {}), self._loop
             )
             return _render_result(future.result(timeout=_CALL_TIMEOUT))
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             return f"[MCP call failed: {type(exc).__name__}: {exc}]"
 
     def status(self) -> str:

@@ -11,6 +11,12 @@ __pycache__/
 # Personal Claude Code overrides for this project
 /.claude/settings.local.json
 
+# Stray scratch files from AI/shell runs (diff dumps, redirect mishaps) — 兜底，别再误入版本库
+/_diff_*.txt
+/$null
+/_t_*.py
+/_strip*.py
+
 # Throwaway visual-preview render
 /_preview.*
 

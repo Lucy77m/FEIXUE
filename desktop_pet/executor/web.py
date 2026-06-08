@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import hashlib
 import tempfile
+import threading
 import time
 from pathlib import Path
 from urllib.parse import urlparse
@@ -17,7 +18,22 @@ _RETRIES = 2
 _RETRY_SLEEP = 0.8
 _IMPERSONATE = "random"
 
-# 反爬 / JS 墙页面返回的是墙文本而非正文，命中这些标记则快速放弃，避免当成内容
+_client = None
+_client_lock = threading.Lock()
+_client_uses = 0
+_CLIENT_MAX_USES = 40
+
+
+def _client_get():
+    global _client, _client_uses
+    with _client_lock:
+        if _client is None or _client_uses >= _CLIENT_MAX_USES:
+            import primp
+            _client = primp.Client(impersonate=_IMPERSONATE, timeout=_FETCH_TIMEOUT)
+            _client_uses = 0
+        _client_uses += 1
+        return _client
+
 _BLOCK_MARKERS = (
     "enable javascript", "automated bot check", "verify you are human",
     "checking your browser", "captcha", "cloudflare", "access denied",
@@ -26,9 +42,7 @@ _BLOCK_MARKERS = (
 
 
 def _http_get(url: str) -> str:
-    import primp
-
-    return primp.Client(impersonate=_IMPERSONATE, timeout=_FETCH_TIMEOUT).get(url).text or ""
+    return _client_get().get(url).text or ""
 
 
 def _search_bing_cn(query: str, n: int) -> list[dict]:
@@ -62,7 +76,7 @@ def _search_baidu(query: str, n: int) -> list[dict]:
         a = div.xpath('.//h3//a[@href]')
         if not a:
             continue
-        url = (a[0].get("href") or "").strip()  # 百度跳转链；web_fetch 会跟随 302 到真实页
+        url = (a[0].get("href") or "").strip()
         title = a[0].text_content().strip()
         body = " ".join("".join(
             div.xpath('.//*[contains(@class, "abstract") or contains(@class, "c-abstract") or contains(@class, "content-right")]//text()')
@@ -80,13 +94,11 @@ def _search_ddgs(query: str, n: int) -> list[dict]:
     out: list[dict] = []
     for r in DDGS().text(query, max_results=n):
         url = (r.get("href") or r.get("url") or "").strip()
-        if url.startswith("http"):  # 与 bing/baidu 一致地过滤掉非 http 的空/坏链
+        if url.startswith("http"):
             out.append({"title": r.get("title", ""), "url": url, "body": r.get("body", "")})
     return out
 
 
-# 国内可直连引擎优先（必应国内版最稳；百度次之——反爬常弹验证），境外 ddgs 垫底（需代理）。
-# 任一引擎返回非空结果即采用；解析为空（如撞反爬页）会自动降级到下一个。
 _SEARCH_BACKENDS = (("bing", _search_bing_cn), ("baidu", _search_baidu), ("ddgs", _search_ddgs))
 
 
@@ -100,7 +112,7 @@ def web_search(query: str, max_results: int = _MAX_RESULTS) -> str:
     for name, backend in _SEARCH_BACKENDS:
         try:
             found = backend(query, max_results)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             errors.append(f"{name}:{type(exc).__name__}")
             continue
         if found:
@@ -131,11 +143,10 @@ def web_fetch(url: str) -> str:
     error = ""
     for attempt in range(_RETRIES):
         try:
-            client = primp.Client(impersonate=_IMPERSONATE, timeout=_FETCH_TIMEOUT)
-            html = client.get(url).text or ""
+            html = _client_get().get(url).text or ""
             if html.strip():
                 break
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             error = str(exc)
         if attempt < _RETRIES - 1:
             time.sleep(_RETRY_SLEEP)
@@ -143,7 +154,7 @@ def web_fetch(url: str) -> str:
         return f"[fetch failed (after {_RETRIES} retries): {error or 'empty response'}]"
     try:
         text = trafilatura.extract(html, include_comments=False, include_links=False) or ""
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return f"[text extraction failed: {exc}]"
     text = text.strip()
     if not text:
@@ -168,9 +179,9 @@ def download_to_temp(url: str, subdir: str = "star_media") -> str | None:
     except ImportError:
         return None
     try:
-        response = primp.Client(impersonate=_IMPERSONATE, timeout=_FETCH_TIMEOUT).get(url)
+        response = _client_get().get(url)
         data = response.content
-    except Exception:  # noqa: BLE001
+    except Exception:
         return None
     if not data:
         return None

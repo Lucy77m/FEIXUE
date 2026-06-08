@@ -44,7 +44,7 @@ def _load():
                 _imgsz = int(shape[2])
             _session = sess
             return _session
-        except Exception:  # noqa: BLE001
+        except Exception:
             _disabled = True
             return None
 
@@ -92,7 +92,7 @@ def detect(pil_image) -> list[tuple[int, int, int, int]]:
             if r - l >= 6 and b - t >= 6:
                 out_boxes.append((l, t, r, b))
         return out_boxes
-    except Exception:  # noqa: BLE001
+    except Exception:
         return []
 
 
