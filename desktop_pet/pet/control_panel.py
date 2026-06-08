@@ -139,8 +139,7 @@ _SEG_OFF = (
 
 
 class _Segmented(QWidget):
-    """分段按钮选择器：一排互斥按钮代替下拉框——无弹窗，且每个按钮用自身样式表(选中态紫底白字一定可见)。
-    接口对齐 QComboBox：currentData() / currentText() / setCurrentData()；on_change 仅在用户点击时回调。"""
+    """一排互斥按钮的分段选择器。"""
 
     def __init__(self, items: list[tuple[str, str]], on_change: "Callable[[str], None] | None" = None) -> None:
         super().__init__()
@@ -361,7 +360,7 @@ class ControlPanel(QDialog):
         anim.start()
 
     def snapshot_for_transition(self) -> "tuple":
-        """切语言关闭前抓当前(旧语言)的一帧 + 窗口位置，交给新面板做交叉淡入。"""
+        """抓当前一帧 + 窗口位置。"""
         return (self.grab(), self.geometry())
 
     def _t(self, key: str) -> str:
@@ -820,6 +819,13 @@ class ControlPanel(QDialog):
         col.addSpacing(8)
         col.addWidget(label(self._t("about_made_by"), "aboutAuthor"))
         col.addWidget(label(self._t("about_meta"), "aboutMeta"))
+        gh = QLabel(f'<a href="https://github.com/dulaiduwang003/MOCHI" style="color: {_ACCENT}; text-decoration: none;">GitHub · dulaiduwang003/MOCHI</a>')
+        gh.setObjectName("aboutMeta")
+        gh.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        gh.setOpenExternalLinks(True)
+        gh.setCursor(Qt.CursorShape.PointingHandCursor)
+        col.addSpacing(3)
+        col.addWidget(gh)
         return page
 
     def _on_reset_clicked(self) -> None:

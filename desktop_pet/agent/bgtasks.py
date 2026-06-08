@@ -1,7 +1,6 @@
 # author: bdth
 # email: 2074055628@qq.com
-# 后台任务注册表：让正在跑的 start_background_task / schedule_task(kind=do) 可被列出、可被协作式停止。
-# 进程级单例，loop(起任务)与 tools(列/停)都 import 它——只依赖标准库，不引 loop/tools，无循环导入。
+# 后台任务注册表：让正在跑的后台任务可被列出、可被协作式停止
 
 from __future__ import annotations
 
@@ -27,7 +26,7 @@ class _BgRegistry:
             self._tasks.pop(tid, None)
 
     def snapshot(self) -> list[tuple[int, str, float]]:
-        """[(id, task, 已运行秒数), ...]，按 id 升序。"""
+        """返回 [(id, task, 已运行秒数), ...]，按 id 升序。"""
         with self._lock:
             now = datetime.now()
             return [
@@ -36,7 +35,7 @@ class _BgRegistry:
             ]
 
     def stop(self, tid: int) -> bool:
-        """置该任务的 cancel 事件——Agent.run 每轮查 self._cancel 会就近退出(协作式，不硬杀)。"""
+        """置该任务的 cancel 事件。"""
         with self._lock:
             d = self._tasks.get(tid)
         if d is None:

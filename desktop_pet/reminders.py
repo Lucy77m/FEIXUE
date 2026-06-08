@@ -41,8 +41,7 @@ def _step(fire: datetime, repeat: str) -> datetime:
 
 
 def _occurrences(fire: datetime, repeat: str, now: datetime) -> tuple[datetime, datetime]:
-    """返回 (≤now 的最近一次触发点, >now 的下一次触发点)。
-    关机错过多次时：只投递「最近一次」(若仍在宽限内)，下次推进到未来——不把错过的全补(免刷屏)。"""
+    """返回 (≤now 的最近一次触发点, >now 的下一次触发点)。"""
     rep = (repeat or "").strip().lower()
     if rep.startswith("interval:"):
         try:

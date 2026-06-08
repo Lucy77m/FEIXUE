@@ -9,8 +9,11 @@
 ![UI](https://img.shields.io/badge/UI-PySide6%20·%20Qt-41CD52?logo=qt&logoColor=white)
 ![uv](https://img.shields.io/badge/managed%20with-uv-DE5FE9)
 ![Art](https://img.shields.io/badge/art-100%25%20code--drawn-FF8C00)
+![License](https://img.shields.io/badge/License-MIT-blueviolet)
 
 [简体中文](README.md) · **English** · [日本語](README.ja.md)
+
+🔗 [github.com/dulaiduwang003/MOCHI](https://github.com/dulaiduwang003/MOCHI)
 
 </div>
 
@@ -330,13 +333,15 @@ Everything lives in `data/` (in-project during development, moved to `%APPDATA%\
 
 ## 9. License
 
-To be determined (MIT or Apache-2.0 recommended).
+[MIT](LICENSE) — use it, change it, ship it however you like; just keep the copyright notice. No warranty, no liability.
 
 ---
 
 <div align="center">
 
-**Author**: bdth · ✉️ [2074055628@qq.com](mailto:2074055628@qq.com)
+**Author**: bdth · ✉️ [2074055628@qq.com](mailto:2074055628@qq.com) · [GitHub](https://github.com/dulaiduwang003/MOCHI)
+
+Honestly, this is just a little thing I built **for fun in my spare time** — no grand plan, I just wanted to see whether "chatting with an AI" could become "keeping a little creature on your desk that actually does things for you." The parts where the code gets meticulous are simply the bits I found interesting enough to fuss over. If you find it fun too, take it and tweak it however you like.
 
 *Mochi is still growing up. If one day it truly takes on a shape of its own, I hope you'll be willing to treat it as a friend, not just a tool.*
 

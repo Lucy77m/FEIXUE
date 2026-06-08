@@ -42,8 +42,7 @@ def _read_text(file: Path) -> str | None:
 
 
 def _read_pdf(file: Path) -> str | None:
-    """提取 PDF 文字。有真实文本层的页直接读取；
-    扫描件/纯图片页回退到 RapidOCR（按 200 DPI 渲染后识别）。"""
+    """提取 PDF 文字（有文本层的页直接读，扫描页走 OCR）。"""
     try:
         import pymupdf
     except ImportError:
@@ -69,7 +68,7 @@ def _read_pdf(file: Path) -> str | None:
 
 
 def _ocr_pdf_page(page) -> str:
-    """把一页 PDF 渲染成位图再做 OCR（用于扫描件页）。"""
+    """把一页 PDF 渲染成位图再做 OCR。"""
     try:
         import numpy as np
 
@@ -216,7 +215,7 @@ class DocStore:
         return "\n".join(f"- {Path(source).name} ({n} chunks)" for source, n in rows)
 
     def sources(self) -> list[tuple[str, str, int]]:
-        """知识库里每个文档：(完整 source 路径, 文件名, chunk 数)，供控制面板逐条展示/删除。"""
+        """返回知识库里每个文档的 (完整 source 路径, 文件名, chunk 数)。"""
         with self._lock:
             rows = self._conn.execute(
                 "SELECT source, COUNT(*) FROM chunks GROUP BY source ORDER BY source"
@@ -224,7 +223,7 @@ class DocStore:
         return [(str(s), Path(s).name, int(n)) for s, n in rows]
 
     def forget_exact(self, source: str) -> int:
-        """按完整 source 精确删一个文档（区别于 agent 工具 forget_docs 的子串匹配删）。"""
+        """按完整 source 精确删一个文档。"""
         with self._lock:
             cur = self._conn.execute("DELETE FROM chunks WHERE source = ?", (source,))
             self._conn.commit()
@@ -232,7 +231,7 @@ class DocStore:
 
 
 def read_file_text(path: str) -> str | None:
-    """读取单个文件的纯文本（PDF 走抽取/OCR），供输入框附件内联用；二进制/不支持格式返回 None。"""
+    """读取单个文件的纯文本（PDF 走抽取/OCR），不支持的格式返回 None。"""
     p = Path(path).expanduser()
     if not p.is_file():
         return None

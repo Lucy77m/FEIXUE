@@ -213,7 +213,7 @@ def _clean(text: str) -> str:
 
 
 def _clean_keep_punct(text: str) -> str:
-    """同 _clean 但保留标点 —— 用于纯标点回复（"……""。。。"）的降级显示，避免被整条吞掉。"""
+    """同 _clean 但保留标点。"""
     text = _MD_LINK.sub(r"\1", text)
     text = _MD_CODE.sub(r"\1", text)
     text = _MD_EMPH.sub("", text)
@@ -288,8 +288,7 @@ class SpeechText(QWidget):
         self.talking.emit(False)
 
     def advance(self) -> None:
-        """语音念完当前这句时由外部调用：翻到下一句(或末句则停留后收起)。
-        若脉冲早于本句打字完成(短句/语速快/中途关 TTS 同步回调)，先记下，打完立刻翻，避免卡死。"""
+        """翻到下一句(或末句则停留后收起)。"""
         if not self._paced:
             return
         if self._awaiting_advance:
@@ -454,12 +453,12 @@ class ThoughtBubble(QWidget):
         self._timer.timeout.connect(self._tick)
 
     def pop(self, text: str, pet: QWidget) -> None:
-        """一次性提示，向上飘并淡出（比如「好，停下了」）。"""
+        """一次性提示,向上飘并淡出。"""
         self._steady = False
         self._begin(text, pet, fresh=True)
 
     def show_step(self, text: str, pet: QWidget) -> None:
-        """进度标签：贴在头部就地换文字，停止更新后才淡出，不会回到头部重新上升。"""
+        """进度标签:贴在头部就地换文字,停止更新后才淡出。"""
         fresh = not (self.isVisible() and self._timer.isActive() and self._steady)
         self._steady = True
         self._steady_left = _BUBBLE_STEP_HOLD
@@ -686,7 +685,7 @@ def _encode_b64(img: QImage, fmt: str, quality: int) -> str:
 
 
 def _image_to_data_url(image: QImage) -> str:
-    """QImage → data URL。超大图先缩到 _IMG_MAX_SIDE；PNG 仍超预算就转 JPEG 递降质量，控住请求体。"""
+    """QImage 转 data URL。"""
     img = image
     if img.width() > _IMG_MAX_SIDE or img.height() > _IMG_MAX_SIDE:
         img = img.scaled(

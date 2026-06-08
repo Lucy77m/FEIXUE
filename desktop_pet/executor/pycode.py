@@ -22,9 +22,7 @@ _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
 def _python_exe() -> str:
-    """跑用户代码 / 装库用的 Python 解释器。
-    开发期就是当前解释器；打包(frozen)后 sys.executable 是 Mochi.exe（直接跑会起 Mochi 自己，
-    不是 Python），改用随包分发的独立 Python：dist/Mochi/pyruntime/python.exe。"""
+    """返回跑用户代码 / 装库用的 Python 解释器。"""
     if getattr(sys, "frozen", False):
         runtime = Path(sys.executable).parent / "pyruntime" / "python.exe"
         if runtime.exists():

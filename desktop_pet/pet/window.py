@@ -1,6 +1,6 @@
 # author: bdth
 # email: 2074055628@qq.com
-# 桌宠主窗口:无边框悬浮 QWidget,负责渲染 blob、处理拖拽/点击/悬停、入场动画与贴边躲藏
+# 桌宠主窗口:无边框悬浮 QWidget,渲染 blob 并处理拖拽/点击/悬停、入场动画与贴边躲藏。
 
 from __future__ import annotations
 

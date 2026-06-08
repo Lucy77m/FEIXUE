@@ -1,9 +1,6 @@
 # author: bdth
 # email: 2074055628@qq.com
-# 语音朗读(TTS)：可切换后端——
-#   · Edge TTS：微软在线神经语音(edge-tts)，30+ 自然中文音色，合成 mp3 后用 winmm(MCI) 播放；需联网。
-#   · 系统 SAPI：本机离线嗓子(经 pywin32)，零依赖兜底。
-# 选了 Edge 音色就走 Edge，合成/播放/联网任一失败这句自动回退 SAPI，保证有声。默认关闭；失败一律静默降级。
+# 语音朗读(TTS)：可切换 Edge TTS / 系统 SAPI 两种后端。
 
 from __future__ import annotations
 
@@ -98,7 +95,7 @@ _edge_ok: "bool | None" = None
 
 
 def edge_available() -> bool:
-    """edge-tts 是否可用(装了包)。结果缓存，供 UI 决定是否展示 Edge 音色。"""
+    """edge-tts 是否可用(装了包)。"""
     global _edge_ok
     if _edge_ok is None:
         try:
@@ -131,7 +128,7 @@ def _select_voice(sp) -> None:
 
 
 def _edge_say(text: str, voice_id: str, rate: int) -> None:
-    """Edge TTS：合成 mp3 → MCI 阻塞播放。任一步失败抛异常，由调用方回退 SAPI。"""
+    """Edge TTS：合成 mp3 → MCI 阻塞播放。"""
     import asyncio
 
     import edge_tts
@@ -168,8 +165,7 @@ def _mci_status(what: str) -> str:
 
 
 def _play_file(path: str) -> None:
-    """用 winmm(MCI) 播放音频文件——契合 worker 串行模型，零新增播放依赖。
-    异步 play + 轮询播放状态，好让 flush() 能中途打断(_stop)，而不是非等这句播完。"""
+    """用 winmm(MCI) 播放音频文件。"""
     import time as _t
 
     if _mci(f'open "{path}" type mpegvideo alias mochitts') != 0:
@@ -199,8 +195,7 @@ _SVSF_PURGE = 3
 
 
 def _sapi_speak(sp, text: str) -> None:
-    """异步念 + 轮询，好让 flush() 能中途打断(_stop)，而不是非等整句念完。
-    WaitUntilDone(ms)：念完返回 True、超时返回 False。老环境若无此方法，退回阻塞 Speak。"""
+    """异步念 + 轮询，让 flush() 能中途打断(_stop)。"""
     try:
         sp.Speak(text, _SVSF_ASYNC)
     except Exception:
@@ -292,8 +287,7 @@ def speak(text: str) -> None:
 
 
 def speak_one(text: str, on_done=None) -> None:
-    """念单独一句，念完后回调 on_done()(在 TTS 线程内)——用于让气泡与语音逐句对齐。
-    未开启 / 清洗后为空 时立即回调，保证调用方(气泡)不会卡住等不到回调。"""
+    """念单独一句，念完后回调 on_done()(在 TTS 线程内)。"""
     cleaned = _clean(text) if _enabled else ""
     if not _enabled or not cleaned:
         if on_done is not None:
@@ -306,7 +300,7 @@ def speak_one(text: str, on_done=None) -> None:
 
 
 def preview(text: str, voice: str, rate, on_done=None) -> None:
-    """试听：用指定音色/语速念一句，无视开关、也不改动当前设置——给面板选音色用。"""
+    """试听：用指定音色/语速念一句，无视开关、也不改动当前设置。"""
     try:
         rate = max(-50, min(50, int(rate)))
     except (TypeError, ValueError):
@@ -320,10 +314,7 @@ def preview(text: str, voice: str, rate, on_done=None) -> None:
 
 
 def flush() -> None:
-    """打断/下线/退出时调：置打断信号(停掉正在念的那句) + 清空待播队列。
-    worker 会在念下一句前自动复位该信号，故置位后无需手动清。
-    关键：被丢弃的排队项也要补调它的 on_done——否则逐句锁(paced)气泡正等这句的回调推进时会永久卡死，
-    连带 is_speaking 恒真、阻塞后台/看屏/主动消息播报。"""
+    """置打断信号(停掉正在念的那句) + 清空待播队列，并补调被丢弃项的 on_done。"""
     _stop.set()
     drained = []
     try:
@@ -341,8 +332,7 @@ def flush() -> None:
 
 
 def shutdown() -> None:
-    """退出前调：停掉正在念的(SAPI purge / MCI stop)、清队列、让 worker 在自己的线程里 CoUninitialize 后退出。
-    显著降低 os._exit 强退时撕裂 SAPI/音频设备导致的「应用程序错误」弹窗。最多等 worker 1.5s。"""
+    """退出前调：停掉正在念的、清队列、让 worker 在自己的线程里 CoUninitialize 后退出。"""
     _shutdown.set()
     _stop.set()
     try:

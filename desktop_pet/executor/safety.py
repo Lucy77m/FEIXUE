@@ -1,6 +1,6 @@
 # author: bdth
 # email: 2074055628@qq.com
-# 危险命令拦截:用正则匹配格式化磁盘、删根目录等灾难性操作并阻止执行
+# 危险命令拦截:匹配灾难性操作并阻止执行
 
 from __future__ import annotations
 

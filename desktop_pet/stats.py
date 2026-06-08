@@ -1,6 +1,6 @@
 # author: bdth
 # email: 2074055628@qq.com
-# 轻量陪伴统计:首次相遇时间 + 累计互动次数,供控制面板「它眼中的你」展示养成感
+# 轻量陪伴统计:记录首次相遇时间与累计互动次数。
 
 from __future__ import annotations
 

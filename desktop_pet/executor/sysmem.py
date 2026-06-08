@@ -1,6 +1,6 @@
 # author: bdth
 # email: 2074055628@qq.com
-# 系统内存查询与读取进程内存:统计内存占用 Top 进程,并通过 Windows API 按地址读取目标进程内存并十六进制转储
+# 系统内存查询与读取进程内存:统计内存占用 Top 进程,并按地址读取目标进程内存并十六进制转储
 
 from __future__ import annotations
 

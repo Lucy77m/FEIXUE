@@ -165,7 +165,7 @@ _FX_EDGE_FADE = 32.0
 
 
 def _edge_alpha(y: float, win_h: float) -> float:
-    """随特效靠近窗口上/下边缘把透明度淡到 0，避免在边缘被硬裁切。"""
+    """随特效靠近窗口上/下边缘把透明度淡到 0。"""
     near_top = y / _FX_EDGE_FADE
     near_bottom = (win_h - y) / _FX_EDGE_FADE
     return max(0.0, min(1.0, near_top, near_bottom))
@@ -307,7 +307,7 @@ class BlobPet:
 
     @property
     def is_catnapping(self) -> bool:
-        """打盹中(自发短睡，会自己醒)，区别于人离开太久的'离开睡'。"""
+        """是否打盹中(自发短睡)。"""
         return self._catnap_left > 0.0
 
     def set_dragging(self, on: bool) -> None:
@@ -355,7 +355,7 @@ class BlobPet:
         return self._react is not None
 
     def clear_pending(self) -> None:
-        """丢弃排队中的表演动作；用户中断任务时调用，避免停止后还冒出一个动作。"""
+        """丢弃排队中的表演动作。"""
         self._pending_perform = None
 
     def perform(self, name: str) -> bool:

@@ -204,7 +204,7 @@ class MemoryStore:
             return int(self._conn.execute("SELECT COUNT(*) FROM experiences").fetchone()[0])
 
     def profile_items(self) -> list[tuple[str, str]]:
-        """全部偏好画像 (key, value) —— 供「它眼中的你」展示。"""
+        """返回全部偏好画像 (key, value)。"""
         with self._lock:
             return [(str(k), str(v)) for k, v in
                     self._conn.execute("SELECT key, value FROM profile ORDER BY key").fetchall()]

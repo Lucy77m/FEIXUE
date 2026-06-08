@@ -9,8 +9,11 @@
 ![UI](https://img.shields.io/badge/UI-PySide6%20·%20Qt-41CD52?logo=qt&logoColor=white)
 ![uv](https://img.shields.io/badge/managed%20with-uv-DE5FE9)
 ![Art](https://img.shields.io/badge/art-100%25%20code--drawn-FF8C00)
+![License](https://img.shields.io/badge/License-MIT-blueviolet)
 
 **简体中文** · [English](README.en.md) · [日本語](README.ja.md)
+
+🔗 [github.com/dulaiduwang003/MOCHI](https://github.com/dulaiduwang003/MOCHI)
 
 </div>
 
@@ -330,13 +333,15 @@ Mochi **能在你的机器上执行任意命令和代码、操控鼠标键盘、
 
 ## 9. 许可
 
-待定（建议 MIT 或 Apache-2.0）。
+[MIT](LICENSE) —— 随便用、随便改、随便分发，保留版权声明即可，作者不担保也不负责。
 
 ---
 
 <div align="center">
 
-**作者**：bdth · ✉️ [2074055628@qq.com](mailto:2074055628@qq.com)
+**作者**：bdth · ✉️ [2074055628@qq.com](mailto:2074055628@qq.com) · [GitHub](https://github.com/dulaiduwang003/MOCHI)
+
+说白了，这就是我**闲来无事、纯凭兴趣写着玩**的一个小东西——没什么宏大目标，就是想看看能不能把"和 AI 对话"做成"桌上养着一只会帮你干活的小生物"。代码里那些较真的细节，都是写的时候自己觉得有意思才折腾的。你要是也觉得好玩，随便拿去用、去改。
 
 *Mochi 还在长大。如果未来某天它真的有了自己的样子，希望你愿意把它当个朋友，而不只是工具。*
 

@@ -79,8 +79,7 @@ def _install_qt_message_filter() -> None:
 
 
 def _light_palette() -> QPalette:
-    """统一的浅色调色板：Qt 弹窗(下拉容器/菜单/tooltip)等未被 QSS 覆盖的部件会用它，
-    从根上杜绝 Windows 深色模式渗进来(比如下拉框圆角四角露出的黑)。"""
+    """给未被 QSS 覆盖的 Qt 部件统一浅色。"""
     p = QPalette()
     base = QColor("#ffffff")
     text = QColor("#3b3a4d")
@@ -132,7 +131,7 @@ def _split_sentences(text: str) -> list[str]:
 
 
 def _friendly_error(exc: Exception) -> str:
-    """把底层异常翻成一句人话，让「乱填 key / 断网 / 限流」一眼能看懂，而不是甩英文堆栈。"""
+    """把底层异常翻成一句人话。"""
     name = type(exc).__name__
     nlow = name.lower()
     msg = str(exc)
@@ -235,8 +234,7 @@ class AgentWorker(QObject):
 
     @Slot(str)
     def run_timed_task(self, task: str) -> None:
-        # 到点的定时任务走前台主体执行：自管 busy(可被点宠物打断)、全套 UI 回调(有身体)、
-        # 但不 reflect(不把这轮当用户对话沉淀记忆)；finally 无条件复位 busy，保证 _timed_inflight 一定释放。
+        # 前台主体执行定时任务
         self._running = True
         self.busy_changed.emit(True)
         try:
@@ -246,7 +244,7 @@ class AgentWorker(QObject):
                     on_plan=self.plan_changed.emit, on_media=self.media_requested.emit,
                     on_perform=self.perform_requested.emit,
                 )
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 reply = _friendly_error(exc)
             if reply.strip() and not (self._agent.was_cancelled(reply) or self._agent.is_cancelled):
                 self.reply_ready.emit(reply)
@@ -361,7 +359,7 @@ class PetApp(QObject):
         self._inbox_inflight = False
         self._cancelling = False
         self._pending_bg: list[tuple[str, str]] = []
-        self._timed_queue: list[str] = []  # 到点的 do 定时任务，前台主体串行执行；worker 忙时在此排队
+        self._timed_queue: list[str] = []  # 到点 do 任务的前台串行执行队列
         self._timed_inflight = False
         self._confirm_event = threading.Event()
         self._confirm_result = False
@@ -868,7 +866,7 @@ class PetApp(QObject):
 
     @Slot(str, str)
     def _on_remote_action(self, kind: str, content: str) -> None:
-        # task → 走前台主体(复用定时任务队列：有身体/能打断/在场才执行/关机回写不丢)；say → 桌宠说一句(隐藏/全屏转托盘)。
+        # task→前台队列；say→说一句
         if kind == "task":
             self._timed_queue.append(content)
             self._drain_timed()
@@ -898,14 +896,13 @@ class PetApp(QObject):
             return False
 
     def _in_scene(self) -> bool:
-        # do 定时任务"在场可前台执行"的环境：开机、可见、没睡、不在全屏游戏里。
-        # 只有在场才把 do 任务从持久库消费出来——否则留库，绝不"消费却不执行"而丢失。
+        # "在场"=开机/可见/没睡/非全屏
         return (self._shown and self._pet.isVisible()
                 and not self._pet.is_asleep and not self._foreground_is_fullscreen())
 
     def _drain_reminders(self) -> None:
         in_scene = self._in_scene()
-        due = reminders.due(datetime.now(), take_do=in_scene)  # 不在场时 do 任务留库不消费(免丢失)
+        due = reminders.due(datetime.now(), take_do=in_scene)
         if not due:
             return
         says = [r.what for r in due if r.kind != "do"]
@@ -922,8 +919,7 @@ class PetApp(QObject):
             self._drain_timed()
 
     def _drain_timed(self) -> None:
-        # 到点的 do 定时任务走前台主体执行：有身体/嘴/人格，能动作能说话能操控能汇报，且点宠物即可打断。
-        # 门控对齐其它自动链路：忙/打断/在念/正打字/不在场时一律"延后不丢"，等条件满足再跑下一个，绝不打断当前对话。
+        # 前台串行执行 do 任务
         if self._timed_inflight or not self._timed_queue:
             return
         if (self._worker.is_running or self._busy or self._lecturing or self._cancelling
@@ -931,16 +927,16 @@ class PetApp(QObject):
             return
         task = self._timed_queue.pop(0)
         self._timed_inflight = True
-        self._pet.wake()  # 到点自己醒来做这件事
+        self._pet.wake()
         self.request_timed_task.emit(task)
 
     def _requeue_timed(self) -> None:
-        # 打断/关机时：把还没执行的定时任务写回持久库(立即到期)，下次在场会重新触发——绝不静默丢弃用户定的任务。
+        # 打断/关机：未执行的定时任务回写持久库
         now = datetime.now()
         for task in self._timed_queue:
             try:
                 reminders.add(now, task, kind="do")
-            except Exception:  # noqa: BLE001
+            except Exception:
                 pass
         self._timed_queue.clear()
         self._timed_inflight = False
@@ -1215,7 +1211,7 @@ class PetApp(QObject):
         emotion.apply("returned")
         selector.set_emotion(*emotion.snapshot())
         self._just_returned = True
-        self._drain_reminders()  # 开机补投：关机期间留库的到期 do 任务尽快前台执行(不等下一拍轮询)
+        self._drain_reminders()  # 开机补投关机期间留库的到期 do 任务
 
     def _power_off(self) -> None:
         """关机：收起桌宠动画 + 停掉进行中的一切 + 收起所有浮层；程序仍常驻后台(不退出)。"""
@@ -1306,6 +1302,13 @@ class PetApp(QObject):
         self._pet.express("neutral")
 
     def _quit(self) -> None:
+     
+        for _t in (self._presence_timer, self._reminder_timer, self._proactive_timer,
+                   self._watch_timer, self._remote_timer):
+            try:
+                _t.stop()
+            except Exception:
+                pass
         self._hotkeys.stop()
         try:
             voice.shutdown()
@@ -1314,6 +1317,12 @@ class PetApp(QObject):
         if self._worker.is_running:
             self._worker.cancel()
         self._confirm_event.set()
+        try:
+            from desktop_pet.agent.bgtasks import bg_tasks
+            for _tid, _task, _secs in bg_tasks.snapshot():
+                bg_tasks.stop(_tid)
+        except Exception:
+            pass
         self._worker.shutdown()
         try:
             mcp_hub.shutdown()
@@ -1322,6 +1331,11 @@ class PetApp(QObject):
         self._thread.quit()
         self._thread.wait(3000)
         self._app.quit()
+        try:
+            import ctypes
+            ctypes.windll.kernel32.TerminateProcess(ctypes.windll.kernel32.GetCurrentProcess(), 0)
+        except Exception:
+            pass
         os._exit(0)
 
     def run(self) -> int:

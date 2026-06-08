@@ -523,8 +523,7 @@ class Agent:
             worker.close()
 
     def _run_workflow(self, mode: str, tasks: list, result_schema: str | None, step: Callable[[str], None] | None) -> str:
-        """确定性编排：fanout=并行扇出 N 个子任务(宽度≤_MAX_PARALLEL_SUBAGENTS)；pipeline=顺序把上阶段输出注入下阶段。
-        把现在「靠模型恰好同轮吐多个 spawn 才并行」的偶发，变成一次调用就可靠的原语。深度/取消沿用现有机制。"""
+        """确定性编排：fanout=并行扇出 N 个子任务；pipeline=顺序把上阶段输出注入下阶段。"""
         if self._depth >= _MAX_SUBAGENT_DEPTH:
             return "(Can't run a workflow from inside a sub-agent.)"
         if isinstance(tasks, str):
@@ -571,8 +570,7 @@ class Agent:
         on_media: Callable[[str, str, str], None] | None = None,
         on_perform: Callable[[str], bool] | None = None,
     ) -> str:
-        # 定时任务到点亲自做：完整工具执行(有身体能动作能说话)，但跑完把这一轮从历史回滚——
-        # 它是自动触发的"它自己做的事"，不该混进用户对话历史、也不该被反思当成用户输入写进长期记忆。
+        # 定时任务亲自做(完整工具执行)，跑完回滚历史
         snapshot = list(self._messages)
         try:
             return self.run(
@@ -676,8 +674,7 @@ class Agent:
         return content
 
     def rewrite_text(self, text: str) -> str:
-        """「顺手就改」：把选中文字独立改写一遍。刻意不调 _prepare/不碰 self._messages，
-        避免与正在 run 的 worker 抢同一份对话历史。"""
+        """把选中文字独立改写一遍。"""
         text = (text or "").strip()
         if not text:
             return ""
@@ -699,7 +696,7 @@ class Agent:
         return _strip_think_leak(content)
 
     def transform_clipboard(self, kind: str, text: str) -> str:
-        """「剪贴板炼金术」：对用户刚复制的报错/外文/代码顺手给一两句。独立调用，不碰主对话历史。"""
+        """对用户刚复制的报错/外文/代码顺手给一两句。"""
         text = (text or "").strip()
         if not text:
             return ""
@@ -721,7 +718,7 @@ class Agent:
         return _strip_think_leak(content)
 
     def explore_topic(self, topic: str) -> str:
-        """空闲时真去查一件小事：用临时子代理(带工具、不污染主对话历史)查完，用自己口吻总结一句。"""
+        """空闲时用临时子代理查一件小事，用自己口吻总结一句。"""
         worker = Agent(self._settings, depth=self._depth + 1)
         try:
             return worker.run(prompts.explore_nudge(topic))
@@ -731,8 +728,7 @@ class Agent:
             worker.close()
 
     def peek_screen(self, trigger: str = "") -> str:
-        """看一眼当前活动窗口截图，判断用户是不是卡住了。没事返回空字符串(模型回 NONE)。
-        trigger 是卡住雷达给的线索(如报错窗口的标题)，有就让模型重点看那处。"""
+        """看一眼当前活动窗口截图，判断用户是不是卡住了。"""
         from desktop_pet.eyes import capture
         from desktop_pet.settings import CAPTURE_WINDOW
         try:
@@ -762,7 +758,7 @@ class Agent:
         return text
 
     def _set_screen_watch(self, arguments: dict) -> str:
-        """开/关「定时看屏分析」。会话级（不落盘）：app 的定时器会按间隔截图，交给 analyze_screen 分析后播报。"""
+        """开/关定时看屏分析。"""
         from desktop_pet.watcher import watcher
         focus = str(arguments.get("focus") or "").strip()
         interval = arguments.get("interval_minutes")
@@ -781,8 +777,7 @@ class Agent:
                 f"\"{foc}\". I'll start within a minute. Say 'stop watching' anytime to turn it off.)")
 
     def analyze_screen(self, focus: str) -> str:
-        """定时看屏：截当前活动窗口，按用户指定的关注点(focus)分析并用自己的口吻报一句。
-        与 peek 区别：peek 判断「是否卡住」且默认沉默；这里是用户主动要的周期汇报，每次都给读数（除非屏上没相关内容→NONE）。"""
+        """定时看屏：截当前活动窗口，按用户指定的关注点分析并用自己的口吻报一句。"""
         from desktop_pet.eyes import capture
         from desktop_pet.settings import CAPTURE_WINDOW
         from desktop_pet.watcher import WATCH_FAIL

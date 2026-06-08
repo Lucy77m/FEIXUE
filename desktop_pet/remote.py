@@ -1,9 +1,6 @@
 # author: bdth
 # email: 2074055628@qq.com
-# 远程触发（文件收件箱）：往 DATA_DIR/inbox/ 丢一个 json，桌宠就去办——手机用网盘(OneDrive/坚果云)同步该目录即可远程触发。
-# 故意只做"文件"这一种入口、不开任何网络监听端口：能往本地 inbox 写文件的进程本就在本机、已有相当权限，
-# 不额外扩大网络攻击面。默认关（settings.remote_inbox），开了才轮询。每个文件处理后移到 inbox/done/。
-# 文件格式：{"task": "..."}(到点后台执行) 或 {"say": "..."}(让桌宠说一句)。
+# 远程触发（文件收件箱）：轮询 DATA_DIR/inbox/ 下的 json 并执行，处理后移到 inbox/done/。
 
 from __future__ import annotations
 
@@ -24,7 +21,7 @@ _SETTLE_S = 4.0
 class RemoteInbox:
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._seen: set[tuple[str, int, int]] = set()  # 归档失败的文件指纹，避免下一拍重读、重复执行同一远程任务
+        self._seen: set[tuple[str, int, int]] = set()
 
     def ensure_dir(self) -> None:
         try:
@@ -33,8 +30,7 @@ class RemoteInbox:
             pass
 
     def poll(self) -> list[tuple[str, str]]:
-        """读 inbox/*.json（除 done/ 外），每个文件一条触发；处理后归档到 inbox/done/。
-        返回 [(kind, content)]，kind ∈ {'task','say'}。坏文件也归档，免得反复读。"""
+        """读 inbox/*.json（除 done/ 外），每个文件一条触发并归档到 inbox/done/，返回 [(kind, content)]。"""
         out: list[tuple[str, str]] = []
         with self._lock:
             if not INBOX.exists():
@@ -53,7 +49,7 @@ class RemoteInbox:
                     continue
                 fp = (p.name, int(st.st_mtime), st.st_size)
                 if fp in self._seen:
-                    continue  # 这份之前已处理过、只是归档失败留在原地——别再读、别重复执行
+                    continue
                 try:
                     data = json.loads(p.read_text(encoding="utf-8"))
                 except (json.JSONDecodeError, OSError, ValueError):

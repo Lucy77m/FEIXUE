@@ -9,8 +9,11 @@
 ![UI](https://img.shields.io/badge/UI-PySide6%20·%20Qt-41CD52?logo=qt&logoColor=white)
 ![uv](https://img.shields.io/badge/managed%20with-uv-DE5FE9)
 ![Art](https://img.shields.io/badge/art-100%25%20code--drawn-FF8C00)
+![License](https://img.shields.io/badge/License-MIT-blueviolet)
 
 [简体中文](README.md) · [English](README.en.md) · **日本語**
+
+🔗 [github.com/dulaiduwang003/MOCHI](https://github.com/dulaiduwang003/MOCHI)
 
 </div>
 
@@ -330,13 +333,15 @@ Mochi は**あなたのマシン上で任意のコマンドとコードを実行
 
 ## 9. ライセンス
 
-未定（MIT または Apache-2.0 を推奨）。
+[MIT](LICENSE) —— 自由に使い・改変し・配布してください。著作権表示だけ残せば OK。無保証・無責任です。
 
 ---
 
 <div align="center">
 
-**作者**：bdth · ✉️ [2074055628@qq.com](mailto:2074055628@qq.com)
+**作者**：bdth · ✉️ [2074055628@qq.com](mailto:2074055628@qq.com) · [GitHub](https://github.com/dulaiduwang003/MOCHI)
+
+正直に言うと、これは**暇つぶしに趣味で作った**ちょっとしたものです——大層な目標はなく、ただ「AI と会話する」を「机の上で、実際に手伝ってくれる小さな生き物を飼う」に変えられないか試してみたかっただけ。コードで細かくこだわっている所は、作っていて面白いと思って弄っただけです。面白そうと思ったら、自由に使って改造してください。
 
 *Mochi はまだ成長中です。いつか本当に自分の姿を持つ日が来たら、ただの道具としてではなく、友達として接してくれたら嬉しいです。*
 

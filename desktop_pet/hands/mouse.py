@@ -1,6 +1,6 @@
 # author: bdth
 # email: 2074055628@qq.com
-# 鼠标操作：将图像坐标换算成屏幕坐标后执行点击/双击/右键/移动/滚动，越界则拒绝
+# 鼠标操作：点击/双击/右键/移动/滚动。
 
 from __future__ import annotations
 

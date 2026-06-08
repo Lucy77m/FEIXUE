@@ -14,9 +14,7 @@ import sys as _sys
 
 
 def atomic_write_text(path: Path, text: str) -> None:
-    """原子写文本：先写唯一临时文件再 os.replace 覆盖目标。
-    避免进程在写到一半时被杀（反思是 fire-and-forget daemon、退出走 os._exit），
-    留下半截 / 损坏的 JSON 让下次启动读不出来。临时名带 uuid，多线程同写同一文件也不会撞 tmp。"""
+    """原子写文本(临时文件 + os.replace 覆盖目标)。"""
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.parent / f".{path.name}.{_uuid.uuid4().hex}.tmp"
     try:
@@ -31,8 +29,7 @@ def atomic_write_text(path: Path, text: str) -> None:
 
 
 def _default_data_dir() -> Path:
-    """开发期用项目内 data/；PyInstaller 打包后改用用户可写的 %APPDATA%/Mochi
-    （打包后 __file__ 落在临时/只读目录，不能拿来存配置与记忆）；STAR_DATA_DIR 始终可覆盖。"""
+    """定位数据目录：开发期用项目内 data/，打包后用 %APPDATA%/Mochi，STAR_DATA_DIR 可覆盖。"""
     override = _os.environ.get("STAR_DATA_DIR")
     if override:
         return Path(override)
@@ -123,10 +120,7 @@ class Settings:
 
 
 def build_http_client(proxy: str):
-    """按代理设置造一个 httpx.Client 给 OpenAI 客户端用。
-    留空＝直连且 trust_env=False（无视系统/环境里的 *_PROXY，免得国内接口被乱代理劫持）；
-    填了＝只走这个代理。
-    超时细分：连不上就 8s 快速失败，别让坏网/坏配置把请求线程卡到天荒地老。"""
+    """按代理设置造一个 httpx.Client。"""
     import httpx
 
     timeout = httpx.Timeout(connect=8.0, read=90.0, write=30.0, pool=8.0)

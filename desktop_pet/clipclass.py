@@ -1,7 +1,6 @@
 # author: bdth
 # email: 2074055628@qq.com
-# 剪贴板文本的本地启发式分类器：判断复制的是 报错 / 外文 / 代码 / 链接 / 普通。
-# 纯函数、无 Qt、无 IO、无网络——给「剪贴板炼金术」与 recall_clipboard 当判别底座。
+# 剪贴板文本的本地启发式分类器：判断复制的是 报错 / 外文 / 代码 / 链接 / 普通
 
 from __future__ import annotations
 
@@ -28,7 +27,7 @@ _CODE_RE = re.compile(
 
 
 def classify(text: str) -> tuple[str, float]:
-    """返回 (类别, 置信度0~1)。顺序：链接→报错→代码→外文→普通（先具体后宽泛）。"""
+    """返回 (类别, 置信度0~1)。"""
     s = (text or "").strip()
     if len(s) < 2:
         return ("plain", 0.0)

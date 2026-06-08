@@ -70,10 +70,7 @@ def cosine(a: list[float], b: list[float]) -> float:
 
 
 def rank_by_cosine(query_vec: list[float], blobs: list[bytes | None], k: int) -> list[int]:
-    """在一堆打包向量(blob)里挑出与 query_vec 余弦最高的前 k 个，返回其下标(降序)。
-    召回是每轮对话的热路径，记忆/知识库变大后逐条纯 Python 余弦明显变慢——优先用 numpy
-    一次性矩阵化算完；numpy 缺失/异常时退回纯 Python(结果一致，只是慢些)。
-    空 blob、维度不符(换过嵌入模型)的向量都跳过，不入选。"""
+    """在打包向量里挑出与 query_vec 余弦最高的前 k 个，返回其下标(降序)。"""
     dim = len(query_vec)
     try:
         import numpy as np

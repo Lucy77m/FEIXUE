@@ -51,7 +51,7 @@ _CUE_LOOKBACK = 4
 
 
 def _cue_hit(low: str, cues: tuple[str, ...]) -> bool:
-    """某类线索词是否「干净」命中——忽略被否定、或指向用户自己的那几次出现。"""
+    """判断某类线索词是否命中（忽略被否定或指向用户自己的出现）。"""
     for cue in cues:
         start = low.find(cue)
         while start != -1:
@@ -134,7 +134,7 @@ class EmotionEngine:
         return _tone_hint(_state_name(valence, arousal), rapport)
 
     def _decayed(self) -> _State:
-        """返回一份状态副本：从 `updated_at` 起向基线恢复到当前时刻。无副作用。"""
+        """返回一份从 updated_at 向基线恢复到当前时刻的状态副本。"""
         s = _State(self._state.valence, self._state.arousal, self._state.rapport, self._state.updated_at)
         if not s.updated_at:
             return s
@@ -155,8 +155,7 @@ class EmotionEngine:
         return s
 
     def _settle_decay(self) -> None:
-        """把随时间衰减后的值结算进存储状态，并把 updated_at 重新锚定到当前时刻。
-        调用方必须已持有锁。供 apply/init 使用，之后会持久化一份新的基线。"""
+        """把衰减后的值结算进存储状态，并把 updated_at 锚定到当前时刻。"""
         self._state = self._decayed()
         self._state.updated_at = self._now()
 

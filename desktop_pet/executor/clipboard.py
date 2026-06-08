@@ -6,8 +6,7 @@ from __future__ import annotations
 
 
 def read_clipboard_text() -> str | None:
-    """返回剪贴板里的文本；非文本 / 空 / 读取失败一律返回 None。
-    供内部 save→restore 用：不把"不是文本"这类提示串当成数据，避免以 '(' 开头的正常文本被误判。"""
+    """返回剪贴板里的文本；非文本 / 空 / 读取失败一律返回 None。"""
     try:
         import win32clipboard
         import win32con

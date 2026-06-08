@@ -39,7 +39,7 @@ QPushButton#no:hover { background: #e7e0d6; color: #5a5a66; }
 
 
 class ConfirmBox(QWidget):
-    """它想做某个操作时，弹出的「执行 / 不执行」小面板——点了才往下走。"""
+    """操作前弹出的「执行 / 不执行」确认小面板。"""
 
     answered = Signal(bool)
 

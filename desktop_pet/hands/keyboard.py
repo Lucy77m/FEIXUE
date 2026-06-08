@@ -1,6 +1,6 @@
 # author: bdth
 # email: 2074055628@qq.com
-# 键盘输入：模拟打字与组合键，非 ASCII 文本走剪贴板粘贴
+# 键盘输入：模拟打字与组合键
 
 from __future__ import annotations
 

@@ -1,8 +1,6 @@
 # author: bdth
 # email: 2074055628@qq.com
-# 剪贴板采样器：监听 QClipboard.dataChanged（UI 线程），对新复制的文本做本地分类、去重、节流，
-# 把「最近一条有趣的剪贴板」留在内存里，并发 interesting 信号给「剪贴板炼金术」消费。
-# 隐私红线：只在内存里留最近几条，进程退出即丢，绝不落盘、绝不进 reflect/journal/LLM 历史。
+# 剪贴板采样器：对新复制的文本做本地分类、去重、节流，发 interesting 信号。
 
 from __future__ import annotations
 
@@ -41,11 +39,11 @@ class Sampler(QObject):
         return self._enabled
 
     def mark_self_write(self, text: str) -> None:
-        """Mochi 自己写回剪贴板前调用，下一次 dataChanged 命中就跳过，防自采样回环。"""
+        """标记自己写回剪贴板的内容，下一次跳过。"""
         self._self_mark = self._hash((text or "").strip())
 
     def feed(self, text: str) -> None:
-        """app 把 QClipboard 文本喂进来（UI 线程）。"""
+        """喂入 QClipboard 文本。"""
         if not self._enabled:
             return
         s = (text or "").strip()
@@ -72,7 +70,7 @@ class Sampler(QObject):
         return self._ring[-1] if self._ring else None
 
     def latest_interesting(self) -> tuple[str, str] | None:
-        """给 worker 线程读：返回的是不可变 tuple 快照，安全。"""
+        """返回最近一条有趣的剪贴板快照。"""
         return self._interesting
 
     def recent(self, n: int = _RING) -> list[tuple[str, str]]:

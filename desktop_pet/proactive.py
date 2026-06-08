@@ -74,7 +74,7 @@ class ProactiveTimer:
         self.schedule_next(now, level)
 
     def today(self, now: datetime, level: str) -> tuple[int, int]:
-        """返回 (今日已主动次数, 当前档位每日上限) —— 供状态主页展示。"""
+        """返回 (今日已主动次数, 当前档位每日上限)。"""
         self._roll_day(now)
         _cmin, _cmax, cap = _params(level)
         return self._state.count, cap

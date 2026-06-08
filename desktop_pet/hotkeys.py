@@ -1,7 +1,6 @@
 # author: bdth
 # email: 2074055628@qq.com
-# 注册 Windows 全局热键（唤出 / 问选区 / 顺手改），组合键可由控制面板自定义；
-# 在后台线程跑 Win32 消息循环并转成 Qt 信号，并把每个键的注册结果(成功/被占用)回报给面板。
+# 注册 Windows 全局热键（唤出 / 问选区 / 顺手改）并转成 Qt 信号。
 
 from __future__ import annotations
 
@@ -24,7 +23,7 @@ _MODS = {
 
 
 def parse_combo(combo: str) -> tuple[int, int] | None:
-    """'ctrl+shift+q' / 'Ctrl+Alt+S' → (mods, vk)；缺修饰键或解析不出主键返回 None。"""
+    """把组合键字符串解析为 (mods, vk)。"""
     parts = [p.strip().lower() for p in (combo or "").split("+") if p.strip()]
     mods = 0
     vk: int | None = None
@@ -76,7 +75,7 @@ class GlobalHotkeys(QObject):
         self._tid = 0
 
     def restart(self, keys: dict) -> None:
-        """用户在面板改了键：停旧线程、用新键重注册（会重新 emit status）。键没变就不折腾。"""
+        """用新键重新注册热键。"""
         new = dict(keys)
         if new == self._keys and self._thread is not None:
             return

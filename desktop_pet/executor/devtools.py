@@ -1,7 +1,6 @@
 # author: bdth
 # email: 2074055628@qq.com
-# 工程纪律工具：看未提交的 git diff（改前摸现状/改后自查）、跑项目测试（改完确认没改坏）。
-# 都用一次性子进程跑（不占常驻 PowerShell 会话、不抢它的 cwd），各带独立超时。
+# 工程纪律工具：看未提交的 git diff、跑项目测试。
 
 from __future__ import annotations
 
@@ -40,7 +39,7 @@ def _kill_tree(pid: int) -> None:
 
 
 def review_diff(path: str = ".", staged: bool = False) -> str:
-    """看工作区未提交的 git diff。path 给仓库目录、或其中某个文件/子目录(只看它)。staged=True 看已暂存的。"""
+    """看工作区未提交的 git diff（staged=True 看已暂存的）。"""
     cwd = _repo_cwd(path)
     p = (path or ".").strip() or "."
     try:
@@ -70,7 +69,7 @@ def review_diff(path: str = ".", staged: bool = False) -> str:
 
 
 def run_tests(command: str = "", path: str = ".") -> str:
-    """跑项目测试并返回结果摘要（改完代码后用它确认没改坏）。不给 command 就自动探测(pytest / npm test)。"""
+    """跑项目测试并返回结果摘要（不给 command 就自动探测）。"""
     cwd = _repo_cwd(path)
     cmd = (command or "").strip()
     if not cmd:

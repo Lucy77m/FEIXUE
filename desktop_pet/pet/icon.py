@@ -138,7 +138,7 @@ def mochi_icon() -> QIcon:
 
 
 def save_ico(path: str = "mochi.ico", sizes: tuple[int, ...] = (16, 24, 32, 48, 64, 128, 256)) -> str:
-    # 把 Mochi 的脸渲染成多尺寸 Windows .ico,给打包的 exe / 安装程序 / 快捷方式用(需 Pillow + 一个 QApplication)。
+    # 渲染多尺寸 .ico
     import io
 
     from PIL import Image

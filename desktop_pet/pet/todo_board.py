@@ -1,7 +1,6 @@
 # author: bdth
 # email: 2074055628@qq.com
-# 任务清单浮窗：常驻显示当前 plan 的待办清单——独立于黑板(BlackBoard)，
-# 这样模型最终回复里带 Markdown 表格/黑板课时不会把清单冲掉(对齐 Claude Code 的 TodoWrite 常驻可见)。
+# 任务清单浮窗：常驻显示当前 plan 的待办清单。
 
 from __future__ import annotations
 

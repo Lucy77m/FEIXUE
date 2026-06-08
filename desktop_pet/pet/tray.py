@@ -38,7 +38,7 @@ class Tray(QSystemTrayIcon):
             self._on_open_panel()
 
     def notify(self, title: str, body: str, msecs: int = 8000) -> None:
-        """系统托盘气泡通知——MoChi 收起/关机/被全屏游戏挡住时，让提醒仍能触达用户。"""
+        """弹出系统托盘气泡通知。"""
         try:
             if QSystemTrayIcon.supportsMessages():
                 self.showMessage(title, body, mochi_icon(), msecs)

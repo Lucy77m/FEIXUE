@@ -1,7 +1,6 @@
 # author: bdth
 # email: 2074055628@qq.com
-# 卡住雷达：证据驱动地判断用户是不是卡在某个窗口（标题报错 / 长时间盯同一窗口没进展），
-# 取代「随机偷看」。只做 UI 线程的轻量探测(observe)；真正的 OCR 取证+诊断在 worker 线程（peek_screen）做。
+# 卡住雷达：判断用户是不是卡在某个窗口。
 
 from __future__ import annotations
 
@@ -34,7 +33,7 @@ class Radar:
         self._since = 0.0
 
     def observe(self) -> RadarSignal:
-        """UI 线程每个 presence tick 调一次：更新久驻计时并给出当前信号。"""
+        """更新久驻计时并给出当前信号。"""
         title = presence.foreground_window_title()
         now = time.monotonic()
         norm = _NORM.sub(" ", title).strip().lower()

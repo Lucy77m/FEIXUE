@@ -592,7 +592,7 @@ def _resolve_reminder_time(fire_at: str | None, in_minutes: float | None) -> dat
 
 
 def _parse_repeat(s: str | None) -> str:
-    """把模型给的 repeat 归一成存储格式：daily / weekly / interval:N；认不出当一次性("")。"""
+    """把模型给的 repeat 归一成存储格式：daily / weekly / interval:N。"""
     s = (s or "").strip().lower()
     if not s:
         return ""

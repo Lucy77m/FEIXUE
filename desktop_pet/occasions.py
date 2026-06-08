@@ -1,6 +1,6 @@
 # author: bdth
 # email: 2074055628@qq.com
-# 时刻/节日感知:公历节日 + 你的生日。命中时返回一句给模型的应景"由头"，让它自然道一句。
+# 时刻/节日感知:公历节日 + 生日,命中时返回一句给模型的应景"由头"。
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ _FESTIVALS = {
 
 
 def _norm_md(raw: str) -> str:
-    """把用户随手填的生日规范成 'MM-DD'：'6-2'、'6/2'、'06-02'、'2026-06-02' 都认；认不出返回 ''。"""
+    """把用户填的生日规范成 'MM-DD'。"""
     nums = re.findall(r"\d+", raw or "")
     if len(nums) < 2:
         return ""
@@ -34,7 +34,7 @@ def _norm_md(raw: str) -> str:
 
 
 def today_key(now: datetime, birthday: str = "") -> str | None:
-    """今天是不是特别的日子；是则返回一个稳定 key(供去重)，否则 None。"""
+    """今天是特别的日子则返回稳定 key,否则 None。"""
     md = now.strftime("%m-%d")
     if _norm_md(birthday) == md:
         return "birthday"
@@ -44,7 +44,7 @@ def today_key(now: datetime, birthday: str = "") -> str | None:
 
 
 def describe(key: str) -> str:
-    """把 key 翻成给模型的中文"由头"(模型会用用户的语言回应)。"""
+    """把 key 翻成给模型的中文"由头"。"""
     if key == "birthday":
         return "今天是 ta 的生日"
     if key.startswith("festival:"):

@@ -113,9 +113,7 @@ def _to_gray(img) -> "object":
 
 
 def _match_template_ncc(image, template) -> tuple[float, int, int]:
-    """纯 numpy 归一化互相关（等价 OpenCV TM_CCOEFF_NORMED 的灰度版），用 FFT 加速到 O(N log N)。
-    image / template 均为 2D 灰度 float 数组。返回 (峰值相关度 0–1, 峰值左上角 x, 峰值左上角 y)。
-    替代原先的 cv2.matchTemplate —— 砍掉 opencv 这一个依赖能让打包体积少约 99MB。"""
+    """纯 numpy 归一化互相关，返回 (峰值相关度, 峰值左上角 x, 峰值左上角 y)。"""
     import numpy as np
 
     ih, iw = image.shape

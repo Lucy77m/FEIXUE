@@ -31,7 +31,7 @@ class Hideout:
         self.edge = edge
         self._from = QPoint(drop)
         self._hidden, self._peek, self._shown, self._open_dir = self._anchors(edge, screen, drop, win_w, win_h)
-        self._out_target = self._peek  # 探出目标：自发张望=探头(_peek)，说话=完全站出来(_shown)
+        self._out_target = self._peek
         self._phase = _TUCK
         self._t = 0.0
         self._wait = 0.0
@@ -61,23 +61,23 @@ class Hideout:
             if edge == "left":
                 hx = sx0 + _HIDE_SHOW - (win_w / 2 + hw)
                 px = sx0 + hw * _PEEK_SHOW - (win_w / 2 + hw)
-                shx = sx0  # 完全站出来：整个窗口进到屏幕内(贴左缘)，气泡不会再被屏幕挡
+                shx = sx0
                 open_dir = _GLANCE_OPEN
             else:
                 hx = sx1 - _HIDE_SHOW - (win_w / 2 - hw)
                 px = sx1 - hw * _PEEK_SHOW - (win_w / 2 - hw)
-                shx = sx1 - win_w  # 贴右缘，整窗在屏内
+                shx = sx1 - win_w
                 open_dir = -_GLANCE_OPEN
             return QPoint(round(hx), y), QPoint(round(px), y), QPoint(round(shx), y), open_dir
         x = max(sx0, min(sx1 - win_w, drop.x()))
         hy = sy0 + _HIDE_SHOW - (win_h / 2 + hh)
         py = sy0 + hh * _PEEK_SHOW - (win_h / 2 + hh)
-        shy = sy0  # 贴顶缘，整窗在屏内
+        shy = sy0
         return QPoint(x, round(hy)), QPoint(x, round(py)), QPoint(x, round(shy)), _GLANCE_OPEN * _SCAN_FRAC
 
     def poke(self) -> None:
         if self._phase in (_LURK, _IN):
-            self._out_target = self._peek  # 被戳一下=好奇探个头，不用整个站出来
+            self._out_target = self._peek
             self._phase = _OUT
             self._t = 0.0
             self._pending_glance = self._open_dir
@@ -85,13 +85,13 @@ class Hideout:
     def hold_out(self, on: bool) -> None:
         self._held_out = on
         if on:
-            self._out_target = self._shown  # 说话期间完全站出来，气泡才不会被屏幕边挡住
+            self._out_target = self._shown
             if self._phase in (_TUCK, _LURK, _IN):
                 self._phase = _OUT
                 self._t = 0.0
                 self._pending_glance = self._open_dir
             elif self._phase == _HOLD:
-                self._phase = _SHOW  # 正探头张望就开口 → 直接站直说话
+                self._phase = _SHOW
         elif self._phase == _SHOW:
             self._phase = _IN
             self._t = 0.0
