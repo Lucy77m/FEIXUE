@@ -53,6 +53,7 @@ It carries persistent **emotions and rapport**, and slowly grows a **self-portra
 | **Engineering Discipline** | View the uncommitted `git diff`, auto-detect and run the test suite (pytest / npm) to verify a change — looks before it leaps, self-checks after editing, like a buddy who actually writes code |
 | **Internet** | Web search, fetch page text, HTTP requests, install packages |
 | **See Screen & Control** | Screenshots, OCR (RapidOCR), on-screen image matching, reading the accessibility tree to click controls precisely, mouse & keyboard; plus **watching your screen on the interval you set** (e.g. keep an eye on your game and warn you of danger/openings) |
+| **System Insight** | Inspect memory usage and the most memory-hungry processes; on request, read a process's memory bytes (debugging / forensics, read-only, only when asked) |
 | **Read Aloud** | Speaks its replies: online Edge neural voices (multiple zh-CN voices like Xiaoxiao / Yunxi / Xiaobei) or a local offline voice, kept in sync sentence-by-sentence with the bubble; voice / speed / preview all adjustable |
 | **Memory** | Long-term memory (experience / preferences / environment) + episodic journal + knowledge base (document RAG), automatically reflecting and consolidating after every conversation |
 | **Skills** | Save proven approaches as reusable skills and call them directly next time (Voyager-style "stronger the more it's used") |
@@ -67,9 +68,11 @@ It carries persistent **emotions and rapport**, and slowly grows a **self-portra
 | **Emotion System** | valence / arousal / rapport drive expressions and behavior; the closer you get, the more it opens up — praise makes it happy, scolding brings it down |
 | **Personality Evolution** | As you spend time together, each round of reflection slowly rewrites a "self-portrait" that's injected into the way it talks and acts — a "self" grown out of the relationship |
 | **Spontaneous Animation** | 15 thinking poses, daydream bubbles, eyes tracking the cursor — all continuous functions of time, never jittery |
-| **Prop-Based Skits** | Drinking coffee, fishing, cracking cases, reading, listening to music, gaming, stargazing — each a multi-stage little play |
+| **Prop-Based Skits** | Drinking coffee, fishing, cracking cases, reading, listening to music, gaming, stargazing, a void-leap, a shadow-clone act, catching a meteor, planting a flower — 11 in all, each a multi-stage little play |
 | **One-Shot Actions** | Dancing, cheering, spinning… each with fitting effects (confetti / musical notes / afterimages) |
-| **Presence Awareness** | It dozes off when you leave and wakes when you return; drag it to a screen edge and it tucks itself away, peeking out from a little corner |
+| **Presence Awareness** | It dozes off when you leave and wakes when you return; drag it to a screen edge and it tucks itself away, peeking out from a little corner; once in a while it "wormholes," teleporting and popping out from somewhere else on the screen |
+| **Holidays & Anniversaries** | It recognizes Gregorian holidays (New Year's, Valentine's, April Fools', Children's Day, Halloween, Christmas Eve, Christmas, New Year's Eve) and your birthday, and brings them up naturally on the day |
+| **Time Together** | It quietly remembers the date you first met and the cumulative interaction count — so it knows "how many days we've known each other" |
 | **Talking First** | Occasionally speaks up on its own when idle, yet **with restraint** — long cooldowns, a daily cap, and rapport gating mean it never spams |
 | **Structured Expression** | It draws comparisons / lists / code on a little blackboard beside it to explain things; multi-step tasks get a **persistent task-list panel** (independent of the blackboard, never wiped by reply content); it can also display images / GIFs |
 | **Screen Helper & Clipboard** | Optional: while idle it occasionally glances at your screen and offers help if you seem stuck; it recognizes when you copy an error / foreign text / code and helps explain / translate on the spot ("Clipboard Alchemy") |
@@ -96,7 +99,8 @@ desktop_pet/
 │   ├─ prompts.py    #   All prompts (persona seed, system, reflection, code-editing discipline) gathered in one place
 │   └─ progress.py   #   Thinking-pose scheduling and progress hints
 ├─ pet/              # The body: window, code-drawn character, speech/input, blackboard, task-list panel (todo_board),
-│                    #       control panel, confirm panel, hiding, entrance, behavior selector & action library, props & palette
+│                    #       control panel, confirm panel, hiding/entrance/wormhole teleport (wormhole), tray (tray),
+│                    #       window effects (fx), behavior selector & action library, props & palette
 ├─ emotion/          # Emotion state machine (VA + rapport) and emotion-tag tables
 ├─ persona.py        # Self-portrait evolution layer (persona.json), injected into conversation context
 ├─ voice.py          # Read-aloud (TTS): Edge online neural voices + local SAPI fallback, synced sentence-by-sentence with the bubble
@@ -105,6 +109,9 @@ desktop_pet/
 ├─ hands/            # Mouse / keyboard / window control
 ├─ eyes/             # Screenshots + accessibility tree (UIA) + on-screen image matching
 ├─ docs.py · reminders.py · proactive.py · journal.py · presence.py
+├─ occasions.py      # Holiday / birthday awareness: hands the model a fitting "hook" on special days
+├─ stats.py          # Lightweight companionship stats: first-met time + cumulative interactions
+├─ clipsampler.py · clipclass.py   # Clipboard-alchemy backend: sampling + local classification (error/foreign-language/code/link) + dedup & throttle
 ├─ watcher.py        # Scheduled screen-watching (session-level, e.g. watch your game)
 ├─ remote.py         # Remote trigger (file inbox, off by default)
 └─ hotkeys.py · skills.py · mcp_hub.py · settings.py · audit.py · i18n.py
@@ -190,7 +197,8 @@ A continuous valence / arousal mood + slowly accumulating rapport, persisted to 
 - **Scheduled screen-watching**: `watcher.py` — on the interval you set, it screenshots the active window, analyzes it against the focus you gave (e.g. your game situation) and reports; session-level (not persisted, ends on restart), and on result it re-checks state so it won't intrude after power-off / stop / mid-conversation, and won't burn a cycle on a transient capture failure.
 - **Engineering discipline**: `executor/devtools.py` provides `review_diff` (view the uncommitted diff, scopable to a file/subdir) / `run_tests` (auto-detect pytest · npm, own 5-min timeout, kills the whole process tree on timeout); the system prompt has a "when working in a code repo" section — look before you leap, small surgical edits, **run tests / self-check the diff after editing**, branch first on a default branch, confirm before irreversible git.
 - **Remote trigger**: `remote.py` — when enabled it polls `data/inbox/*.json`, running `{"task":...}` in the background or having it `{"say":...}` a line, then archiving into `inbox/done/`. **Files only, opens no network port**; off by default; to avoid reading a half-synced cloud file it waits until the mtime has been stable for a few seconds, and polls on a background thread so the UI never freezes.
-- **Hiding / entrance**: dragged to a screen edge it shrinks into a corner and occasionally peeks out; every launch picks a random entrance animation and never repeats the previous one.
+- **Hiding / entrance**: dragged to a screen edge it shrinks into a corner and occasionally peeks out; every launch picks a random entrance animation and never repeats the previous one; once in a while it "wormholes" — cracking open a wormhole in place, spinning inward, teleporting while the window is invisible, and popping out elsewhere on the screen.
+- **Holidays / companionship**: `occasions.py` recognizes Gregorian holidays + the birthday you set and, on the day, gives the model a fitting "hook" so it brings them up naturally rather than offering a canned greeting; `stats.py` quietly tracks first-meeting time and cumulative interactions — the basis for "how long we've known each other."
 - **MCP / hotkeys / skills / audit / i18n**: MCP connectors blend into the tool table as `mcp__{server}__{tool}`; global hotkeys run a Win32 message loop on a dedicated thread (summon / ask selection / quick rewrite); skills save working code as reusable items injected into the prompt; all tool calls are written to an audit log; the control panel UI supports Chinese / English / Japanese.
 
 ---

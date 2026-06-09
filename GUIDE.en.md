@@ -92,7 +92,7 @@ There are no automated UI tests; verification relies on a **manual walkthrough c
 2. The **control panel** (Endpoint / Chat / Permissions / About — four pages);
 3. The **audit log** `data/logs/audit-YYYYMMDD.jsonl` (use `Get-Content` to view the latest lines).
 
-Walkthrough coverage: basic conversation and expressions, command actions (perform / skits), idle behavior, interruption, proactive messages, memory and episodic journal, global hotkeys (incl. quick rewrite), clipboard and windows, control panel, reminders and scheduling (incl. recurrence / system notifications), TTS voice & sentence-sync, scheduled screen-watching, task-list panel, sub-agent orchestration, remote trigger, thinking animation, blackboard and images, reflection gating.
+Walkthrough coverage: basic conversation and expressions, command actions (perform / skits), idle behavior, interruption, proactive messages, holiday / birthday awareness and companionship stats, memory and episodic journal, global hotkeys (incl. quick rewrite), clipboard and windows, control panel, reminders and scheduling (incl. recurrence / system notifications), TTS voice & sentence-sync, scheduled screen-watching, task-list panel, sub-agent orchestration, remote trigger, thinking animation, blackboard and images, reflection gating.
 
 **Common Troubleshooting**:
 
@@ -126,9 +126,11 @@ Everything lives in `data/` (in-project during development, moved to `%APPDATA%\
 | `settings.json` | Endpoint / model / language / capability toggles / proactive frequency / TTS voice & speed / remote-trigger toggle |
 | `emotion.json` | valence / arousal / rapport + timestamp |
 | `persona.json` | Self-portrait (personality evolution layer) |
+| `stats.json` | Companionship stats: first-met time + cumulative interaction count |
 | `proactive.json` | Cooldown / count state for proactive messages |
 | `reminders.json` | Pending reminders / scheduled tasks (incl. recurrence rule) |
 | `journal.json` | Episodic journal (the most recent entries) |
+| `last_entrance.txt` | Last entrance-animation type (so the next launch doesn't repeat the same one) |
 | `memory/memory.db` | Long-term memory (SQLite) |
 | `docs.db` | Knowledge-base chunks + embeddings |
 | `skills/` | Self-built skill code + registry |
