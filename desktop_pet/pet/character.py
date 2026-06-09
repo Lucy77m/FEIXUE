@@ -21,7 +21,7 @@ from desktop_pet.emotion.tags import EXPRESSIONS as _EXPRESSIONS
 from desktop_pet.pet import palette, props
 from desktop_pet.pet.behavior import selector
 from desktop_pet.pet.behaviors import Category, registry
-from desktop_pet.pet.behaviors.easing import ease_out
+from desktop_pet.pet.behaviors.easing import ease_in, ease_out, ease_out_back
 
 _INK = palette.INK
 _SKIN = palette.SKIN
@@ -87,8 +87,146 @@ _ACTIVITIES = {
         ("gaze", 6.5, "★"),
         ("wow", 2.0, "✦"),
     ]),
+    "void": ("void", 0.5, "puff_up", [
+        ("notice", 3.0, "?"),
+        ("crack", 4.0, "…"),
+        ("peer", 4.5, "·"),
+        ("brace", 2.0, "!"),
+        ("leap", 1.4, "✦"),
+        ("gone", 3.0, ""),
+        ("return", 2.2, "★"),
+        ("seal", 3.5, "～"),
+    ]),
+    "clone": ("clone", 0.0, "happy_wiggle", [
+        ("focus", 3.0, "…"),
+        ("split", 2.0, "!"),
+        ("mirror", 6.0, "♪"),
+        ("swap", 4.5, "✦"),
+        ("merge", 2.0, "✦"),
+    ]),
+    "meteor": ("meteor", -0.3, "cheer", [
+        ("spot", 3.0, "?"),
+        ("fall", 5.0, "✦"),
+        ("scramble", 3.0, "!"),
+        ("catch", 1.5, "★"),
+        ("cradle", 3.0, "♥"),
+        ("release", 2.5, "～"),
+    ]),
+    "sprout": ("sprout", 0.3, "happy_wiggle", [
+        ("dig", 3.0, ""),
+        ("plant", 2.5, "·"),
+        ("water", 4.0, "～"),
+        ("wait", 6.0, "…"),
+        ("sprout", 4.0, "✦"),
+        ("bloom", 3.5, "★"),
+        ("sniff", 3.0, "♥"),
+    ]),
 }
 _ACTIVITY_GAP = (150.0, 300.0)
+_TRAVEL = "__travel__"  # 随机轮换里代表"跳虫洞穿越到屏幕另一边"的特殊标记（由窗口层执行移动）
+
+
+def _void_body(stage, p, t, bw, bh):
+    """虚空一跃：探身→蓄力→缩进裂缝→消失→弹回。"""
+    if stage == "notice":
+        e = ease_out(p)
+        return 0.10 * bw * e, 0.0, 6.0 * e, 1.0, 1.0
+    if stage == "peer":
+        wob = math.sin(t * 4.0) * 3.0
+        return 0.20 * bw, 0.05 * bh, 12.0 + wob, 1.03, 0.97
+    if stage == "brace":
+        e = ease_in(p)
+        return 0.18 * bw, 0.10 * bh * e, 8.0, 1.0 + 0.20 * e, 1.0 - 0.28 * e
+    if stage == "leap":
+        if p < 0.3:
+            e = ease_out(p / 0.3)
+            return 0.18 * bw, -0.05 * bh * e, 8.0, 1.0 - 0.12 * e, 1.0 + 0.18 * e
+        e = ease_in((p - 0.3) / 0.7)
+        ox = (0.18 + 0.55 * e) * bw
+        oy = (-0.55 * math.sin(e * math.pi) + 0.30 * e) * bh
+        s = max(0.06, 1.0 - 0.92 * e)
+        return ox, oy, 8.0 + 360.0 * e, s, s
+    if stage == "gone":
+        return 0.73 * bw, 0.30 * bh, 0.0, 0.001, 0.001
+    if stage == "return":
+        e = ease_out_back(p)
+        ox = (0.73 - 0.73 * e) * bw
+        oy = (0.30 - 0.30 * e) * bh - math.sin(p * math.pi) * 0.12 * bh
+        s = max(0.06, 0.08 + 0.92 * e)
+        return ox, oy, 0.0, s, s
+    if stage == "seal":
+        return 0.10 * bw * (1.0 - ease_out(p)), 0.0, 4.0 * (1.0 - p), 1.0, 1.0
+    return 0.0, 0.0, 0.0, 1.0, 1.0
+
+
+def _clone_body(stage, p, t, bw, bh):
+    """影分身：凝神→分裂→镜像舞→换位→合体。本体的位姿；分身在 draw 里镜像。"""
+    if stage == "focus":
+        e = ease_in(p)
+        return 0.0, 0.0, math.sin(t * 20.0) * 2.0 * e, 1.0 + 0.04 * e, 1.0 - 0.06 * e
+    if stage == "split":
+        e = ease_out(p)
+        return -0.16 * bw * e, 0.0, -6.0 * e, 1.0 + 0.10 * math.sin(p * math.pi), 1.0
+    if stage == "mirror":
+        return math.sin(t * 3.0) * 0.18 * bw, 0.0, math.sin(t * 3.0) * 8.0, 1.0, 1.0
+    if stage == "swap":
+        return math.cos(t * 1.8) * 0.22 * bw, math.sin(t * 1.8) * 0.10 * bh, 0.0, 1.0, 1.0
+    if stage == "merge":
+        e = ease_out(p)
+        ox = -0.16 * bw * (1.0 - e)
+        k = ease_in(max(0.0, (p - 0.7) / 0.3))
+        return ox, 0.0, 0.0, 1.0 + 0.18 * k, 1.0 - 0.14 * k
+    return 0.0, 0.0, 0.0, 1.0, 1.0
+
+
+def _meteor_body(stage, p, t, bw, bh):
+    """接流星：仰望→挪位→蹦跳→纵身接住→捧着→放飞。"""
+    if stage == "spot":
+        e = ease_out(p)
+        return -0.05 * bw * e, -0.04 * bh * e, -4.0 * e, 1.0, 1.0
+    if stage == "fall":
+        return math.sin(t * 2.2) * 0.12 * bw, -0.02 * bh, 0.0, 1.0, 1.0
+    if stage == "scramble":
+        hop = -abs(math.sin(t * 8.0)) * 0.05 * bh
+        return 0.20 * bw * ease_out(p), hop, 0.0, 1.0, 1.0 + 0.04 * abs(math.sin(t * 8.0))
+    if stage == "catch":
+        up = math.sin(p * math.pi)
+        return 0.15 * bw, -0.12 * bh * up, 0.0, 1.0 - 0.08 * up, 1.0 + 0.20 * up
+    if stage == "cradle":
+        return 0.10 * bw, math.sin(t * 2.0) * 0.03 * bh, 0.0, 1.0, 1.0
+    if stage == "release":
+        e = ease_out(p)
+        return 0.10 * bw * (1.0 - e), -0.04 * bh * math.sin(p * math.pi), 0.0, 1.0, 1.0
+    return 0.0, 0.0, 0.0, 1.0, 1.0
+
+
+def _sprout_body(stage, p, t, bw, bh):
+    """种花：挖坑→播种→浇水→等待→破土→绽放→凑近闻。"""
+    if stage == "dig":
+        e = ease_out(p)
+        return 0.0, 0.06 * bh * e, 6.0 * e, 1.0, 1.0
+    if stage in ("plant", "water"):
+        sway = math.sin(t * 4.0) * 0.05 * bw if stage == "water" else 0.0
+        return sway, 0.06 * bh, 6.0, 1.0, 1.0
+    if stage == "wait":
+        return math.sin(t * 0.8) * 0.03 * bw, 0.0, math.sin(t * 0.8) * 2.0, 1.0, 1.0
+    if stage == "sprout":
+        return 0.0, 0.03 * bh * ease_out(p), 0.0, 1.0, 1.0
+    if stage == "bloom":
+        up = math.sin(p * math.pi)
+        return 0.0, -0.04 * bh * up, 0.0, 1.0, 1.0 + 0.05 * up
+    if stage == "sniff":
+        e = ease_out(p)
+        return 0.12 * bw * e, 0.05 * bh * e, 8.0 * e, 1.0, 1.0
+    return 0.0, 0.0, 0.0, 1.0, 1.0
+
+
+_ACTIVITY_BODY = {
+    "void": _void_body,
+    "clone": _clone_body,
+    "meteor": _meteor_body,
+    "sprout": _sprout_body,
+}
 
 
 _SLEEP_FADE = 1.2
@@ -216,6 +354,7 @@ class BlobPet:
         self._fx_origin_y = 110.0
         self._activity: str | None = None
         self._pending_perform: str | None = None
+        self._wants_travel = False
         self._activity_timer = random.uniform(*_ACTIVITY_GAP)
         self._stage_i = 0
         self._stage_left = 0.0
@@ -353,6 +492,17 @@ class BlobPet:
     @property
     def is_reacting(self) -> bool:
         return self._react is not None
+
+    @property
+    def in_activity(self) -> bool:
+        return self._activity is not None
+
+    def take_travel_request(self) -> bool:
+        """随机轮换若选中了"虫洞穿越"，返回一次 True 并清除；由 PetWindow 消费去移动窗口。"""
+        if self._wants_travel:
+            self._wants_travel = False
+            return True
+        return False
 
     def clear_pending(self) -> None:
         """丢弃排队中的表演动作。"""
@@ -499,11 +649,15 @@ class BlobPet:
             if self._activity_timer <= 0.0:
                 self._activity_timer = random.uniform(*_ACTIVITY_GAP)
                 if idle:
-                    name = random.choice(list(_ACTIVITIES))
-                    self._activity = name
-                    self._costume = _ACTIVITIES[name][0]
-                    self._stage_i = 0
-                    self._enter_stage(_ACTIVITIES[name][3][0])
+                    name = random.choice(list(_ACTIVITIES) + [_TRAVEL])
+                    if name == _TRAVEL:
+                        # 虫洞穿越也是随机轮换的一员；它要移动窗口，交给 PetWindow 执行
+                        self._wants_travel = True
+                    else:
+                        self._activity = name
+                        self._costume = _ACTIVITIES[name][0]
+                        self._stage_i = 0
+                        self._enter_stage(_ACTIVITIES[name][3][0])
 
     def _enter_stage(self, stage: tuple) -> None:
         self._stage_dur = max(0.1, stage[1])
@@ -522,6 +676,13 @@ class BlobPet:
         if self._activity is None:
             return ""
         return _ACTIVITIES[self._activity][3][self._stage_i][0]
+
+    def _activity_body_transform(self, bw: float, bh: float):
+        """小品期间的身体位姿增量 (ox, oy, rot, sx, sy)。默认中性；只有登记了 body 曲线的小品才动。"""
+        curve = _ACTIVITY_BODY.get(self._activity)
+        if curve is None:
+            return 0.0, 0.0, 0.0, 1.0, 1.0
+        return curve(self._stage, self._stage_p, self._t, bw, bh)
 
     def _spawn_dream(self, glyph: str | None = None) -> None:
         self._dream_bubbles.append([
@@ -643,6 +804,14 @@ class BlobPet:
             oy += self._sleep_e * (_SLEEP_SINK * bh + slow * bh * 0.025)
             sxm *= 1 - 0.05 * self._sleep_e * slow
             sym *= 1 + 0.05 * self._sleep_e * slow
+
+        if self._activity is not None:
+            a_ox, a_oy, a_rot, a_sx, a_sy = self._activity_body_transform(bw, bh)
+            ox += a_ox
+            oy += a_oy
+            rot += a_rot
+            sxm *= a_sx
+            sym *= a_sy
 
         head_y = cy + oy
         painter.save()

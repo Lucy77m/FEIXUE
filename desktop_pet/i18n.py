@@ -38,7 +38,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "lbl_reply_lang": "回复语言", "ph_reply_lang": "留空 = 跟随你；也可填任意语言",
         "lbl_ui_lang": "界面语言",
         "lbl_temp": "发散度", "lbl_maxlen": "最大长度", "ph_maxlen": "0 或留空 = 不限",
-        "lbl_max_steps": "最大步数", "ph_max_steps": "每个任务的工具步数上限，默认 16（1–64）",
+        "lbl_autonomy": "放手程度", "au_frugal": "省心", "au_normal": "正常", "au_auto": "放手干",
         "cb_thinking": "开启思考（展示思维链，更细但更慢）",
         "lbl_think_level": "思考档位",
         "sec_hotkeys": "全局快捷键",
@@ -64,7 +64,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "help_reply_lang": "它回复你时用的语言。留空 = 跟随你说的话；也可填「四川话」「English」等",
         "help_temp": "回答的发散程度：低（0.2）更稳更准，高（1.0）更活泼多变。日常 0.7 左右",
         "help_maxlen": "单次回复的最大长度（token）。留空或 0 = 不限。例：2048",
-        "help_max_steps": "一个任务最多走几步工具调用。简单事 16 够用；复杂的开应用 / 点界面可调到 30–40。范围 1–64",
+        "help_autonomy": "它一个任务能连续干多少步、到点会自检要不要继续。省心=短任务/省钱(到~30步停)；正常=日常(~100)；放手干=能独立干完“建项目+跑测试”这类大活(~500，到顶才强制停、防失控烧钱)。短任务三档没区别，只在长任务时拉开。",
         "help_thinking": "让它先想再答并展示思维链——更细致但更慢更费。纯文本模型可关掉",
         "help_proactive": "空闲时偶尔自己开口（问候 / 分享 / 深夜关心）。有长冷却和每日上限，不会刷屏",
         "help_proactive_freq": "主动说话的频率：安静 90–180 分钟/次，正常 40–90，话痨 15–35",
@@ -104,6 +104,8 @@ _STRINGS: dict[str, dict[str, str]] = {
         "reset_btn": "重置 Mochi（清空所有记忆）",
         "reset_arm": "确认？这会让它忘记一切，回到初生",
         "reset_done": "已重置 ✓ 它现在是新生的了",
+        "new_topic_btn": "开启新对话",
+        "new_topic_done": "已翻篇 ✓",
         "panel_title": "Mochi 控制面板",
         "thinking": "思考中…",
         "plan_title": "当前计划", "step_unit": "步",
@@ -163,7 +165,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "lbl_reply_lang": "Reply language", "ph_reply_lang": "blank = follow you; or type any language",
         "lbl_ui_lang": "Interface language",
         "lbl_temp": "Temperature", "lbl_maxlen": "Max length", "ph_maxlen": "0 or blank = no limit",
-        "lbl_max_steps": "Max steps", "ph_max_steps": "tool steps per task, default 16 (1–64)",
+        "lbl_autonomy": "Autonomy", "au_frugal": "Frugal", "au_normal": "Normal", "au_auto": "Free rein",
         "cb_thinking": "Enable thinking (show reasoning — finer but slower)",
         "lbl_think_level": "Thinking level",
         "sec_hotkeys": "Global hotkeys",
@@ -189,7 +191,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "help_reply_lang": "The language it replies in. Blank = follow you; or type 'English', 'Français', etc.",
         "help_temp": "How varied answers are: low (0.2) steadier / precise, high (1.0) livelier. ~0.7 for everyday use.",
         "help_maxlen": "Max length of one reply (tokens). Blank or 0 = no limit. e.g. 2048",
-        "help_max_steps": "Max tool-steps per task. 16 is plenty for simple things; 30–40 for opening apps / clicking UIs. Range 1–64.",
+        "help_autonomy": "How far it runs on one task before self-checking whether to keep going. Frugal = short tasks / save money (stops by ~30 steps); Normal = everyday (~100); Free rein = big jobs it can finish on its own like building a project + running tests (~500, hard stop to avoid runaway). The tiers only matter on long tasks — short ones end the same.",
         "help_thinking": "Let it reason first and show its chain of thought — finer but slower / costlier. Turn off for text-only models.",
         "help_proactive": "Speaks up on its own when idle (greetings / sharing / late-night care). Long cooldown + daily cap — never spammy.",
         "help_proactive_freq": "How often it speaks up: Quiet 90–180 min, Normal 40–90, Chatty 15–35.",
@@ -230,6 +232,8 @@ _STRINGS: dict[str, dict[str, str]] = {
         "reset_btn": "Reset Mochi (wipe all memory)",
         "reset_arm": "Confirm? This makes it forget everything — newborn again",
         "reset_done": "Reset ✓ it's newborn now",
+        "new_topic_btn": "New chat",
+        "new_topic_done": "Fresh start ✓",
         "panel_title": "Mochi Control Panel",
         "thinking": "Thinking…",
         "plan_title": "Current plan", "step_unit": "steps",
@@ -290,7 +294,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "lbl_reply_lang": "返信言語", "ph_reply_lang": "空欄 = あなたに合わせる；任意の言語も可",
         "lbl_ui_lang": "表示言語",
         "lbl_temp": "多様性", "lbl_maxlen": "最大長", "ph_maxlen": "0 または空欄 = 無制限",
-        "lbl_max_steps": "最大ステップ数", "ph_max_steps": "タスクごとのツール手順上限・既定 16（1–64）",
+        "lbl_autonomy": "おまかせ度", "au_frugal": "省エネ", "au_normal": "普通", "au_auto": "おまかせ",
         "cb_thinking": "思考を有効化（思考過程を表示・精密だが遅い）",
         "lbl_think_level": "思考レベル",
         "sec_hotkeys": "グローバルホットキー",
@@ -316,7 +320,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "help_reply_lang": "返信に使う言語。空欄 = あなたに合わせる。「English」等も可。",
         "help_temp": "回答のばらつき：低(0.2)=安定・正確、高(1.0)=活発。日常は 0.7 前後。",
         "help_maxlen": "1 回の返信の最大長（トークン）。空欄か 0 = 無制限。例：2048",
-        "help_max_steps": "1 タスクのツール手順の上限。簡単なら 16、アプリ起動や UI 操作など複雑なら 30〜40。範囲 1〜64。",
+        "help_autonomy": "1 タスクで連続して何手まで進め、節目で続行するか自己判断します。省エネ＝短いタスク/節約（〜30手で停止）、普通＝日常（〜100）、おまかせ＝プロジェクト構築＋テストのような大きな仕事を自力で完遂（〜500、暴走防止に上限で強制停止）。違いが出るのは長いタスクのときだけです。",
         "help_thinking": "答える前に考え、思考過程を表示——精密だが遅く高コスト。テキスト専用モデルではオフに。",
         "help_proactive": "暇なとき自分から話す（挨拶／共有／夜更かしの気遣い）。長いクールダウンと上限で連投しません。",
         "help_proactive_freq": "話しかける頻度：静か 90〜180 分、普通 40〜90、おしゃべり 15〜35。",
@@ -357,6 +361,8 @@ _STRINGS: dict[str, dict[str, str]] = {
         "reset_btn": "Mochiをリセット（全記憶を消去）",
         "reset_arm": "確認？すべてを忘れて生まれたてに戻ります",
         "reset_done": "リセット完了 ✓ 生まれたてです",
+        "new_topic_btn": "新しい会話",
+        "new_topic_done": "リセット ✓",
         "panel_title": "Mochi コントロールパネル",
         "thinking": "考え中…",
         "plan_title": "現在の計画", "step_unit": "手順",
@@ -401,6 +407,7 @@ _STRINGS: dict[str, dict[str, str]] = {
 }
 
 PROACTIVE_LABEL_KEYS = (("安静", "pl_quiet"), ("正常", "pl_normal"), ("话痨", "pl_chatty"))
+AUTONOMY_LABEL_KEYS = (("省心", "au_frugal"), ("正常", "au_normal"), ("放手干", "au_auto"))
 
 THINK_LEVEL_KEYS = (("off", "tl_off"), ("low", "tl_low"), ("medium", "tl_medium"), ("high", "tl_high"), ("max", "tl_max"))
 

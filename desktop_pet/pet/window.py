@@ -24,6 +24,7 @@ from desktop_pet.pet.character import BLOB_HALF_H, BLOB_HALF_W, BlobPet
 from desktop_pet.pet.entrance import Entrance
 from desktop_pet.pet.fx import make_floating, raise_topmost
 from desktop_pet.pet.hideout import Hideout
+from desktop_pet.pet.wormhole import Wormhole
 
 _FPS = 60
 _CLICK_SLOP = 5
@@ -41,6 +42,7 @@ class PetWindow(QWidget):
     moved = Signal()
     grabbed = Signal()
     hid = Signal()
+    wants_travel = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -67,6 +69,8 @@ class PetWindow(QWidget):
         self._entrance_t = 0.0
         self._rest_pos = QPoint()
         self._hideout: Hideout | None = None
+        self._wormhole: Wormhole | None = None
+        self._wormhole_t = 0.0
 
     def below_blob(self) -> QPoint:
         geo = self.frameGeometry()
@@ -122,8 +126,13 @@ class PetWindow(QWidget):
     def is_hidden(self) -> bool:
         return self._hideout is not None
 
+    @property
+    def is_traveling(self) -> bool:
+        return self._wormhole is not None
+
     def summon_front(self) -> None:
         self._end_hide()
+        self._end_travel()
         self._blob.wake()
         raise_topmost(self)
 
@@ -161,13 +170,56 @@ class PetWindow(QWidget):
         self.move(pos.toPoint())
         self.setWindowOpacity(opacity)
 
+    def start_wormhole(self) -> bool:
+        """跳虫洞传送到当前屏幕对侧的随机落点。仅在空闲(无入场/藏边/拖拽/小品/反应)时启动。
+        去哪、能不能动完全由窗口自己定——上层只负责决定"该不该现在传送"。"""
+        if (self._entrance is not None or self._hideout is not None or self._wormhole is not None
+                or self._is_dragging or self._blob.in_activity or self._blob.is_reacting):
+            return False
+        to_pos = self._pick_wander_target()
+        if to_pos is None:
+            return False
+        frm = self.frameGeometry().topLeft()
+        self._rest_pos = QPoint(to_pos)
+        self._wormhole = Wormhole(QPoint(frm), QPoint(to_pos), self.width(), self.height())
+        self._wormhole_t = 0.0
+        return True
+
+    def _pick_wander_target(self) -> QPoint | None:
+        """当前屏幕可用区内、横向对侧的随机合法落点（整窗在屏内、不压任务栏）。"""
+        screen = self.screen()
+        if screen is None:
+            return None
+        avail = screen.availableGeometry()
+        w, h = self.width(), self.height()
+        if avail.width() <= w or avail.height() <= h:
+            return None
+        mid = avail.center().x()
+        left_hi = avail.left() + avail.width() // 2 - w
+        right_lo = avail.left() + avail.width() // 2
+        if self.frameGeometry().center().x() >= mid:
+            x = random.randint(avail.left(), max(avail.left(), left_hi))        # 跳到左半
+        else:
+            x = random.randint(min(right_lo, avail.right() - w), avail.right() - w)  # 跳到右半
+        y = random.randint(avail.top(), avail.bottom() - h)
+        return QPoint(x, y)
+
+    def _end_travel(self) -> None:
+        if self._wormhole is not None:
+            self._wormhole = None
+            self.move(self._rest_pos)
+
     def _tick(self) -> None:
         now = time.perf_counter()
         dt = now - self._last
         self._last = now
         self._blob.advance(dt)
+        if self._blob.take_travel_request():
+            self.wants_travel.emit()
         if self._entrance is not None:
             self._advance_entrance(dt)
+        elif self._wormhole is not None:
+            self._advance_wormhole(dt)
         elif self._hideout is not None:
             self._hideout.hold_out(self._blob.is_talking)
             pos, glance = self._hideout.advance(dt)
@@ -189,8 +241,33 @@ class PetWindow(QWidget):
         self.setWindowOpacity(opacity)
         self.moved.emit()
 
+    def _advance_wormhole(self, dt: float) -> None:
+        self._wormhole_t += dt
+        if self._wormhole_t >= self._wormhole.duration:
+            self._wormhole = None
+            self.move(self._rest_pos)
+            self.moved.emit()
+            return
+        p = self._wormhole_t / self._wormhole.duration
+        self.move(self._wormhole.window_state(p).toPoint())
+        self.moved.emit()
+
     def paintEvent(self, event: QPaintEvent) -> None:
         painter = QPainter(self)
+        if self._wormhole is not None:
+            w, h = self.width(), self.height()
+            p = min(self._wormhole_t / self._wormhole.duration, 1.0)
+            self._wormhole.draw_props(painter, w, h, p)
+            sx, sy, oy, rot = self._wormhole.blob_transform(p)
+            if sx > 0.001 and sy > 0.001:
+                painter.save()
+                painter.translate(w / 2, h / 2 + oy)
+                painter.rotate(rot)
+                painter.scale(sx, sy)
+                painter.translate(-w / 2, -h / 2)
+                self._blob.paint(painter, w, h)
+                painter.restore()
+            return
         if self._entrance is None:
             self._blob.paint(painter, self.width(), self.height())
             return
@@ -231,6 +308,7 @@ class PetWindow(QWidget):
                 self.grabbed.emit()
                 self._blob.set_dragging(True)
                 self._end_hide()
+                self._end_travel()
             self.move(pos - self._drag_offset)
             self.moved.emit()
             event.accept()

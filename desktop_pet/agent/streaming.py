@@ -68,8 +68,10 @@ def reassemble(
                 slot["name"] = call.function.name
             if call.function and call.function.arguments:
                 slot["args"].append(call.function.arguments)
+    # 有些 OpenAI 兼容端点流式不回传 tool_call.id（或只首块给）。空 id 会让并行工具调用
+    # 互相覆盖、漏执行，且回灌时 tool_call_id 重复/为空导致下一轮 API 400。按 index 兜一个唯一 id。
     tool_calls = [
-        StreamToolCall(calls[i]["id"], calls[i]["name"], "".join(calls[i]["args"]))
+        StreamToolCall(calls[i]["id"] or f"call_{i}", calls[i]["name"], "".join(calls[i]["args"]))
         for i in sorted(calls)
     ] or None
     return StreamMessage("".join(content) or None, tool_calls)

@@ -268,6 +268,29 @@ STEP_LIMIT_NUDGE = (
 )
 
 
+EMPTY_REPLY_NUDGE = (
+    "(Your last turn came back with only thinking — no visible reply text and no tool action. "
+    "If the task isn't finished, take the next concrete step NOW with a tool. If it's done or "
+    "you're answering, write your actual reply as normal visible text (not inside your thinking). "
+    "Start with an emotion tag as usual.)"
+)
+
+EMPTY_REPLY_FALLBACK = (
+    "[confused]\n诶…我刚有点走神，上一步光想了没说出口。我还在弄刚才那件事——要我接着往下做吗？"
+)
+
+
+def step_checkpoint_nudge(n: int) -> str:
+    """续杯自检：到检查点时让模型自己判断是否继续，而不是直接掐断。"""
+    return (
+        f"(Self-check — you've taken {n} tool steps in a row on this. If the task is genuinely "
+        "moving forward and getting closer to done, keep going (no need to announce this, just "
+        "continue). But if you're going in circles, retrying the same thing that doesn't work, "
+        "stuck, or actually already finished — STOP now and give your final reply. "
+        "Don't burn steps just to look busy; quality and honesty over grinding.)"
+    )
+
+
 _SPONTANEOUS_MODES = {
     "check_in": "You've nothing on right now and just feel like saying hi — a greeting, or a light remark about the moment; easy, not clingy.",
     "follow_up": "Recall something you talked about / did together before and pick the thread back up naturally (e.g. how that thing turned out); don't force it.",

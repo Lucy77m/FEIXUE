@@ -245,6 +245,8 @@ class SpeechText(QWidget):
         self._paced = False
         self._awaiting_advance = False
         self._advance_pending = False
+        self._awaiting_start = False   # paced：本句已显示文本但在等音频出声
+        self._synced = False           # paced：本句正由音频播放进度逐词驱动
 
         self._type_timer = QTimer(self)
         self._type_timer.timeout.connect(self._reveal)
@@ -271,7 +273,8 @@ class SpeechText(QWidget):
     @property
     def is_speaking(self) -> bool:
         return (bool(self._queue) or self._type_timer.isActive()
-                or self._phase_timer.isActive() or self._awaiting_advance)
+                or self._phase_timer.isActive() or self._awaiting_advance
+                or self._awaiting_start or self._synced)
 
     def interrupt(self) -> None:
         self._stop()
@@ -285,6 +288,8 @@ class SpeechText(QWidget):
         self._paced = False
         self._awaiting_advance = False
         self._advance_pending = False
+        self._awaiting_start = False
+        self._synced = False
         self.talking.emit(False)
 
     def advance(self) -> None:
@@ -299,6 +304,8 @@ class SpeechText(QWidget):
 
     def _do_advance(self) -> None:
         self._type_timer.stop()
+        self._synced = False
+        self._awaiting_start = False
         if self._queue:
             self._shown = 0
             self._phase = "blank"
@@ -315,10 +322,50 @@ class SpeechText(QWidget):
         self.show()
         self.raise_()
         self.talking.emit(True)
-        self._type_timer.start(_TYPE_MS)
-        self.update()
         if self._paced:
+            # 配速朗读：先显示空白，等音频真正出声(begin_chunk)或逐词进度(set_progress)再推进，
+            # 不抢在音频前面跑打字机 —— 这正是 Edge 在线合成"文字领先声音"的修复点。
+            self._awaiting_start = True
+            self._synced = False
+            self.update()
             self.chunk_shown.emit(self._full)
+        else:
+            self._type_timer.start(_TYPE_MS)
+            self.update()
+
+    def begin_chunk(self) -> None:
+        """音频开始出声：启动本地打字机兜底（SAPI / 无逐词进度时）。若随后来了 set_progress，会被接管。"""
+        if not self._paced or not self._awaiting_start:
+            return
+        self._awaiting_start = False
+        if not self._synced and not self._type_timer.isActive():
+            self._type_timer.start(_TYPE_MS)
+
+    def set_progress(self, shown: int) -> None:
+        """按音频真实播放进度把文字显示到第 shown 个字符（逐词同步，接管本地打字机）。"""
+        if not self._paced:
+            return
+        self._awaiting_start = False
+        self._synced = True
+        self._type_timer.stop()
+        target = max(0, min(int(shown), len(self._full)))
+        if target == self._shown and target < len(self._full):
+            return
+        self._shown = target
+        self.update()
+        if self._shown >= len(self._full):
+            self._on_display_complete()
+
+    def _on_display_complete(self) -> None:
+        """一句显示完成（打字机跑完 或 音频进度到末尾）后的推进。"""
+        self._type_timer.stop()
+        if self._awaiting_advance:
+            return
+        if self._advance_pending:
+            self._advance_pending = False
+            self._do_advance()
+        else:
+            self._awaiting_advance = True
 
     def _reveal(self) -> None:
         step = 1 if len(self._full) < _LONG_CHUNK else 2
@@ -326,11 +373,7 @@ class SpeechText(QWidget):
         if self._shown >= len(self._full):
             self._type_timer.stop()
             if self._paced:
-                if self._advance_pending:
-                    self._advance_pending = False
-                    self._do_advance()
-                else:
-                    self._awaiting_advance = True
+                self._on_display_complete()
                 self.update()
                 return
             self.talking.emit(False)
@@ -354,6 +397,8 @@ class SpeechText(QWidget):
             self._phase = ""
             self._paced = False
             self._awaiting_advance = False
+            self._awaiting_start = False
+            self._synced = False
             self.hide()
             self.finished.emit()
 

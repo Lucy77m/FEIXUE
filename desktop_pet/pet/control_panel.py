@@ -199,12 +199,14 @@ class ControlPanel(QDialog):
                  on_set_language: Callable[[str], None] | None = None,
                  hotkey_status_provider: Callable[[], dict] | None = None,
                  on_preview_voice: Callable[[str, int], None] | None = None,
+                 on_new_topic: Callable[[], None] | None = None,
                  intro: "tuple | None" = None) -> None:
         super().__init__()
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self._settings = settings
         self._on_reset = on_reset
+        self._on_new_topic = on_new_topic
         self._on_apply = on_apply
         self._status_provider = status_provider
         self._on_toggle_active = on_toggle_active
@@ -402,8 +404,8 @@ class ControlPanel(QDialog):
         self._temperature.valueChanged.connect(
             lambda v: self._temp_label.setText(f"{v / 100:.2f}")
         )
-        self._max_steps = QLineEdit(str(settings.max_steps))
-        self._max_steps.setPlaceholderText(self._t("ph_max_steps"))
+        self._autonomy = _Segmented([(value, self._t(label_key)) for value, label_key in i18n.AUTONOMY_LABEL_KEYS])
+        self._autonomy.setCurrentData(settings.autonomy)
         self._think_level = _Segmented([(value, self._t(label_key)) for value, label_key in i18n.THINK_LEVEL_KEYS])
         self._think_level.setCurrentData(settings.think_level)
         self._proactive_enabled = QCheckBox(self._t("cb_proactive"))
@@ -694,7 +696,7 @@ class ControlPanel(QDialog):
         temp_row.addWidget(self._temperature, 1)
         temp_row.addWidget(self._temp_label)
         body.addWidget(self._field("lbl_temp", temp_row, "help_temp"))
-        body.addWidget(self._field("lbl_max_steps", self._max_steps, "help_max_steps"))
+        body.addWidget(self._field("lbl_autonomy", self._autonomy, "help_autonomy"))
         body.addWidget(self._field("lbl_think_level", self._think_level, "help_think_level"))
         body.addWidget(self._check_field(self._proactive_enabled, "help_proactive"))
         body.addWidget(self._field("lbl_proactive_freq", self._proactive_level, "help_proactive_freq"))
@@ -809,8 +811,12 @@ class ControlPanel(QDialog):
         self._reset_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._reset_armed = False
         self._reset_btn.clicked.connect(self._on_reset_clicked)
+        self._new_topic_btn = QPushButton(self._t("new_topic_btn"), objectName="cancel")
+        self._new_topic_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._new_topic_btn.clicked.connect(self._on_new_topic_clicked)
         reset_row = QHBoxLayout()
         reset_row.addStretch(1)
+        reset_row.addWidget(self._new_topic_btn)
         reset_row.addWidget(self._reset_btn)
         reset_row.addStretch(1)
         col.addLayout(reset_row)
@@ -827,6 +833,12 @@ class ControlPanel(QDialog):
         col.addSpacing(3)
         col.addWidget(gh)
         return page
+
+    def _on_new_topic_clicked(self) -> None:
+        if self._on_new_topic is not None:
+            self._on_new_topic()
+        self._new_topic_btn.setText(self._t("new_topic_done"))
+        self._new_topic_btn.setEnabled(False)
 
     def _on_reset_clicked(self) -> None:
         if not self._reset_armed:
@@ -873,13 +885,6 @@ class ControlPanel(QDialog):
         self._page_anim = anim
         anim.start()
 
-    @staticmethod
-    def _parse_max_steps(text: str) -> int:
-        text = text.strip()
-        if not text.isdigit():
-            return 16
-        return max(1, min(int(text), 64))
-
     def _on_save(self) -> None:
         s = self._settings
         s.api_key = self._api_key.text().strip()
@@ -890,7 +895,7 @@ class ControlPanel(QDialog):
         s.language = self._language.text().strip()
         s.birthday = self._birthday.text().strip()
         s.temperature = round(self._temperature.value() / 100, 2)
-        s.max_steps = self._parse_max_steps(self._max_steps.text())
+        s.autonomy = self._autonomy.currentData() or "正常"
         s.think_level = self._think_level.currentData() or "medium"
         s.enable_thinking, s.max_tokens = THINK_PRESETS[s.think_level]
         s.proactive_enabled = self._proactive_enabled.isChecked()

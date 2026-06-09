@@ -8,6 +8,7 @@ import copy
 import json
 import re
 import threading
+import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -27,11 +28,12 @@ from desktop_pet.executor import pycode, shell, web
 from desktop_pet import i18n, journal, persona
 from desktop_pet.mcp_hub import mcp_hub
 from desktop_pet.memory.store import store
-from desktop_pet.settings import Settings, build_http_client
+from desktop_pet.settings import AUTONOMY_BUDGETS, Settings, build_http_client
 from desktop_pet.skills import skills
 
-_MAX_STEPS = 16
-_MAX_STEPS_CEILING = 64
+_SUBAGENT_BUDGET = (12, 40)  # 子代理/后台固定小预算(检查点, 安全顶)，防递归把步数放大失控
+_MAX_EMPTY_RETRIES = 2  # 模型只思考、无正文也无工具调用时，最多轻推几次再兜底，防静默收场
+_FRESH_AFTER = 25 * 60  # 距上次交互超过这么久(秒)，新消息自动开新话题，不接半天前的旧任务
 _RUN_CANCELLED = "\x00cancelled"
 _MAX_SUBAGENT_DEPTH = 1
 _SPAWN_TOOL = "spawn_agent"
@@ -135,6 +137,20 @@ def _strip_think_leak(text: str) -> str:
     return text.replace("<think>", "").replace("</think>", "").strip()
 
 
+_PLAN_STATUS_ALIAS = {
+    "done": "done", "completed": "done", "complete": "done", "finished": "done",
+    "finish": "done", "ok": "done", "success": "done", "✓": "done", "x": "done",
+    "doing": "doing", "in_progress": "doing", "in-progress": "doing", "inprogress": "doing",
+    "active": "doing", "current": "doing", "running": "doing", "wip": "doing", "ongoing": "doing", "started": "doing",
+    "todo": "todo", "pending": "todo", "not_started": "todo", "queued": "todo", "waiting": "todo",
+}
+
+
+def _norm_plan_status(status) -> str:
+    """把模型给的各种状态写法归一到 todo/doing/done，避免 'completed' 这种同义词被当未开始而"重置"清单。"""
+    return _PLAN_STATUS_ALIAS.get(str(status or "").strip().lower(), "todo")
+
+
 def _parse_json(text: str) -> dict | None:
     start, end = text.find("{"), text.rfind("}")
     if start == -1 or end <= start:
@@ -157,6 +173,7 @@ class Agent:
         self._notify = notify
         self._oa_client: OpenAI | None = None
         self._oa_creds: tuple[str, str, str] | None = None
+        self._client_lock = threading.Lock()
         self._shell = shell.new_session()
         self._python = pycode.new_runner()
         self._messages: list[dict] = [self._system_message()]
@@ -169,6 +186,7 @@ class Agent:
         self._turn_used_tools = False
         self._turn_substantive = True
         self._hit_step_limit = False
+        self._last_active = 0.0
 
     def _build_tools(self) -> list[dict]:
         excluded: set[str] = set()
@@ -196,13 +214,31 @@ class Agent:
         self._messages = [self._system_message()]
         self._plan = []
 
+    def new_topic(self) -> None:
+        """翻篇：只清当前对话窗口，长期记忆/情绪/人格全部保留。"""
+        self._messages = [self._system_message()]
+        self._plan = []
+        self._last_active = 0.0
+
     def cancel(self) -> None:
+        # 关子进程/管道/连接可能阻塞(命令还在跑、流式连接活跃)。绝不在调用方(UI 线程)同步做，
+        # 否则点"暂停"会卡死 UI。只设标志、把 IO 拆解丢后台；worker 靠标志+被杀的子进程自行退出。
         self._cancel.set()
-        self._shell.close()
-        self._python.close()
-        client = self._oa_client
-        if client is not None:
+        threading.Thread(target=self._teardown_io, daemon=True, name="mochi-cancel-io").start()
+
+    def _teardown_io(self) -> None:
+        try:
+            self._shell.close()
+        except Exception:
+            pass
+        try:
+            self._python.close()
+        except Exception:
+            pass
+        with self._client_lock:
+            client = self._oa_client
             self._oa_client = None
+        if client is not None:
             try:
                 client.close()
             except Exception:
@@ -307,24 +343,47 @@ class Agent:
         self._on_perform = on_perform
         if self._owns_cancel:
             self._cancel.clear()
+        now = time.monotonic()
+        if (self._depth == 0 and self._last_active
+                and now - self._last_active > _FRESH_AFTER and len(self._messages) > 1):
+            # 久未交互 → 翻篇开新话题（只清当前对话窗口，长期记忆/情绪/人格保留）
+            self._messages = [self._system_message()]
+        self._last_active = now
         self._prepare(user_message)
         history_mark = len(self._messages)
         n_att = len(attachments) if isinstance(attachments, list) else 0
         audit.user(user_message + (f"  [附件×{n_att}]" if n_att else ""))
         self._messages.append({"role": "user", "content": self._compose_user_content(user_message, attachments)})
-        configured_steps = self._settings.max_steps if self._settings.max_steps > 0 else _MAX_STEPS
-        max_steps = min(configured_steps, _MAX_STEPS_CEILING)
-        for _ in range(max_steps):
+        checkpoint, hard_cap = self._budget()
+        steps = 0
+        empties = 0
+        while steps < hard_cap:
             if self._cancel.is_set():
                 del self._messages[history_mark:]
                 return _RUN_CANCELLED
             step(i18n.thinking_label())
-            message = self._complete(think)
+            try:
+                message = self._complete(think)
+            except Exception:
+                # 网络/流式中途出错：回滚本回合历史，别在对话里留半截让下条消息"接力"
+                del self._messages[history_mark:]
+                raise
             if message.content:
                 message.content = _strip_think_leak(message.content)
             self._messages.append(self._as_dict(message))
             if not message.tool_calls:
                 reply = message.content or ""
+                if not reply.strip():
+                    # 只思考、没正文也没动作（MAX 思考 + 在线流式常见）——别静默收场
+                    empties += 1
+                    if empties <= _MAX_EMPTY_RETRIES and steps < hard_cap:
+                        self._messages.append({"role": "user", "content": prompts.EMPTY_REPLY_NUDGE})
+                        steps += 1
+                        continue
+                    del self._messages[history_mark:]   # 实在拿不到 → 回滚脏回合，不污染历史
+                    self._turn_substantive = False
+                    audit.reply("[empty reply]")
+                    return prompts.EMPTY_REPLY_FALLBACK
                 self._turn_substantive = (
                     self._turn_used_tools or (len(user_message) + len(reply)) >= _REFLECT_MIN_CHARS
                 )
@@ -333,6 +392,11 @@ class Agent:
 
             if message.content:
                 step(message.content.strip())
+
+            if self._cancel.is_set():
+                # 流式吐 tool_call 期间被打断：别再真的执行那个(可能半成型的)工具，直接回滚
+                del self._messages[history_mark:]
+                return _RUN_CANCELLED
 
             images: list[str] = []
             parsed = [(c, _parse_json(c.function.arguments or "{}") or {}) for c in message.tool_calls]
@@ -394,6 +458,10 @@ class Agent:
             if self._cancel.is_set():
                 del self._messages[history_mark:]
                 return _RUN_CANCELLED
+            steps += 1
+            if steps < hard_cap and steps % checkpoint == 0:
+                # 到检查点：让模型自评要不要续杯(工具仍开)，而不是直接掐断长任务
+                self._messages.append({"role": "user", "content": prompts.step_checkpoint_nudge(steps)})
         self._hit_step_limit = True
         self._turn_substantive = True
         if self._cancel.is_set():
@@ -413,18 +481,25 @@ class Agent:
         audit.reply(reply)
         return reply
 
+    def _budget(self) -> tuple[int, int]:
+        """(检查点间隔, 安全顶)。子代理/后台用固定小预算防递归放大；主代理按面板的"放手程度"。"""
+        if self._depth > 0:
+            return _SUBAGENT_BUDGET
+        return AUTONOMY_BUDGETS.get(self._settings.autonomy, AUTONOMY_BUDGETS["正常"])
+
     def _client(self) -> OpenAI:
         creds = (self._settings.api_key, self._settings.base_url, self._settings.proxy)
-        if self._oa_client is None or self._oa_creds != creds:
-            self._oa_client = OpenAI(
-                api_key=self._settings.api_key or "missing",
-                base_url=self._settings.base_url,
-                timeout=_REQUEST_TIMEOUT,
-                max_retries=_MAX_RETRIES,
-                http_client=build_http_client(self._settings.proxy),
-            )
-            self._oa_creds = creds
-        return self._oa_client
+        with self._client_lock:
+            if self._oa_client is None or self._oa_creds != creds:
+                self._oa_client = OpenAI(
+                    api_key=self._settings.api_key or "missing",
+                    base_url=self._settings.base_url,
+                    timeout=_REQUEST_TIMEOUT,
+                    max_retries=_MAX_RETRIES,
+                    http_client=build_http_client(self._settings.proxy),
+                )
+                self._oa_creds = creds
+            return self._oa_client
 
     def _complete(self, on_think: Callable[[str], None], offer_tools: bool = True) -> StreamMessage:
         params: dict = {
@@ -445,9 +520,8 @@ class Agent:
         cleaned: list[dict] = []
         for raw in steps or []:
             if isinstance(raw, dict) and str(raw.get("text", "")).strip():
-                status = raw.get("status")
                 cleaned.append(
-                    {"text": str(raw["text"]).strip(), "status": status if status in PLAN_ICON else "todo"}
+                    {"text": str(raw["text"]).strip(), "status": _norm_plan_status(raw.get("status"))}
                 )
         self._plan = cleaned
         if cleaned:

@@ -617,6 +617,216 @@ def draw_sweat(painter: QPainter, bw: float, bh: float, t: float, stage: str, st
     )
 
 
+def _star_poly(cx: float, cy: float, r: float) -> QPolygonF:
+    pts = []
+    for i in range(10):
+        ang = -math.pi / 2 + i * math.pi / 5
+        rad = r if i % 2 == 0 else r * 0.42
+        pts.append(QPointF(cx + math.cos(ang) * rad, cy + math.sin(ang) * rad))
+    return QPolygonF(pts)
+
+
+def draw_void(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
+    """虚空一跃：身体旁裂开的靛紫漩涡，张开→脉动→闭合。"""
+    if stage == "notice":
+        open_ = 0.25 * ease_out(stage_p)
+    elif stage == "crack":
+        open_ = 0.25 + 0.75 * ease_out(stage_p)
+    elif stage == "seal":
+        open_ = 1.0 - ease_in(stage_p)
+    else:
+        open_ = 1.0
+    if open_ <= 0.01:
+        return
+    rw, rh = bw * 0.42 * open_, bh * 0.40 * open_
+    painter.save()
+    painter.translate(bw * 0.73, bh * 0.10)
+
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor(120, 90, 230, int(70 * open_)))
+    painter.drawEllipse(QRectF(-rw * 0.78, -rh * 0.78, rw * 1.56, rh * 1.56))
+
+    pen = QPen(QColor(150, 120, 245))
+    pen.setWidthF(max(1.5, bw * 0.014))
+    painter.setPen(pen)
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    for i in range(4):
+        f = 1.0 - i * 0.22
+        painter.save()
+        painter.rotate((t * 60 + i * 40) % 360)
+        painter.drawArc(QRectF(-rw * f, -rh * f, rw * 2 * f, rh * 2 * f), 0, 300 * 16)
+        painter.restore()
+
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor(12, 8, 28))
+    painter.drawEllipse(QRectF(-rw, -rh, rw * 2, rh * 2))
+
+    for k in range(7):
+        a = t * 2.2 + k * (math.tau / 7)
+        r = (t * 0.6 + k * 0.31) % 1.0
+        pr = 1.0 - r
+        x, y = math.cos(a) * rw * 1.4 * r, math.sin(a) * rh * 1.4 * r
+        painter.setBrush(QColor(190, 170, 255, int(220 * pr)))
+        painter.drawEllipse(QPointF(x, y), bw * 0.02 * pr + 0.5, bw * 0.02 * pr + 0.5)
+
+    if stage == "gone":
+        pulse = 0.5 + 0.5 * math.sin(t * 6.0)
+        painter.setPen(QPen(QColor(200, 180, 255, int(160 * pulse)), max(1.5, bw * 0.02)))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawEllipse(QRectF(-rw * 1.1, -rh * 1.1, rw * 2.2, rh * 2.2))
+    painter.restore()
+
+
+def _ghost_body(painter: QPainter, bw: float, bh: float, gx: float, gy: float, alpha: int) -> None:
+    painter.save()
+    painter.translate(gx, gy)
+    pen = QPen(QColor(120, 110, 220, alpha))
+    pen.setWidthF(max(1.5, bw * 0.016))
+    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+    painter.setPen(pen)
+    painter.setBrush(QColor(150, 140, 235, int(alpha * 0.45)))
+    painter.drawRoundedRect(QRectF(-bw / 2, -bh / 2, bw, bh), bh * 0.48, bh * 0.48)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor(80, 70, 170, alpha))
+    painter.drawEllipse(QPointF(-bw * 0.16, -bh * 0.02), bw * 0.05, bw * 0.05)
+    painter.drawEllipse(QPointF(bw * 0.16, -bh * 0.02), bw * 0.05, bw * 0.05)
+    painter.restore()
+
+
+def draw_clone(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
+    """影分身：本体旁分裂出半透明分身，镜像舞、换位、再合体。"""
+    if stage == "split":
+        a = ease_out(stage_p)
+        gx, gy = 0.16 * bw * a, 0.0
+    elif stage == "mirror":
+        a = 1.0
+        gx, gy = -math.sin(t * 3.0) * 0.18 * bw, 0.0
+    elif stage == "swap":
+        a = 1.0
+        gx, gy = -math.cos(t * 1.8) * 0.22 * bw, -math.sin(t * 1.8) * 0.10 * bh
+    elif stage == "merge":
+        a = 1.0 - ease_in(stage_p)
+        gx, gy = 0.16 * bw * (1.0 - ease_out(stage_p)), 0.0
+    else:
+        return
+    if a <= 0.01:
+        return
+    _ghost_body(painter, bw, bh, gx, gy, int(200 * a))
+
+
+def draw_meteor(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
+    """接流星：一颗星从左上坠下，被接住后捧在身前发光，再放飞。"""
+    twinkle = 0.8 + 0.2 * math.sin(t * 9.0)
+    if stage == "spot":
+        sx, sy, r, a = -0.55 * bw, -1.0 * bh, bw * 0.10, 1.0
+    elif stage == "fall":
+        e = ease_in(stage_p)
+        sx = -0.55 * bw + e * 0.75 * bw
+        sy = -1.0 * bh + e * 0.45 * bh
+        r, a = bw * 0.11, 1.0
+    elif stage == "scramble":
+        sx = 0.20 * bw + math.sin(t * 5.0) * 0.03 * bw
+        sy = -0.55 * bh + math.sin(t * 7.0) * 0.02 * bh
+        r, a = bw * 0.11, 1.0
+    elif stage == "catch":
+        e = ease_out(min(stage_p / 0.5, 1.0))
+        sx = 0.18 * bw - e * 0.03 * bw
+        sy = -0.50 * bh + e * 0.42 * bh
+        r, a = bw * 0.12, 1.0
+    elif stage == "cradle":
+        sx, sy = 0.12 * bw, -0.08 * bh + math.sin(t * 2.0) * 0.03 * bh
+        r, a = bw * 0.13, 1.0
+    elif stage == "release":
+        e = ease_in(stage_p)
+        sx, sy = 0.12 * bw, -0.08 * bh - e * 0.9 * bh
+        r, a = bw * 0.13, 1.0 - e
+    else:
+        return
+    if a <= 0.01:
+        return
+    painter.save()
+    # 拖尾（下落时）
+    if stage == "fall":
+        trail = QPen(QColor(255, 220, 130, 120))
+        trail.setWidthF(max(1.5, bw * 0.02))
+        trail.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(trail)
+        painter.drawLine(QPointF(sx - bw * 0.12, sy - bh * 0.16), QPointF(sx, sy))
+    # 光晕
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor(255, 230, 150, int(80 * a * twinkle)))
+    painter.drawEllipse(QPointF(sx, sy), r * 1.8, r * 1.8)
+    # 星本体
+    painter.setBrush(QColor(255, 220, 110, int(255 * a)))
+    painter.drawPolygon(_star_poly(sx, sy, r * twinkle))
+    painter.restore()
+
+
+def draw_sprout(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
+    """种花：挖坑播种浇水→等待→破土→绽放。慢而治愈。"""
+    base_x, base_y = bw * 0.32, bh * 0.46
+    if stage == "sprout":
+        grow = ease_out(stage_p)
+    elif stage in ("bloom", "sniff"):
+        grow = 1.0
+    else:
+        grow = 0.0
+    bloom = ease_out(stage_p) if stage == "bloom" else (1.0 if stage == "sniff" else 0.0)
+    painter.save()
+
+    # 土堆
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor(120, 85, 55))
+    painter.drawChord(QRectF(base_x - bw * 0.14, base_y - bh * 0.05, bw * 0.28, bh * 0.16), 0, 180 * 16)
+
+    # 播种：种子落下
+    if stage == "plant":
+        seed_y = base_y - bh * 0.30 * (1.0 - ease_in(stage_p))
+        painter.setBrush(QColor(90, 70, 50))
+        painter.drawEllipse(QPointF(base_x, seed_y), bw * 0.022, bw * 0.022)
+    # 浇水：水滴
+    if stage == "water":
+        painter.setBrush(QColor(120, 190, 240, 220))
+        for k in range(3):
+            ph = (t * 1.6 + k * 0.33) % 1.0
+            wy = base_y - bh * 0.34 + ph * bh * 0.30
+            painter.drawEllipse(QPointF(base_x - bw * 0.05 + k * bw * 0.05, wy), bw * 0.018, bh * 0.03)
+
+    # 茎 + 叶 + 花
+    stem_h = grow * bh * 0.55
+    if stem_h > 1.0:
+        sway = math.sin(t * 1.4) * bw * 0.03 * grow
+        top = QPointF(base_x + sway, base_y - stem_h)
+        pen = QPen(QColor(70, 150, 70))
+        pen.setWidthF(max(1.8, bw * 0.02))
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        path = QPainterPath()
+        path.moveTo(base_x, base_y)
+        path.quadTo(base_x + sway * 0.5, base_y - stem_h * 0.5, top.x(), top.y())
+        painter.drawPath(path)
+        if stem_h > bh * 0.22:
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(90, 170, 90))
+            ly = base_y - stem_h * 0.5
+            painter.drawEllipse(QRectF(base_x + sway * 0.5 - bw * 0.10, ly - bh * 0.02, bw * 0.10, bh * 0.07))
+            painter.drawEllipse(QRectF(base_x + sway * 0.5, ly - bh * 0.05, bw * 0.10, bh * 0.07))
+        if bloom > 0.0:
+            pr = bw * 0.06 * bloom
+            painter.setBrush(QColor(240, 130, 170))
+            for i in range(5):
+                ang = t * 0.5 + i * (math.tau / 5)
+                px, py = top.x() + math.cos(ang) * pr, top.y() + math.sin(ang) * pr
+                painter.drawEllipse(QPointF(px, py), pr * 0.7, pr * 0.7)
+            painter.setBrush(QColor(250, 215, 90))
+            painter.drawEllipse(top, pr * 0.55, pr * 0.55)
+            if stage == "sniff":
+                painter.setBrush(QColor(255, 200, 90, int(180 * (0.5 + 0.5 * math.sin(t * 5.0)))))
+                painter.drawEllipse(QPointF(top.x() + bw * 0.12, top.y() - bh * 0.10), bw * 0.012, bw * 0.012)
+    painter.restore()
+
+
 COSTUME_LAYERS = {
     "sherlock": (draw_sherlock, None),
     "coffee": (draw_coffee, None),
@@ -628,6 +838,10 @@ COSTUME_LAYERS = {
     "party": (None, draw_confetti),
     "raincloud": (None, draw_raincloud),
     "sweat": (None, draw_sweat),
+    "void": (None, draw_void),
+    "clone": (None, draw_clone),
+    "meteor": (None, draw_meteor),
+    "sprout": (None, draw_sprout),
 }
 COSTUMES = frozenset(COSTUME_LAYERS)
 WORN_COSTUMES = frozenset(name for name, (worn, _ambient) in COSTUME_LAYERS.items() if worn)

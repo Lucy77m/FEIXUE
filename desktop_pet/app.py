@@ -155,6 +155,7 @@ def _friendly_error(exc: Exception) -> str:
 class AgentWorker(QObject):
 
     reply_ready = Signal(str)
+    proactive_reply = Signal(str)   # 主动发声(peek/探索/主动说/剪贴板)：前台忙时可丢弃，不抢主回复
     busy_changed = Signal(bool)
     task_finished = Signal(bool)
     step = Signal(str)
@@ -222,15 +223,15 @@ class AgentWorker(QObject):
             reply = self._agent.deliver_reminder(what)
             if reply.strip():
                 self.reply_ready.emit(reply)
-        except Exception:
-            pass
+        except Exception as exc:
+            audit.system("deliver_reminder failed", error=repr(exc))
 
     @Slot(str)
     def run_task(self, task: str) -> None:
         try:
             self._agent.run_background(task)
-        except Exception:
-            pass
+        except Exception as exc:
+            audit.system("run_task dispatch failed", error=repr(exc))
 
     @Slot(str)
     def run_timed_task(self, task: str) -> None:
@@ -257,19 +258,20 @@ class AgentWorker(QObject):
         try:
             reply = self._agent.speak_spontaneously(mode, context)
             if reply.strip():
-                self.reply_ready.emit(reply)
-        except Exception:
-            pass
+                self.proactive_reply.emit(reply)
+        except Exception as exc:
+            audit.system("speak_spontaneously failed", error=repr(exc))
 
     @Slot(str)
     def explore(self, topic: str) -> None:
         def work() -> None:
             try:
                 reply = self._agent.explore_topic(topic)
-            except Exception:
+            except Exception as exc:
+                audit.system("explore failed", error=repr(exc))
                 reply = ""
             if reply and reply.strip():
-                self.reply_ready.emit(reply)
+                self.proactive_reply.emit(reply)
         threading.Thread(target=work, daemon=True, name="mochi-explore").start()
 
     @Slot(str)
@@ -277,10 +279,11 @@ class AgentWorker(QObject):
         def work() -> None:
             try:
                 reply = self._agent.peek_screen(trigger)
-            except Exception:
+            except Exception as exc:
+                audit.system("peek_screen failed", error=repr(exc))
                 reply = ""
             if reply and reply.strip():
-                self.reply_ready.emit(reply)
+                self.proactive_reply.emit(reply)
         threading.Thread(target=work, daemon=True, name="mochi-peek").start()
 
     @Slot(str)
@@ -288,7 +291,8 @@ class AgentWorker(QObject):
         def work() -> None:
             try:
                 reply = self._agent.analyze_screen(focus)
-            except Exception:
+            except Exception as exc:
+                audit.system("analyze_screen failed", error=repr(exc))
                 reply = ""
             self.analysis_ready.emit(reply or "")
         threading.Thread(target=work, daemon=True, name="mochi-watch").start()
@@ -298,7 +302,8 @@ class AgentWorker(QObject):
         def work() -> None:
             try:
                 out = self._agent.rewrite_text(text)
-            except Exception:
+            except Exception as exc:
+                audit.system("rewrite failed", error=repr(exc))
                 out = ""
             self.rewrite_ready.emit(out)
         threading.Thread(target=work, daemon=True, name="mochi-rewrite").start()
@@ -308,14 +313,18 @@ class AgentWorker(QObject):
         def work() -> None:
             try:
                 out = self._agent.transform_clipboard(kind, text)
-            except Exception:
+            except Exception as exc:
+                audit.system("clip_alchemy failed", error=repr(exc))
                 out = ""
             if out and out.strip():
-                self.reply_ready.emit(out)
+                self.proactive_reply.emit(out)
         threading.Thread(target=work, daemon=True, name="mochi-alchemy").start()
 
     def forget_all(self) -> None:
         self._agent.forget_all()
+
+    def new_topic(self) -> None:
+        self._agent.new_topic()
 
 
 _ALCHEMY_MIN_INTERVAL_S = 45.0
@@ -334,6 +343,8 @@ class PetApp(QObject):
     request_rewrite = Signal(str)
     request_clip_alchemy = Signal(str, str)
     _voice_chunk_done = Signal(int)
+    _voice_chunk_start = Signal(int)
+    _voice_chunk_progress = Signal(int, int)
 
     def __init__(self) -> None:
         _install_qt_message_filter()
@@ -358,11 +369,14 @@ class PetApp(QObject):
         self._watch_inflight = False
         self._inbox_inflight = False
         self._cancelling = False
+        self._pending_quit = False
         self._pending_bg: list[tuple[str, str]] = []
         self._timed_queue: list[str] = []  # 到点 do 任务的前台串行执行队列
         self._timed_inflight = False
+        self._inflight_timed: str | None = None  # 正在前台跑的那个 do 任务(打断时回写用)
         self._confirm_event = threading.Event()
         self._confirm_result = False
+        self._confirm_pending = False
 
         from desktop_pet.agent.loop import Agent
 
@@ -430,13 +444,17 @@ class PetApp(QObject):
         self._pet.moved.connect(self._follow)
         self._pet.grabbed.connect(self._wake)
         self._pet.hid.connect(self._on_hide)
+        self._pet.wants_travel.connect(self._on_wants_travel)
         self._speech.talking.connect(self._on_speech_talking)
         self._speech.finished.connect(self._on_speech_finished)
         self._speech.chunk_shown.connect(self._on_chunk_shown)
         self._voice_chunk_done.connect(self._on_voice_chunk_done)
+        self._voice_chunk_start.connect(self._on_voice_chunk_start)
+        self._voice_chunk_progress.connect(self._on_voice_chunk_progress)
         self._input.submitted.connect(self._worker.handle)
         self._input.submitted.connect(self._on_submit)
         self._worker.reply_ready.connect(self._on_reply)
+        self._worker.proactive_reply.connect(self._on_proactive_reply)
         self._worker.busy_changed.connect(self._on_busy)
         self._worker.task_finished.connect(self._on_task_finished)
         self._worker.step.connect(self._on_step)
@@ -639,6 +657,13 @@ class PetApp(QObject):
         self._input.fade_out()
 
     @Slot(str)
+    @Slot(str)
+    def _on_proactive_reply(self, raw: str) -> None:
+        # 主动发声到达时若前台已忙(用户开了输入框/主任务在跑/正在说话)，直接丢弃，不抢镜
+        if self._foreground_busy() or self._lecturing:
+            return
+        self._on_reply(raw)
+
     def _on_reply(self, raw: str) -> None:
         tag, text = _parse_emotion(raw)
         self._pet.express(tag)
@@ -660,9 +685,13 @@ class PetApp(QObject):
         self._pending_bg.append((task, result))
         self._drain_pending_bg()
 
+    def _engaged(self) -> bool:
+        """它正忙、或用户正在跟它打交道——此刻不该自顾自插入主动行为。"""
+        return (self._worker.is_running or self._busy or self._lecturing
+                or self._speech.is_speaking or self._input.isVisible())
+
     def _foreground_busy(self) -> bool:
-        return (self._busy or self._worker.is_running or self._speech.is_speaking
-                or self._lecturing or self._cancelling or self._input.isVisible())
+        return self._engaged() or self._cancelling
 
     def _drain_pending_bg(self) -> None:
         if not self._pending_bg:
@@ -725,7 +754,24 @@ class PetApp(QObject):
     @Slot(str)
     def _on_chunk_shown(self, chunk: str) -> None:
         gen = self._speak_gen
-        voice.speak_one(chunk, on_done=lambda g=gen: self._voice_chunk_done.emit(g))
+        voice.speak_one(
+            chunk,
+            on_start=lambda g=gen: self._voice_chunk_start.emit(g),
+            on_progress=lambda n, g=gen: self._voice_chunk_progress.emit(g, n),
+            on_done=lambda g=gen: self._voice_chunk_done.emit(g),
+        )
+
+    @Slot(int)
+    def _on_voice_chunk_start(self, gen: int) -> None:
+        if gen != self._speak_gen:
+            return
+        self._speech.begin_chunk()
+
+    @Slot(int, int)
+    def _on_voice_chunk_progress(self, gen: int, shown: int) -> None:
+        if gen != self._speak_gen:
+            return
+        self._speech.set_progress(shown)
 
     @Slot(int)
     def _on_voice_chunk_done(self, gen: int) -> None:
@@ -774,9 +820,13 @@ class PetApp(QObject):
     def _confirm(self, action: str) -> bool:
         self._confirm_result = False
         self._confirm_event.clear()
+        self._confirm_pending = True
         self.request_confirm.emit(action)
-        self._confirm_event.wait(timeout=300)
-        return self._confirm_result
+        try:
+            self._confirm_event.wait(timeout=300)
+            return self._confirm_result
+        finally:
+            self._confirm_pending = False   # 超时/返回后，迟到的点击不再被采纳
 
     @Slot(str)
     def _on_confirm_requested(self, action: str) -> None:
@@ -789,6 +839,8 @@ class PetApp(QObject):
 
     @Slot(bool)
     def _on_confirm_answered(self, ok: bool) -> None:
+        if not self._confirm_pending:   # 没有正在等待的确认（超时后迟到的点击）→ 忽略，别串到下一次
+            return
         self._confirm_result = ok
         self._confirm_event.set()
 
@@ -804,7 +856,10 @@ class PetApp(QObject):
             self._think.start(self._pet)
         else:
             self._think.stop()
+            self._todo.dismiss()   # 任务结束就收起计划面板，不再一直挂着
             self._timed_inflight = False
+            if not self._cancelling:
+                self._inflight_timed = None   # 正常跑完，不必回写(被取消时留给 _requeue_timed 回写)
             self._drain_pending_bg()
             self._drain_timed()
 
@@ -922,23 +977,27 @@ class PetApp(QObject):
         # 前台串行执行 do 任务
         if self._timed_inflight or not self._timed_queue:
             return
-        if (self._worker.is_running or self._busy or self._lecturing or self._cancelling
-                or self._speech.is_speaking or self._input.isVisible() or not self._in_scene()):
+        if self._engaged() or self._cancelling or not self._in_scene():
             return
         task = self._timed_queue.pop(0)
         self._timed_inflight = True
+        self._inflight_timed = task   # 记住正在跑的，打断时好回写、别静默吞掉
         self._pet.wake()
         self.request_timed_task.emit(task)
 
     def _requeue_timed(self) -> None:
-        # 打断/关机：未执行的定时任务回写持久库
+        # 打断/关机：未执行的定时任务(含正在跑的那个)回写持久库，避免被静默吞掉
         now = datetime.now()
-        for task in self._timed_queue:
+        pending = list(self._timed_queue)
+        if self._inflight_timed:
+            pending.insert(0, self._inflight_timed)
+        for task in pending:
             try:
                 reminders.add(now, task, kind="do")
             except Exception:
                 pass
         self._timed_queue.clear()
+        self._inflight_timed = None
         self._timed_inflight = False
 
     @Slot()
@@ -951,12 +1010,19 @@ class PetApp(QObject):
         except Exception:
             pass
 
+    @Slot()
+    def _on_wants_travel(self) -> None:
+        """角色的随机轮换选中了"虫洞穿越"。app 只判断"此刻该不该打扰"(输入框开着/在场/没睡等
+        全局状态)；去哪、怎么动完全由窗口自己决定。"""
+        if self._engaged() or not self._pet.isVisible() or self._pet.is_asleep:
+            return
+        self._pet.start_wormhole()
+
     def _maybe_peek(self) -> bool:
         s = self._settings
         if not s.watch_screen or not s.allow_control:
             return False
-        if (self._worker.is_running or self._busy or self._lecturing or self._speech.is_speaking
-                or self._input.isVisible() or not self._pet.isVisible() or self._pet.is_asleep):
+        if self._engaged() or not self._pet.isVisible() or self._pet.is_asleep:
             return False
         if presence.idle_seconds() >= 60:
             return False
@@ -986,8 +1052,7 @@ class PetApp(QObject):
             return
         if not self._shown or not self._pet.isVisible() or self._pet.is_asleep:
             return
-        if (self._watch_inflight or self._worker.is_running or self._busy or self._lecturing
-                or self._speech.is_speaking or self._input.isVisible()):
+        if self._watch_inflight or self._engaged():
             return
         focus = watcher.due(datetime.now())
         if not focus:
@@ -1013,8 +1078,7 @@ class PetApp(QObject):
     def _maybe_occasion(self) -> bool:
         if not self._settings.proactive_enabled:
             return False
-        if (self._worker.is_running or self._busy or self._lecturing or self._speech.is_speaking
-                or self._input.isVisible() or not self._pet.isVisible() or self._pet.is_asleep):
+        if self._engaged() or not self._pet.isVisible() or self._pet.is_asleep:
             return False
         if presence.idle_seconds() >= _AWAY_S:
             return False
@@ -1113,6 +1177,8 @@ class PetApp(QObject):
         screen = self._app.primaryScreen().availableGeometry()
         if self._board.isVisible():
             self._board.follow(self._pet, screen)
+        if self._todo.isVisible():
+            self._todo.follow(self._pet, screen)
         if self._media.isVisible():
             self._media.follow(self._pet, screen)
         if self._confirm_box.is_open():
@@ -1253,11 +1319,15 @@ class PetApp(QObject):
                 on_set_language=self._set_language,
                 hotkey_status_provider=self._hotkey_status_snapshot,
                 on_preview_voice=self._preview_voice,
+                on_new_topic=self._new_topic,
                 intro=self._relang_intro,
             )
             self._relang_intro = None
             self._panel.exec()
             self._panel = None
+            if self._pending_quit:
+                self._do_quit()
+                return
             if not self._relang:
                 break
 
@@ -1291,6 +1361,15 @@ class PetApp(QObject):
         if self._input.isVisible():
             self._input.setPlaceholderText(i18n.t("input_placeholder"))
 
+    def _new_topic(self) -> None:
+        # 手动翻篇：只清当前对话窗口，长期记忆/情绪/人格不动
+        if self._busy or self._worker.is_running:
+            self._worker.cancel()
+        self._worker.new_topic()
+        self._speech.interrupt()
+        self._todo.dismiss()
+        self._reset_lecture()
+
     def _reset_all(self) -> None:
         if self._busy or self._worker.is_running:
             self._worker.cancel()
@@ -1302,7 +1381,25 @@ class PetApp(QObject):
         self._pet.express("neutral")
 
     def _quit(self) -> None:
-     
+        # 退出常从控制面板的嵌套 exec() 事件循环里触发(托盘→退出)。在那个 C++ 栈中间直接
+        # os._exit/TerminateProcess，会因 Qt 栈未解开而 access violation(见 crash.log)。
+        # 所以先收起托盘+让面板 exec() 正常返回，再到顶层事件循环里真正收尾。
+        if self._pending_quit:
+            return
+        self._pending_quit = True
+        try:
+            self._tray.hide()
+        except Exception:
+            pass
+        if self._panel is not None:
+            try:
+                self._panel.reject()
+            except Exception:
+                pass
+            return  # _open_panel 的循环在 exec() 返回后会调用 _do_quit
+        self._do_quit()
+
+    def _do_quit(self) -> None:
         for _t in (self._presence_timer, self._reminder_timer, self._proactive_timer,
                    self._watch_timer, self._remote_timer):
             try:
