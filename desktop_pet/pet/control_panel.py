@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
 
 from desktop_pet import __version__, i18n, updater, voice
 from desktop_pet.docs import docs
+from desktop_pet.eyes import detect
 from desktop_pet.i18n import UI_LANGUAGES
 from desktop_pet.pet.icon import mochi_icon
 from desktop_pet.settings import Settings, THINK_PRESETS
@@ -178,10 +179,6 @@ class _Segmented(QWidget):
         i = self._group.checkedId()
         return self._items[i][0] if 0 <= i < len(self._items) else None
 
-    def currentText(self) -> str:
-        i = self._group.checkedId()
-        return self._items[i][1] if 0 <= i < len(self._items) else ""
-
 
 def _hint(text: str) -> QLabel:
     label = QLabel(text)
@@ -192,6 +189,8 @@ def _hint(text: str) -> QLabel:
 
 class ControlPanel(QDialog):
     _update_checked = Signal(object)
+    _gui_model_done = Signal(str)
+    _gui_progress = Signal(int)
 
     def __init__(self, settings: Settings, on_reset: Callable[[], None] | None = None,
                  on_apply: Callable[[], None] | None = None,
@@ -851,7 +850,60 @@ class ControlPanel(QDialog):
         self._update_status.setOpenExternalLinks(True)
         col.addWidget(self._update_status)
         self._update_checked.connect(self._render_update)
-        return page
+
+        col.addSpacing(6)
+        self._gui_btn = QPushButton(self._t("gui_model_btn"), objectName="cancel")
+        self._gui_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._gui_btn.clicked.connect(self._on_gui_model)
+        gui_row = QHBoxLayout()
+        gui_row.addStretch(1)
+        gui_row.addWidget(self._gui_btn)
+        gui_row.addStretch(1)
+        col.addLayout(gui_row)
+        self._gui_status = QLabel("", objectName="aboutMeta")
+        self._gui_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._gui_status.setWordWrap(True)
+        col.addWidget(self._gui_status)
+        self._gui_model_done.connect(self._render_gui_model)
+        self._gui_progress.connect(lambda p: self._gui_status.setText(self._t("gui_model_downloading") + f" {p}%"))
+        if detect.available():
+            self._gui_status.setText(self._t("gui_model_on"))
+            self._gui_btn.setEnabled(False)
+        else:
+            self._gui_status.setText(self._t("gui_model_hint"))
+
+        scroll = QScrollArea(objectName="scroll")
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(page)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.viewport().setStyleSheet("background: transparent;")
+        return scroll
+
+    def _on_gui_model(self) -> None:
+        if detect.available():
+            self._gui_status.setText(self._t("gui_model_on"))
+            self._gui_btn.setEnabled(False)
+            return
+        self._gui_btn.setEnabled(False)
+        self._gui_status.setText(self._t("gui_model_downloading"))
+
+        def work() -> None:
+            res = detect.download(
+                self._settings.proxy,
+                on_progress=lambda d, t: self._gui_progress.emit(int(d * 100 / t) if t else 0),
+            )
+            self._gui_model_done.emit(res)
+
+        threading.Thread(target=work, daemon=True, name="mochi-gui-model").start()
+
+    def _render_gui_model(self, res: str) -> None:
+        if res == "ok" and detect.available():
+            self._gui_status.setText(self._t("gui_model_on"))
+            self._gui_btn.setEnabled(False)
+        else:
+            self._gui_btn.setEnabled(True)
+            self._gui_status.setText(self._t("gui_model_failed") + ("" if res == "ok" else f"  {res}"))
 
     def _on_check_update(self) -> None:
         self._check_btn.setEnabled(False)

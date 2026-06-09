@@ -250,13 +250,6 @@ _DRAG_STRETCH = 0.12
 
 
 _OUTLINE = QColor(46, 46, 54)
-_THINK_POSES = (
-    "chin_rest", "scratch_head", "temple_tap",
-    "look_up", "tilt_head", "stroke_chin", "count_steps", "aha", "facepalm",
-    "shake_no", "drum_fingers", "peer_close", "pace", "head_bob", "blank_stare",
-)
-
-
 _THINK_HOME = 0
 _THINK_XFADE_DUR = 0.5
 

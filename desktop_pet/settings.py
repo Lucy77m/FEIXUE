@@ -45,18 +45,12 @@ SETTINGS_PATH = DATA_DIR / "settings.json"
 CAPTURE_WINDOW = "window"
 CAPTURE_FULLSCREEN = "fullscreen"
 
-LANGUAGES = ("跟随", "中文", "English", "日本語")
-
-PROACTIVE_LEVELS = ("安静", "正常", "话痨")
-
-AUTONOMY_LEVELS = ("省心", "正常", "放手干")
 AUTONOMY_BUDGETS = {
     "省心": (12, 30),
     "正常": (24, 100),
     "放手干": (40, 500),
 }
 
-THINK_LEVELS = ("off", "low", "medium", "high", "max")
 THINK_PRESETS = {
     "off": (False, 2048),
     "low": (True, 2048),

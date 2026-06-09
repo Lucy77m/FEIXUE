@@ -122,14 +122,6 @@ class PetWindow(QWidget):
     def is_catnapping(self) -> bool:
         return self._blob.is_catnapping
 
-    @property
-    def is_hidden(self) -> bool:
-        return self._hideout is not None
-
-    @property
-    def is_traveling(self) -> bool:
-        return self._wormhole is not None
-
     def summon_front(self) -> None:
         self._end_hide()
         self._end_travel()

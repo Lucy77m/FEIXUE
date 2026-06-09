@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import re
 
-KINDS = ("error", "foreign", "code", "url", "plain")
 INTERESTING = frozenset({"error", "foreign", "code", "url"})
 
 _URL_RE = re.compile(r"^https?://\S+$", re.IGNORECASE)

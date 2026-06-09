@@ -731,7 +731,9 @@ def _dispatch_impl(
     if name == "web_fetch":
         return ToolResult(web.web_fetch(arguments["url"]))
     if name == "install_package":
-        return ToolResult(install_package(arguments["name"]))
+        result = install_package(arguments["name"])
+        python.refresh_native_dlls() 
+        return ToolResult(result)
     if name == "system_memory":
         return ToolResult(sysmem.system_memory(arguments.get("top", 12)))
     if name == "read_process_memory":

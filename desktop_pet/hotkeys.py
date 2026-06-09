@@ -83,9 +83,6 @@ class GlobalHotkeys(QObject):
         self._keys = new
         self.start()
 
-    def current_status(self) -> dict:
-        return dict(self._status)
-
     def _run(self) -> None:
         user32 = kernel32 = None
         id_map: dict[int, str] = {}

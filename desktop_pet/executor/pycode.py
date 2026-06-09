@@ -29,9 +29,21 @@ def _python_exe() -> str:
             return str(runtime)
     return sys.executable
 
+_DLL_FIX = (
+    "import os, sys\n"
+    "if hasattr(os, 'add_dll_directory'):\n"
+    "    for _sp in [p for p in sys.path if p and p.endswith('site-packages')]:\n"
+    "        for _sub in ('pywin32_system32', 'win32', 'win32/lib', 'pywin32'):\n"
+    "            _d = os.path.join(_sp, _sub)\n"
+    "            if os.path.isdir(_d):\n"
+    "                try: os.add_dll_directory(_d)\n"
+    "                except OSError: pass\n"
+)
+
 _BOOTSTRAP = r'''
 import base64, io, sys, traceback
 from contextlib import redirect_stdout
+__DLLFIX__
 _in = sys.stdin
 sys.stdin = io.StringIO("")
 _out = sys.__stdout__
@@ -86,6 +98,13 @@ class PythonRunner:
                 return "[Python subprocess error; reset — please retry]"
             return self._collect(output, timeout)
 
+    def refresh_native_dlls(self) -> None:
+
+        try:
+            self.run(_DLL_FIX)
+        except Exception:
+            pass
+
     def _ensure(self) -> None:
         if self._proc is not None and self._proc.poll() is None:
             return
@@ -93,7 +112,8 @@ class PythonRunner:
         self._end = f"<<E{uuid.uuid4().hex}>>"
         self._out = queue.Queue()
         bootstrap = (
-            _BOOTSTRAP.replace("__START__", self._start)
+            _BOOTSTRAP.replace("__DLLFIX__", _DLL_FIX)
+            .replace("__START__", self._start)
             .replace("__END__", self._end)
             .replace("__CAP__", str(_OUTPUT_CAP))
         )

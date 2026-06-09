@@ -5,10 +5,57 @@
 from __future__ import annotations
 
 import threading
+from pathlib import Path
 
 from desktop_pet.settings import DATA_DIR
 
-_MODEL_PATH = DATA_DIR / "models" / "ui_detect.onnx"
+
+_MODEL_URL = "https://github.com/dulaiduwang003/MOCHI/releases/download/models/ui_detect.onnx"
+
+
+def _data_model() -> Path:
+    return DATA_DIR / "models" / "ui_detect.onnx"
+
+
+def _model_path():
+    """先找随包发布的模型(源码/打包都在 eyes/models/)，再找数据目录下用户自备/下载的。"""
+    for p in (Path(__file__).resolve().parent / "models" / "ui_detect.onnx", _data_model()):
+        if p.exists():
+            return p
+    return None
+
+
+def download(proxy: str = "", on_progress=None) -> str:
+    """可选增强：下载 UI 元素检测模型到数据目录(可写)，下完检测器自动启用。
+    返回 'ok' 或 '[失败:…]'。含网络，调用方放后台线程。on_progress(done,total) 报进度。"""
+    from desktop_pet.settings import build_http_client
+
+    target = _data_model()
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        client = build_http_client(proxy)
+        try:
+            with client.stream("GET", _MODEL_URL, follow_redirects=True) as r:
+                r.raise_for_status()
+                total = int(r.headers.get("content-length", 0) or 0)
+                tmp = target.with_name("ui_detect.onnx.part")
+                done = 0
+                with open(tmp, "wb") as f:
+                    for chunk in r.iter_bytes(65536):
+                        f.write(chunk)
+                        done += len(chunk)
+                        if on_progress:
+                            on_progress(done, total)
+                tmp.replace(target)
+        finally:
+            client.close()
+    except Exception as exc:
+        return f"[失败: {str(exc)[:120]}]"
+    global _session, _disabled
+    _session, _disabled = None, False   # 重置缓存，让 _load 用新模型
+    return "ok"
+
+
 _CONF = 0.30
 _IOU = 0.45
 _MAX_DET = 120
@@ -28,7 +75,8 @@ def _load():
     global _session, _input_name, _imgsz, _disabled
     if _session is not None:
         return _session
-    if _disabled or not _MODEL_PATH.exists():
+    path = _model_path()
+    if _disabled or path is None:
         return None
     with _lock:
         if _session is not None:
@@ -36,7 +84,7 @@ def _load():
         try:
             import onnxruntime as ort
 
-            sess = ort.InferenceSession(str(_MODEL_PATH), providers=["CPUExecutionProvider"])
+            sess = ort.InferenceSession(str(path), providers=["CPUExecutionProvider"])
             inp = sess.get_inputs()[0]
             _input_name = inp.name
             shape = inp.shape

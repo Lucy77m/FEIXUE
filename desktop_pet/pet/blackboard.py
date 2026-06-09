@@ -13,6 +13,7 @@ from PySide6.QtGui import (
     QBrush,
     QColor,
     QFont,
+    QGuiApplication,
     QLinearGradient,
     QPainter,
     QPaintEvent,
@@ -244,9 +245,14 @@ class BlackBoard(QWidget):
         size = doc.size()
         nat_w = max(1.0, size.width())
         nat_h = max(1.0, size.height())
-        self._doc_scale = min(1.0, _MAX_W / nat_w, _MAX_H / nat_h)
+        # 只按宽度约束缩放，绝不为"塞进固定高度"而把整块连字一起缩小（否则内容一长字就看不清）。
+        # 内容更长就让黑板长高，封顶在屏幕可用高度的一定比例；再超出的由 _render_chalk 的 clip 裁掉。
+        self._doc_scale = min(1.0, _MAX_W / nat_w)
         cw = nat_w * self._doc_scale
-        ch = nat_h * self._doc_scale
+        screen = QGuiApplication.primaryScreen()
+        avail_h = screen.availableGeometry().height() if screen is not None else 900
+        max_h = max(_MAX_H, avail_h * 0.82 - (2 * _SHADOW + 2 * _FRAME + 2 * _PAD + _TRAY_H + 24))
+        ch = min(nat_h * self._doc_scale, max_h)
         self._content_h = ch
 
         inner_w, inner_h = cw + 2 * _PAD, ch + 2 * _PAD

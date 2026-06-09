@@ -17,7 +17,6 @@ _INTERACTIVE = {
 }
 _MAX_NODES = 400
 _MAX_DEPTH = 14
-_MAX_LISTED = 60
 
 
 def available() -> bool:

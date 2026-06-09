@@ -7,6 +7,8 @@
 # 这是一个合理的起点，不保证一次成功——重依赖应用首次打包常要按运行时报错补
 # datas / hiddenimports（详见 docs/打包说明.md）。
 
+import os
+
 from PyInstaller.utils.hooks import (
     collect_data_files,
     collect_dynamic_libs,
@@ -28,12 +30,22 @@ binaries += collect_dynamic_libs("uiautomation")
 datas += collect_data_files("uiautomation", includes=["bin/*.dll"])
 # trafilatura 自带配置文件
 datas += collect_data_files("trafilatura")
+# justext（trafilatura 抓正文时用它去模板化）：自带各语言 stoplists 数据文件，
+# 漏了打包后 web_fetch 抓正文会崩（FileNotFound: .../justext/stoplists）
+datas += collect_data_files("justext")
+hiddenimports += collect_submodules("justext")
 # edge-tts（在线神经语音 TTS）：收子模块 + certifi 证书（SSL 握手要用，漏了打包后联网合成必失败）
 hiddenimports += collect_submodules("edge_tts")
 datas += collect_data_files("certifi")
 
 # 易被漏掉的隐藏依赖：pywin32 时区、uiautomation 依赖的 comtypes
 hiddenimports += ["win32timezone", "comtypes", "comtypes.client", "comtypes.stream"]
+
+# UI 元素视觉检测模型（YOLO→ONNX，自绘窗口靠它才"看得见"可点区域）。模型不进版本库，
+# 放在 desktop_pet/eyes/models/ 下就会被打进包；没有就跳过（检测器自动静默关闭，不影响其余功能）。
+_ui_model = os.path.join("desktop_pet", "eyes", "models", "ui_detect.onnx")
+if os.path.exists(_ui_model):
+    datas += [(_ui_model, os.path.join("desktop_pet", "eyes", "models"))]
 
 a = Analysis(
     ["main.py"],

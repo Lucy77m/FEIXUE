@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from PIL import Image, ImageDraw, ImageFont
 
-from desktop_pet.eyes import capture, uia
+from desktop_pet.eyes import capture, detect, uia
 
 _LAST: list[dict] = []
 _COLORS = {"uia": (80, 230, 140), "ocr": (90, 190, 255), "icon": (255, 180, 70)}
@@ -78,20 +78,42 @@ def screen_elements() -> tuple[bytes, str]:
             "ctrl": None, "invokable": False,
         })
         idx += 1
+    # 第三路：视觉元素检测器(可选 GUI 增强)。UIA 在自绘/游戏窗口失效时，它补出"可点区域"。
+    # 模型没启用时 detect.detect 返回 []，这里就是空操作。与 UIA/OCR 去重(已覆盖的不重复标)。
+    for (l, t, r, b) in detect.detect(img):
+        center_abs = ((l + r) // 2 + ox, (t + b) // 2 + oy)
+        if any(_inside(center_abs, rect) for rect in taken):
+            continue
+        rect_abs = (l + ox, t + oy, r + ox, b + oy)
+        taken.append(rect_abs)
+        elements.append({
+            "idx": idx, "source": "icon", "kind": "icon", "name": "",
+            "rect_abs": rect_abs, "center_abs": center_abs,
+            "ctrl": None, "invokable": False,
+        })
+        idx += 1
 
     _LAST[:] = elements
     annotated = _annotate(img, elements, ox, oy)
     jpeg, _w, _h = capture._encode(annotated)
 
+    detector_on = detect.available()
     if not elements:
-        return jpeg, "(no actionable elements detected — try a screenshot, or this may be a custom-drawn / game surface)"
+        msg = "(no actionable elements detected — try a screenshot, or this may be a custom-drawn / game surface"
+        if not detector_on:
+            msg += "; the visual element detector is OFF — turning on 'GUI enhancement' in Control Panel > About lets me find clickable spots on custom-drawn / game / Qt windows"
+        return jpeg, msg + ")"
     _tags = {"uia": "·ctrl", "ocr": "·text", "icon": "·icon"}
     lines = ["Numbered actionable elements on screen (call act_element with the number):"]
     for el in elements:
         tag = "▸invoke" if el["invokable"] else _tags.get(el.get("source", "ocr"), "")
         nm = (el["name"][:46] if el["name"] else "(icon)")
         lines.append(f'[{el["idx"]}] {el["kind"]} 「{nm}」 {tag}')
-    return jpeg, "\n".join(lines)
+    text = "\n".join(lines)
+    if not detector_on and not any(e.get("source") == "uia" for e in elements):
+        text += ("\n(only text/OCR detected here — the visual element detector is OFF; on custom-drawn "
+                 "windows, enabling 'GUI enhancement' in Control Panel > About would let me see icon buttons too)")
+    return jpeg, text
 
 
 def act_element(index: int, action: str = "click", text: str = "") -> str:

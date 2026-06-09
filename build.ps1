@@ -19,6 +19,7 @@ if (Test-Path dist) { Remove-Item dist -Recurse -Force }
 Write-Host "[3/6] 生成应用图标 mochi.ico（Mochi 自己的脸）..." -ForegroundColor Cyan
 $env:QT_QPA_PLATFORM = "offscreen"
 uv run python -c "from PySide6.QtWidgets import QApplication; QApplication([]); from desktop_pet.pet.icon import save_ico; save_ico('mochi.ico')"
+Remove-Item Env:QT_QPA_PLATFORM -ErrorAction SilentlyContinue  # 别把 offscreen 泄漏给同会话后续命令（否则之后在同窗口跑 main.py 会无窗口）
 
 Write-Host "[4/6] 打包中（PyInstaller，首次较慢）..." -ForegroundColor Cyan
 uv run pyinstaller mochi.spec --noconfirm

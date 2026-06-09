@@ -89,10 +89,6 @@ def set_rate(percent) -> None:
         _rate = 0
 
 
-def current_voice() -> str:
-    return _voice
-
-
 _edge_ok: "bool | None" = None
 
 
@@ -247,25 +243,6 @@ def _mci_status(what: str) -> str:
     buf = ctypes.create_unicode_buffer(128)
     ctypes.windll.winmm.mciSendStringW(f"status mochitts {what}", buf, 128, 0)
     return buf.value
-
-
-def _play_file(path: str) -> None:
-    """用 winmm(MCI) 播放音频文件。"""
-    import time as _t
-
-    if _mci(f'open "{path}" type mpegvideo alias mochitts') != 0:
-        if _mci(f'open "{path}" alias mochitts') != 0:
-            raise RuntimeError("MCI open failed")
-    try:
-        if _mci("play mochitts") != 0:
-            raise RuntimeError("MCI play failed")
-        while _mci_status("mode") == "playing":
-            if _stop.is_set():
-                _mci("stop mochitts")
-                break
-            _t.sleep(0.05)
-    finally:
-        _mci_close()
 
 
 def _apply_sapi_rate(sp, percent: int) -> None:

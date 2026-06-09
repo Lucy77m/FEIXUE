@@ -26,3 +26,8 @@ __pycache__/
 # PyInstaller 打包产物
 /build/
 /dist/
+
+# UI 检测模型(YOLO 衍生 = AGPL，且是大二进制)——不进版本库，打包/运行时单独获取
+/desktop_pet/eyes/models/*.onnx
+# 导出 ONNX 用的临时 .pt 权重
+/_vendor_model/

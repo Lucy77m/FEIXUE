@@ -152,9 +152,6 @@ class MCPHub:
     def tool_schemas(self) -> list[dict]:
         return list(self._schemas)
 
-    def handles(self, name: str) -> bool:
-        return name in self._routes
-
     def call(self, name: str, arguments: dict) -> str:
         route = self._routes.get(name)
         if route is None:

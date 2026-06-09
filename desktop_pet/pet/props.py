@@ -533,26 +533,6 @@ def _draw_moustache(painter: QPainter, bw: float, bh: float) -> None:
     painter.drawPath(path)
 
 
-def draw_party_hat(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
-    top = -bh * 0.5
-    apex = QPointF(0.0, top - bh * 0.62)
-    cone = QPolygonF([apex, QPointF(-bw * 0.22, top + bh * 0.02), QPointF(bw * 0.22, top + bh * 0.02)])
-    pen = QPen(QColor(40, 40, 50))
-    pen.setWidthF(max(1.5, bw * 0.012))
-    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-    painter.setPen(pen)
-    painter.setBrush(QColor(245, 90, 120))
-    painter.drawPolygon(cone)
-    stripe = QPen(QColor(255, 220, 90))
-    stripe.setWidthF(bw * 0.022)
-    painter.setPen(stripe)
-    painter.drawLine(QPointF(-bw * 0.09, top - bh * 0.12), QPointF(bw * 0.09, top - bh * 0.05))
-    painter.drawLine(QPointF(-bw * 0.05, top - bh * 0.36), QPointF(bw * 0.05, top - bh * 0.29))
-    painter.setPen(Qt.PenStyle.NoPen)
-    painter.setBrush(QColor(120, 200, 240))
-    painter.drawEllipse(apex, bw * 0.045, bw * 0.045)
-
-
 def draw_pointer(painter: QPainter, bw: float, bh: float, t: float) -> None:
     tip_bob = math.sin(t * 2.0) * bh * 0.04
     x0, y0 = -bw * 0.3, bh * 0.48
