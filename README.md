@@ -1,4 +1,3 @@
-                                                                                                                                                                                                                                                                                      <div align="center">
 
 # ★ Mochi · 桌面宠物 Agent
 
