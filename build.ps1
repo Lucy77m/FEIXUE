@@ -4,6 +4,11 @@
 # 用法： .\build.ps1
 $ErrorActionPreference = "Stop"
 
+# 版本号单一真源：desktop_pet\__init__.py 的 __version__。发版只改它一处，打包自动同步到安装器。
+$ver = (Select-String -Path "desktop_pet\__init__.py" -Pattern '__version__\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
+if (-not $ver) { Write-Host "✗ 读不到 __version__（desktop_pet\__init__.py）" -ForegroundColor Red; exit 1 }
+Write-Host "打包版本：v$ver" -ForegroundColor Cyan
+
 Write-Host "[1/6] 确保依赖（含 pyinstaller）..." -ForegroundColor Cyan
 uv sync
 
@@ -51,7 +56,7 @@ if ($built -and (Test-Path "dist\Mochi\Mochi.exe")) {
     }
     if ($iscc) {
         Write-Host "[6/6] 制作安装程序（Inno Setup）..." -ForegroundColor Cyan
-        & $iscc /Q installer.iss
+        & $iscc /Q "/DMyAppVersion=$ver" installer.iss
         $setupMade = (Test-Path "dist\MochiSetup.exe")
     } else {
         Write-Host "[6/6] 跳过安装程序：未检测到 Inno Setup。" -ForegroundColor Yellow

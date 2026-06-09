@@ -7,7 +7,7 @@ from __future__ import annotations
 import threading
 from collections.abc import Callable
 
-from PySide6.QtCore import QEasingCurve, QPoint, QPropertyAnimation, QSize, Qt, QTimer
+from PySide6.QtCore import QEasingCurve, QPoint, QPropertyAnimation, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QKeySequence, QMouseEvent
 from PySide6.QtWidgets import (
     QButtonGroup,
@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from desktop_pet import i18n, voice
+from desktop_pet import __version__, i18n, updater, voice
 from desktop_pet.docs import docs
 from desktop_pet.i18n import UI_LANGUAGES
 from desktop_pet.pet.icon import mochi_icon
@@ -191,6 +191,8 @@ def _hint(text: str) -> QLabel:
 
 
 class ControlPanel(QDialog):
+    _update_checked = Signal(object)
+
     def __init__(self, settings: Settings, on_reset: Callable[[], None] | None = None,
                  on_apply: Callable[[], None] | None = None,
                  status_provider: Callable[[], dict] | None = None,
@@ -797,6 +799,7 @@ class ControlPanel(QDialog):
         col.addStretch(1)
         col.addWidget(label("Mochi", "aboutName"))
         col.addWidget(label("もち · 麻薯", "aboutGloss"))
+        col.addWidget(label(f"v{__version__}", "aboutMeta"))
         col.addSpacing(6)
         col.addLayout(rule("aboutRule", 56, 3))
         col.addSpacing(10)
@@ -832,7 +835,52 @@ class ControlPanel(QDialog):
         gh.setCursor(Qt.CursorShape.PointingHandCursor)
         col.addSpacing(3)
         col.addWidget(gh)
+
+        col.addSpacing(8)
+        self._check_btn = QPushButton(self._t("btn_check_update"), objectName="cancel")
+        self._check_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._check_btn.clicked.connect(self._on_check_update)
+        btn_row = QHBoxLayout()
+        btn_row.addStretch(1)
+        btn_row.addWidget(self._check_btn)
+        btn_row.addStretch(1)
+        col.addLayout(btn_row)
+        self._update_status = QLabel("", objectName="aboutMeta")
+        self._update_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._update_status.setWordWrap(True)
+        self._update_status.setOpenExternalLinks(True)
+        col.addWidget(self._update_status)
+        self._update_checked.connect(self._render_update)
         return page
+
+    def _on_check_update(self) -> None:
+        self._check_btn.setEnabled(False)
+        self._update_status.setText(self._t("update_checking"))
+
+        def work() -> None:
+            try:
+                result = updater.check_latest(self._settings.proxy)
+            except Exception as exc:
+                result = {"status": "error", "error": str(exc)}
+            self._update_checked.emit(result)
+
+        threading.Thread(target=work, daemon=True, name="mochi-update-check-panel").start()
+
+    def _render_update(self, result: object) -> None:
+        self._check_btn.setEnabled(True)
+        status = result.get("status") if isinstance(result, dict) else "error"
+        if status == "newer":
+            v = str(result.get("latest", ""))
+            url = result.get("url", updater.RELEASES_PAGE)
+            txt = self._t("update_newer").replace("{v}", v)
+            link = self._t("update_download")
+            self._update_status.setText(
+                f'{txt} · <a href="{url}" style="color: {_ACCENT}; text-decoration: none;">{link}</a>'
+            )
+        elif status == "latest":
+            self._update_status.setText(self._t("update_latest"))
+        else:
+            self._update_status.setText(self._t("update_failed"))
 
     def _on_new_topic_clicked(self) -> None:
         if self._on_new_topic is not None:

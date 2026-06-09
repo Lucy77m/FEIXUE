@@ -11,7 +11,11 @@
 ; ============================================================================
 
 #define MyAppName "墨池 Mochi"
-#define MyAppVersion "0.1.0"
+; 版本号真源是 desktop_pet\__init__.py 的 __version__；build.ps1 打包时用 /DMyAppVersion 传进来。
+; 下面这行只是手动 iscc 编译时的兜底默认值。
+#ifndef MyAppVersion
+  #define MyAppVersion "0.1.0"
+#endif
 #define MyAppPublisher "bdth"
 #define MyAppExeName "Mochi.exe"
 
