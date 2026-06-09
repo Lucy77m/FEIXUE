@@ -745,18 +745,15 @@ def draw_meteor(painter: QPainter, bw: float, bh: float, t: float, stage: str, s
     if a <= 0.01:
         return
     painter.save()
-    # 拖尾（下落时）
     if stage == "fall":
         trail = QPen(QColor(255, 220, 130, 120))
         trail.setWidthF(max(1.5, bw * 0.02))
         trail.setCapStyle(Qt.PenCapStyle.RoundCap)
         painter.setPen(trail)
         painter.drawLine(QPointF(sx - bw * 0.12, sy - bh * 0.16), QPointF(sx, sy))
-    # 光晕
     painter.setPen(Qt.PenStyle.NoPen)
     painter.setBrush(QColor(255, 230, 150, int(80 * a * twinkle)))
     painter.drawEllipse(QPointF(sx, sy), r * 1.8, r * 1.8)
-    # 星本体
     painter.setBrush(QColor(255, 220, 110, int(255 * a)))
     painter.drawPolygon(_star_poly(sx, sy, r * twinkle))
     painter.restore()
@@ -774,17 +771,14 @@ def draw_sprout(painter: QPainter, bw: float, bh: float, t: float, stage: str, s
     bloom = ease_out(stage_p) if stage == "bloom" else (1.0 if stage == "sniff" else 0.0)
     painter.save()
 
-    # 土堆
     painter.setPen(Qt.PenStyle.NoPen)
     painter.setBrush(QColor(120, 85, 55))
     painter.drawChord(QRectF(base_x - bw * 0.14, base_y - bh * 0.05, bw * 0.28, bh * 0.16), 0, 180 * 16)
 
-    # 播种：种子落下
     if stage == "plant":
         seed_y = base_y - bh * 0.30 * (1.0 - ease_in(stage_p))
         painter.setBrush(QColor(90, 70, 50))
         painter.drawEllipse(QPointF(base_x, seed_y), bw * 0.022, bw * 0.022)
-    # 浇水：水滴
     if stage == "water":
         painter.setBrush(QColor(120, 190, 240, 220))
         for k in range(3):
@@ -792,7 +786,6 @@ def draw_sprout(painter: QPainter, bw: float, bh: float, t: float, stage: str, s
             wy = base_y - bh * 0.34 + ph * bh * 0.30
             painter.drawEllipse(QPointF(base_x - bw * 0.05 + k * bw * 0.05, wy), bw * 0.018, bh * 0.03)
 
-    # 茎 + 叶 + 花
     stem_h = grow * bh * 0.55
     if stem_h > 1.0:
         sway = math.sin(t * 1.4) * bw * 0.03 * grow

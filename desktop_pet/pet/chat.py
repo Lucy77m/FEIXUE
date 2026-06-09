@@ -245,8 +245,8 @@ class SpeechText(QWidget):
         self._paced = False
         self._awaiting_advance = False
         self._advance_pending = False
-        self._awaiting_start = False   # paced：本句已显示文本但在等音频出声
-        self._synced = False           # paced：本句正由音频播放进度逐词驱动
+        self._awaiting_start = False
+        self._synced = False
 
         self._type_timer = QTimer(self)
         self._type_timer.timeout.connect(self._reveal)
@@ -323,8 +323,6 @@ class SpeechText(QWidget):
         self.raise_()
         self.talking.emit(True)
         if self._paced:
-            # 配速朗读：先显示空白，等音频真正出声(begin_chunk)或逐词进度(set_progress)再推进，
-            # 不抢在音频前面跑打字机 —— 这正是 Edge 在线合成"文字领先声音"的修复点。
             self._awaiting_start = True
             self._synced = False
             self.update()

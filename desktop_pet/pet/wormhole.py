@@ -11,7 +11,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPen
 
 _DURATION = 2.8
-_JUMP_P = 0.5  # 窗口在此进度瞬移（此时 blob 缩到不可见，跳变看不出）
+_JUMP_P = 0.5
 
 
 def _clamp01(p: float) -> float:
@@ -108,7 +108,7 @@ class Wormhole:
         for k in range(8):
             a = p * 9.0 + k * (math.tau / 8)
             phase = (p * 4.0 + k * 0.3) % 1.0
-            r = (1.0 - phase) if inward else phase   # 进洞向内吸、出洞向外喷
+            r = (1.0 - phase) if inward else phase
             pr = (1.0 - r)
             x, y = math.cos(a) * rad * 1.25 * r, math.sin(a) * rad * 1.25 * r
             painter.setBrush(QColor(190, 170, 255, int(220 * pr)))

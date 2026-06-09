@@ -123,7 +123,7 @@ _ACTIVITIES = {
     ]),
 }
 _ACTIVITY_GAP = (150.0, 300.0)
-_TRAVEL = "__travel__"  # 随机轮换里代表"跳虫洞穿越到屏幕另一边"的特殊标记（由窗口层执行移动）
+_TRAVEL = "__travel__"
 
 
 def _void_body(stage, p, t, bw, bh):
@@ -579,6 +579,12 @@ class BlobPet:
 
     def _advance_catnap(self, dt: float) -> None:
         if self._catnap_left > 0.0:
+            if (self._busy or self._pondering or self._talking or self._lecturing
+                    or self._dragging or self._activity):
+                self._catnap_left = 0.0
+                self._catnap_timer = random.uniform(*_CATNAP_GAP)
+                self.wake()
+                return
             self._catnap_left -= dt
             if self._catnap_left <= 0.0:
                 self._catnap_left = 0.0
@@ -651,7 +657,6 @@ class BlobPet:
                 if idle:
                     name = random.choice(list(_ACTIVITIES) + [_TRAVEL])
                     if name == _TRAVEL:
-                        # 虫洞穿越也是随机轮换的一员；它要移动窗口，交给 PetWindow 执行
                         self._wants_travel = True
                     else:
                         self._activity = name

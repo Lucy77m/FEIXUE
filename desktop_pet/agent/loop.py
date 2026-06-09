@@ -31,9 +31,9 @@ from desktop_pet.memory.store import store
 from desktop_pet.settings import AUTONOMY_BUDGETS, Settings, build_http_client
 from desktop_pet.skills import skills
 
-_SUBAGENT_BUDGET = (12, 40)  # 子代理/后台固定小预算(检查点, 安全顶)，防递归把步数放大失控
-_MAX_EMPTY_RETRIES = 2  # 模型只思考、无正文也无工具调用时，最多轻推几次再兜底，防静默收场
-_FRESH_AFTER = 25 * 60  # 距上次交互超过这么久(秒)，新消息自动开新话题，不接半天前的旧任务
+_SUBAGENT_BUDGET = (12, 40)
+_MAX_EMPTY_RETRIES = 2
+_FRESH_AFTER = 25 * 60
 _RUN_CANCELLED = "\x00cancelled"
 _MAX_SUBAGENT_DEPTH = 1
 _SPAWN_TOOL = "spawn_agent"
@@ -221,8 +221,6 @@ class Agent:
         self._last_active = 0.0
 
     def cancel(self) -> None:
-        # 关子进程/管道/连接可能阻塞(命令还在跑、流式连接活跃)。绝不在调用方(UI 线程)同步做，
-        # 否则点"暂停"会卡死 UI。只设标志、把 IO 拆解丢后台；worker 靠标志+被杀的子进程自行退出。
         self._cancel.set()
         threading.Thread(target=self._teardown_io, daemon=True, name="mochi-cancel-io").start()
 
@@ -346,7 +344,6 @@ class Agent:
         now = time.monotonic()
         if (self._depth == 0 and self._last_active
                 and now - self._last_active > _FRESH_AFTER and len(self._messages) > 1):
-            # 久未交互 → 翻篇开新话题（只清当前对话窗口，长期记忆/情绪/人格保留）
             self._messages = [self._system_message()]
         self._last_active = now
         self._prepare(user_message)
@@ -365,7 +362,6 @@ class Agent:
             try:
                 message = self._complete(think)
             except Exception:
-                # 网络/流式中途出错：回滚本回合历史，别在对话里留半截让下条消息"接力"
                 del self._messages[history_mark:]
                 raise
             if message.content:
@@ -374,13 +370,12 @@ class Agent:
             if not message.tool_calls:
                 reply = message.content or ""
                 if not reply.strip():
-                    # 只思考、没正文也没动作（MAX 思考 + 在线流式常见）——别静默收场
                     empties += 1
                     if empties <= _MAX_EMPTY_RETRIES and steps < hard_cap:
                         self._messages.append({"role": "user", "content": prompts.EMPTY_REPLY_NUDGE})
                         steps += 1
                         continue
-                    del self._messages[history_mark:]   # 实在拿不到 → 回滚脏回合，不污染历史
+                    del self._messages[history_mark:]
                     self._turn_substantive = False
                     audit.reply("[empty reply]")
                     return prompts.EMPTY_REPLY_FALLBACK
@@ -394,7 +389,6 @@ class Agent:
                 step(message.content.strip())
 
             if self._cancel.is_set():
-                # 流式吐 tool_call 期间被打断：别再真的执行那个(可能半成型的)工具，直接回滚
                 del self._messages[history_mark:]
                 return _RUN_CANCELLED
 
@@ -460,7 +454,6 @@ class Agent:
                 return _RUN_CANCELLED
             steps += 1
             if steps < hard_cap and steps % checkpoint == 0:
-                # 到检查点：让模型自评要不要续杯(工具仍开)，而不是直接掐断长任务
                 self._messages.append({"role": "user", "content": prompts.step_checkpoint_nudge(steps)})
         self._hit_step_limit = True
         self._turn_substantive = True
@@ -644,7 +637,6 @@ class Agent:
         on_media: Callable[[str, str, str], None] | None = None,
         on_perform: Callable[[str], bool] | None = None,
     ) -> str:
-        # 定时任务亲自做(完整工具执行)，跑完回滚历史
         snapshot = list(self._messages)
         try:
             return self.run(

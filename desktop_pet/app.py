@@ -155,7 +155,7 @@ def _friendly_error(exc: Exception) -> str:
 class AgentWorker(QObject):
 
     reply_ready = Signal(str)
-    proactive_reply = Signal(str)   # 主动发声(peek/探索/主动说/剪贴板)：前台忙时可丢弃，不抢主回复
+    proactive_reply = Signal(str)
     busy_changed = Signal(bool)
     task_finished = Signal(bool)
     step = Signal(str)
@@ -235,7 +235,6 @@ class AgentWorker(QObject):
 
     @Slot(str)
     def run_timed_task(self, task: str) -> None:
-        # 前台主体执行定时任务
         self._running = True
         self.busy_changed.emit(True)
         try:
@@ -371,9 +370,9 @@ class PetApp(QObject):
         self._cancelling = False
         self._pending_quit = False
         self._pending_bg: list[tuple[str, str]] = []
-        self._timed_queue: list[str] = []  # 到点 do 任务的前台串行执行队列
+        self._timed_queue: list[str] = []
         self._timed_inflight = False
-        self._inflight_timed: str | None = None  # 正在前台跑的那个 do 任务(打断时回写用)
+        self._inflight_timed: str | None = None
         self._confirm_event = threading.Event()
         self._confirm_result = False
         self._confirm_pending = False
@@ -485,24 +484,33 @@ class PetApp(QObject):
         self.request_clip_alchemy.connect(self._worker.clip_alchemy)
         sampler.set_enabled(self._settings.clip_sampler or self._settings.clip_alchemy)
 
+    def _cancel_active_task(self, *, notify: bool = True) -> bool:
+        """停掉正在跑的任务/发言。点击宠物暂停、把它拖到屏幕边缘缩起都复用这条路径，
+        免得两套停止逻辑各写一半、日后漂移。notify=True 时在头顶弹「已停止」气泡；
+        缩到边缘时宠物已经躲起来了，静默暂停即可(notify=False)。返回是否确实停了任务。"""
+        busy = self._worker.is_running or self._busy or self._speech.is_speaking or self._lecturing
+        if not busy or self._cancelling:
+            return False
+        self._cancelling = True
+        self._worker.cancel()
+        self._confirm_result = False
+        self._confirm_event.set()
+        self._confirm_box.close_box()
+        self._on_busy(False)
+        self._speech.interrupt()
+        voice.flush()
+        self._reset_lecture()
+        self._todo.dismiss()
+        self._requeue_timed()
+        self._pet.clear_pending()
+        if notify:
+            self._thought.pop(i18n.t("ui_stopped"), self._pet)
+        return True
+
     @Slot()
     def _toggle_input(self) -> None:
         self._wake()
-        busy = self._worker.is_running or self._busy or self._speech.is_speaking or self._lecturing
-        if busy and not self._cancelling:
-            self._cancelling = True
-            self._worker.cancel()
-            self._confirm_result = False
-            self._confirm_event.set()
-            self._confirm_box.close_box()
-            self._on_busy(False)
-            self._speech.interrupt()
-            voice.flush()
-            self._reset_lecture()
-            self._todo.dismiss()
-            self._requeue_timed()
-            self._pet.clear_pending()
-            self._thought.pop(i18n.t("ui_stopped"), self._pet)
+        if self._cancel_active_task():
             return
         if self._input.isVisible():
             self._input.fade_out()
@@ -659,7 +667,6 @@ class PetApp(QObject):
     @Slot(str)
     @Slot(str)
     def _on_proactive_reply(self, raw: str) -> None:
-        # 主动发声到达时若前台已忙(用户开了输入框/主任务在跑/正在说话)，直接丢弃，不抢镜
         if self._foreground_busy() or self._lecturing:
             return
         self._on_reply(raw)
@@ -826,7 +833,7 @@ class PetApp(QObject):
             self._confirm_event.wait(timeout=300)
             return self._confirm_result
         finally:
-            self._confirm_pending = False   # 超时/返回后，迟到的点击不再被采纳
+            self._confirm_pending = False
 
     @Slot(str)
     def _on_confirm_requested(self, action: str) -> None:
@@ -839,7 +846,7 @@ class PetApp(QObject):
 
     @Slot(bool)
     def _on_confirm_answered(self, ok: bool) -> None:
-        if not self._confirm_pending:   # 没有正在等待的确认（超时后迟到的点击）→ 忽略，别串到下一次
+        if not self._confirm_pending:
             return
         self._confirm_result = ok
         self._confirm_event.set()
@@ -856,10 +863,10 @@ class PetApp(QObject):
             self._think.start(self._pet)
         else:
             self._think.stop()
-            self._todo.dismiss()   # 任务结束就收起计划面板，不再一直挂着
+            self._todo.dismiss()
             self._timed_inflight = False
             if not self._cancelling:
-                self._inflight_timed = None   # 正常跑完，不必回写(被取消时留给 _requeue_timed 回写)
+                self._inflight_timed = None
             self._drain_pending_bg()
             self._drain_timed()
 
@@ -921,7 +928,6 @@ class PetApp(QObject):
 
     @Slot(str, str)
     def _on_remote_action(self, kind: str, content: str) -> None:
-        # task→前台队列；say→说一句
         if kind == "task":
             self._timed_queue.append(content)
             self._drain_timed()
@@ -951,7 +957,6 @@ class PetApp(QObject):
             return False
 
     def _in_scene(self) -> bool:
-        # "在场"=开机/可见/没睡/非全屏
         return (self._shown and self._pet.isVisible()
                 and not self._pet.is_asleep and not self._foreground_is_fullscreen())
 
@@ -974,19 +979,17 @@ class PetApp(QObject):
             self._drain_timed()
 
     def _drain_timed(self) -> None:
-        # 前台串行执行 do 任务
         if self._timed_inflight or not self._timed_queue:
             return
         if self._engaged() or self._cancelling or not self._in_scene():
             return
         task = self._timed_queue.pop(0)
         self._timed_inflight = True
-        self._inflight_timed = task   # 记住正在跑的，打断时好回写、别静默吞掉
+        self._inflight_timed = task
         self._pet.wake()
         self.request_timed_task.emit(task)
 
     def _requeue_timed(self) -> None:
-        # 打断/关机：未执行的定时任务(含正在跑的那个)回写持久库，避免被静默吞掉
         now = datetime.now()
         pending = list(self._timed_queue)
         if self._inflight_timed:
@@ -1156,6 +1159,7 @@ class PetApp(QObject):
 
     @Slot()
     def _on_hide(self) -> None:
+        self._cancel_active_task(notify=False)
         self._input.fade_out()
         self._speech.interrupt()
         voice.flush()
@@ -1277,7 +1281,7 @@ class PetApp(QObject):
         emotion.apply("returned")
         selector.set_emotion(*emotion.snapshot())
         self._just_returned = True
-        self._drain_reminders()  # 开机补投关机期间留库的到期 do 任务
+        self._drain_reminders()
 
     def _power_off(self) -> None:
         """关机：收起桌宠动画 + 停掉进行中的一切 + 收起所有浮层；程序仍常驻后台(不退出)。"""
@@ -1362,7 +1366,6 @@ class PetApp(QObject):
             self._input.setPlaceholderText(i18n.t("input_placeholder"))
 
     def _new_topic(self) -> None:
-        # 手动翻篇：只清当前对话窗口，长期记忆/情绪/人格不动
         if self._busy or self._worker.is_running:
             self._worker.cancel()
         self._worker.new_topic()
@@ -1381,9 +1384,6 @@ class PetApp(QObject):
         self._pet.express("neutral")
 
     def _quit(self) -> None:
-        # 退出常从控制面板的嵌套 exec() 事件循环里触发(托盘→退出)。在那个 C++ 栈中间直接
-        # os._exit/TerminateProcess，会因 Qt 栈未解开而 access violation(见 crash.log)。
-        # 所以先收起托盘+让面板 exec() 正常返回，再到顶层事件循环里真正收尾。
         if self._pending_quit:
             return
         self._pending_quit = True
@@ -1396,7 +1396,7 @@ class PetApp(QObject):
                 self._panel.reject()
             except Exception:
                 pass
-            return  # _open_panel 的循环在 exec() 返回后会调用 _do_quit
+            return
         self._do_quit()
 
     def _do_quit(self) -> None:

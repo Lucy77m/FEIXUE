@@ -22,9 +22,8 @@ _ACCENT = "#6f5cf0"
 _ACCENT_DK = "#4a3fce"
 _FONT = "'Segoe UI', 'Microsoft YaHei UI', 'Microsoft YaHei', sans-serif"
 _MARGIN = 18
-_CARDW = 324  # 卡片固定宽度（之前只设上限导致被 wordwrap 压到很窄）
+_CARDW = 324
 
-# 状态：done=已完成 / doing=进行中 / todo=待办 / plain=普通文本
 _ICON_STATUS = {"●": "done", "→": "doing", "○": "todo"}
 
 _STYLE = f"""

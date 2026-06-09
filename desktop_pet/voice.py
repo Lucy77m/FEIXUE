@@ -20,8 +20,8 @@ _worker_thread: "threading.Thread | None" = None
 
 _voice = ""
 _rate = 0
-_file_seq = 0  # 临时音频文件序号（逐句独立文件，避免互相覆盖）
-_EDGE_SYNTH_TIMEOUT = 25.0  # Edge 在线合成单句超时(秒)：网络挂起时别把 TTS 线程永久卡死
+_file_seq = 0
+_EDGE_SYNTH_TIMEOUT = 25.0
 
 SYSTEM_VOICE = ""
 EDGE_VOICES: list[tuple[str, str]] = [
@@ -147,7 +147,6 @@ def _synth_edge(text: str, voice_id: str, rate: int) -> tuple[str, list[tuple[fl
             if kind == "audio" and chunk.get("data"):
                 audio.extend(chunk["data"])
             elif kind == "WordBoundary":
-                # offset 单位 100ns → 毫秒
                 words.append((chunk.get("offset", 0) / 10000.0, chunk.get("text", "")))
 
     async def _go() -> None:
@@ -163,8 +162,6 @@ def _synth_edge(text: str, voice_id: str, rate: int) -> tuple[str, list[tuple[fl
     with open(path, "wb") as fh:
         fh.write(bytes(audio))
 
-    # 把逐词时间戳换成"播放到此刻 → 应显示到第几个字符"：按词长占比铺到 text 长度，
-    # 不依赖 boundary 文本能否还原原串（中文分词常对不上），只用其时间锚点 + 长度占比，鲁棒。
     total_wlen = sum(len(w) for _, w in words) or 1
     n = len(text)
     cum = 0
@@ -346,7 +343,7 @@ def _worker() -> None:
                     synth = _synth_edge(text, voice, rate)
                     if synth is not None and _stop.is_set():
                         try:
-                            os.remove(synth[0])   # 合成好了但已被打断、不播了 → 别把 mp3 留在 %TEMP%
+                            os.remove(synth[0])
                         except OSError:
                             pass
                     elif synth is not None:
@@ -366,7 +363,6 @@ def _worker() -> None:
                         _sapi_speak(cur, text)
                     except Exception:
                         pass
-        # 兜底：合成失败且无 SAPI、或文本为空时也要让 UI 解锁开始显示
         if not started and on_start is not None:
             try:
                 on_start()

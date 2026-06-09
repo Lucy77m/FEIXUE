@@ -49,8 +49,6 @@ LANGUAGES = ("跟随", "中文", "English", "日本語")
 
 PROACTIVE_LEVELS = ("安静", "正常", "话痨")
 
-# 放手程度 → (检查点间隔 soft, 安全顶 hard)：每干满 soft 步让模型自检"还要不要继续"，
-# 真推进就续杯、卡住就收尾；到 hard 步强制收尾，防失控无限烧。
 AUTONOMY_LEVELS = ("省心", "正常", "放手干")
 AUTONOMY_BUDGETS = {
     "省心": (12, 30),

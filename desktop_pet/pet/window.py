@@ -198,9 +198,9 @@ class PetWindow(QWidget):
         left_hi = avail.left() + avail.width() // 2 - w
         right_lo = avail.left() + avail.width() // 2
         if self.frameGeometry().center().x() >= mid:
-            x = random.randint(avail.left(), max(avail.left(), left_hi))        # 跳到左半
+            x = random.randint(avail.left(), max(avail.left(), left_hi))
         else:
-            x = random.randint(min(right_lo, avail.right() - w), avail.right() - w)  # 跳到右半
+            x = random.randint(min(right_lo, avail.right() - w), avail.right() - w)
         y = random.randint(avail.top(), avail.bottom() - h)
         return QPoint(x, y)
 

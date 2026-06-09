@@ -84,11 +84,11 @@ TOOLS = [
     ),
     _function(
         "edit_file",
-        "Precisely edit a file: replace the EXACTLY matching `old` string with `new` (surgical — safer than rewriting a whole file with write_file). "
-        "`old` must carry enough context to be unique; if it isn't found, or appears multiple times without replace_all, you get an error to fix.",
+        "Edit a file by replacing the `old` string with `new` (surgical — safer than rewriting a whole file with write_file). "
+        "`old` must carry enough context to be unique. Matching is exact first; if that misses it falls back to ignoring line-ending (CRLF/LF) and whitespace/indentation differences, so you don't have to reproduce indentation byte-perfectly. If `old` isn't found at all, or matches multiple spots without replace_all, you get an error to fix.",
         {
             "path": {"type": "string", "description": "file path"},
-            "old": {"type": "string", "description": "the original text to replace (including whitespace/indentation; must match exactly)"},
+            "old": {"type": "string", "description": "the original text to replace; reproduce it as faithfully as you can, but minor whitespace/indentation/line-ending differences are tolerated"},
             "new": {"type": "string", "description": "the replacement text"},
             "replace_all": {"type": "boolean", "description": "replace all occurrences; default replaces only the first (and requires it to be unique)"},
         },
