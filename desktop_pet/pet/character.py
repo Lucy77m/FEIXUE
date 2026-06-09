@@ -431,6 +431,9 @@ class BlobPet:
     def fall_asleep(self) -> None:
         if self._asleep or self._falling_asleep:
             return
+        if (self._busy or self._pondering or self._talking or self._lecturing
+                or self._activity or self._dragging):
+            return                      # 干活/思考/说话/活动/拖动中不睡——睡眠只在真正空闲时触发
         self._falling_asleep = True
         self.react("yawn")
 

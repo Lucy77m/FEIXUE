@@ -250,6 +250,25 @@ class Agent:
     def is_cancelled(self) -> bool:
         return self._cancel.is_set()
 
+    def _seal_cancelled(self, history_mark: int) -> None:
+        """用户打断时不清空本轮，而是把历史修补成合法状态后保留——这样下次接着说，
+        它还记得刚才在聊什么、在做什么。给每个还没拿到结果的 tool_call 补一条"被打断"
+        占位结果，避免悬空的 tool_call 让下一次请求格式非法。"""
+        have = {m.get("tool_call_id") for m in self._messages if m.get("role") == "tool"}
+        pending = []
+        for m in self._messages:
+            if m.get("role") == "assistant":
+                for call in m.get("tool_calls") or []:
+                    cid = call.get("id")
+                    if cid and cid not in have:
+                        pending.append(cid)
+                        have.add(cid)
+        for cid in pending:
+            self._messages.append({
+                "role": "tool", "tool_call_id": cid,
+                "content": "[用户中断了这次操作，这一步没有执行完。]",
+            })
+
     @property
     def hit_step_limit(self) -> bool:
         return self._hit_step_limit
@@ -356,7 +375,7 @@ class Agent:
         empties = 0
         while steps < hard_cap:
             if self._cancel.is_set():
-                del self._messages[history_mark:]
+                self._seal_cancelled(history_mark)
                 return _RUN_CANCELLED
             step(i18n.thinking_label())
             try:
@@ -389,7 +408,7 @@ class Agent:
                 step(message.content.strip())
 
             if self._cancel.is_set():
-                del self._messages[history_mark:]
+                self._seal_cancelled(history_mark)
                 return _RUN_CANCELLED
 
             images: list[str] = []
@@ -450,7 +469,7 @@ class Agent:
             if images:
                 self._append_images(images)
             if self._cancel.is_set():
-                del self._messages[history_mark:]
+                self._seal_cancelled(history_mark)
                 return _RUN_CANCELLED
             steps += 1
             if steps < hard_cap and steps % checkpoint == 0:
@@ -458,7 +477,7 @@ class Agent:
         self._hit_step_limit = True
         self._turn_substantive = True
         if self._cancel.is_set():
-            del self._messages[history_mark:]
+            self._seal_cancelled(history_mark)
             return _RUN_CANCELLED
         step(i18n.thinking_label())
         self._messages.append({"role": "user", "content": prompts.STEP_LIMIT_NUDGE})

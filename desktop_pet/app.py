@@ -893,7 +893,7 @@ class PetApp(QObject):
             pass
 
     def _poll_presence(self) -> None:
-        if self._busy or not self._pet.isVisible():
+        if self._engaged() or not self._pet.isVisible():   # 干活/思考/说话/讲黑板/输入中都不准睡
             return
         away = _AWAY_NIGHT_S if self._is_night() else _AWAY_S
         if presence.idle_seconds() >= away:

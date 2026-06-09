@@ -93,7 +93,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "tab_bond": "羁绊", "hint_bond": "你们相处下来，它记住的你、长成的它。",
         "bond_stat_fmt": "相处 {days} 天 · 互动 {n} 次 · 亲密度 {rap}% · 技能 {sk}",
         "bond_persona": "它长成的样子", "bond_persona_empty": "还没长出个性，还是纯出厂的样子~ 多相处它会慢慢变。",
-        "bond_prefs": "它记下的你", "bond_exp": "它学到的关于你的事",
+        "bond_prefs": "它记下的你", "bond_exp": "它积累的经验",
         "bond_empty": "（还没有~ 多聊聊它就慢慢记住了）",
         "about_sub": "住在你电脑里的 AI 桌面伙伴",
         "about_desc": "能看屏幕、联网查证、写改代码、记事、规划，还能定时主动提醒、"
@@ -226,7 +226,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "tab_bond": "Bond", "hint_bond": "What it remembers about you, and who it has grown into.",
         "bond_stat_fmt": "{days} days together · {n} chats · closeness {rap}% · {sk} skills",
         "bond_persona": "Who it has become", "bond_persona_empty": "No personality yet — still factory-fresh. It grows as you spend time together.",
-        "bond_prefs": "What it remembers about you", "bond_exp": "Things it learned about you",
+        "bond_prefs": "What it remembers about you", "bond_exp": "Lessons it's picked up",
         "bond_empty": "(nothing yet — chat more and it'll start remembering)",
         "about_sub": "An AI desktop companion living in your PC",
         "about_desc": "It can see the screen, look things up online, write and edit code, take notes, "
@@ -361,7 +361,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "tab_bond": "絆", "hint_bond": "一緒に過ごす中で覚えたあなた、育った自分。",
         "bond_stat_fmt": "一緒に {days} 日 · 会話 {n} 回 · 親密度 {rap}% · スキル {sk}",
         "bond_persona": "育った自分", "bond_persona_empty": "まだ個性は育っていません — 出荷時のまま。一緒に過ごすほど変わります。",
-        "bond_prefs": "あなたについて覚えたこと", "bond_exp": "あなたについて学んだこと",
+        "bond_prefs": "あなたについて覚えたこと", "bond_exp": "学んだ経験",
         "bond_empty": "（まだありません〜 もっと話すと覚えていきます）",
         "about_sub": "あなたのPCに棲むAIデスクトップの相棒",
         "about_desc": "画面を見て、ネットで調べ、コードを書き直し、メモを取り、計画し、"
