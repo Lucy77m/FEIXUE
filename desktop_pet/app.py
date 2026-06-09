@@ -1311,29 +1311,35 @@ class PetApp(QObject):
             self._panel.raise_()
             self._panel.activateWindow()
             return
-        while True:
+        self._relang = False
+        self._panel = ControlPanel(
+            self._settings,
+            on_reset=self._reset_all,
+            on_apply=self._apply_settings_live,
+            status_provider=self._status_snapshot,
+            on_toggle_active=self._toggle_power,
+            bond_provider=self._bond_snapshot,
+            on_set_language=self._set_language,
+            hotkey_status_provider=self._hotkey_status_snapshot,
+            on_preview_voice=self._preview_voice,
+            on_new_topic=self._new_topic,
+            intro=self._relang_intro,
+        )
+        self._relang_intro = None
+        self._panel.setModal(False)   # 非模态：面板开着也能点/拖 Mochi、继续对话
+        self._panel.finished.connect(self._on_panel_closed)
+        self._panel.show()
+        self._panel.raise_()
+        self._panel.activateWindow()
+
+    def _on_panel_closed(self, _result: int = 0) -> None:
+        self._panel = None
+        if self._pending_quit:
+            self._do_quit()
+            return
+        if self._relang:               # 切换界面语言 → 用新语言重建面板
             self._relang = False
-            self._panel = ControlPanel(
-                self._settings,
-                on_reset=self._reset_all,
-                on_apply=self._apply_settings_live,
-                status_provider=self._status_snapshot,
-                on_toggle_active=self._toggle_power,
-                bond_provider=self._bond_snapshot,
-                on_set_language=self._set_language,
-                hotkey_status_provider=self._hotkey_status_snapshot,
-                on_preview_voice=self._preview_voice,
-                on_new_topic=self._new_topic,
-                intro=self._relang_intro,
-            )
-            self._relang_intro = None
-            self._panel.exec()
-            self._panel = None
-            if self._pending_quit:
-                self._do_quit()
-                return
-            if not self._relang:
-                break
+            QTimer.singleShot(0, self._open_panel)
 
     def _set_language(self, lang: str) -> None:
         self._settings.ui_language = lang
