@@ -500,6 +500,11 @@ class PetApp(QObject):
         self._focus_timer.setSingleShot(True)
         self._focus_timer.timeout.connect(self._end_focus)
         self._shot_last = 0.0
+        from desktop_pet.pet.footprints import FootprintLayer
+        self._paws = FootprintLayer()
+        self._paw_last = QPoint()
+        self._pet.moved.connect(self._on_pet_moved_paws)
+        self._tail = None  # 捉迷藏的尾巴窗
         self._hot_on = False
         self._cpu_high_n = 0
         self._hot_last_pop = 0.0
@@ -642,6 +647,7 @@ class PetApp(QObject):
     def _summon(self) -> None:
         if not self._shown:
             self._power_on()
+        self._hs_abort()
         if not self._pet.isVisible():
             self._pet.setVisible(True)
         self._pet.summon_front()
@@ -1330,6 +1336,96 @@ class PetApp(QObject):
             return
         self.request_message.emit(i18n.t("desk_tidy_msg").format(n=n))
 
+    def _on_pet_moved_paws(self) -> None:
+        """走动时心情好就留脚印 节日换花样"""
+        try:
+            _val, _aro, _r = emotion.snapshot()
+            if _val < 0.25:
+                return
+            pos = self._pet.frameGeometry().center()
+            d = pos - self._paw_last
+            if (d.x() * d.x() + d.y() * d.y()) < 70 * 70:
+                return
+            import math as _m
+            heading = _m.atan2(d.y(), d.x()) if self._paw_last != QPoint() else 0.0
+            self._paw_last = QPoint(pos)
+            kind = "paw"
+            okey = occasions.today_key(datetime.now()) or ""
+            if "spring" in okey or "newyear" in okey:
+                kind = "flower"
+            elif "christmas" in okey or "winter" in okey:
+                kind = "snow"
+            self._paws.add(pos.x(), pos.y() + self._pet.height() // 4, heading, kind)
+        except Exception:
+            pass
+
+    def _maybe_hide_seek(self) -> bool:
+        """偶尔藏起来让用户找 一天最多一次"""
+        if not self._settings.proactive_enabled or self._meeting_mode:
+            return False
+        if self._engaged() or not self._pet.isVisible() or self._pet.is_asleep or self._tail is not None:
+            return False
+        if presence.idle_seconds() >= 60:
+            return False
+        _val, _aro, rapport = emotion.snapshot()
+        if rapport < 0.5:
+            return False
+        today = datetime.now().date().isoformat()
+        if stats.get_note("hideseek") == today or random.random() > 0.12:
+            return False
+        stats.set_note("hideseek", today)
+        self._feed_pop(i18n.t("hs_start"))
+        QTimer.singleShot(1500, self._hs_hide)
+        return True
+
+    def _hs_hide(self) -> None:
+        from desktop_pet.pet.hideseek import TailWindow
+        from desktop_pet.eyes import capture
+        if self._tail is not None or not self._pet.isVisible():
+            return
+        scr = self._app.primaryScreen().availableGeometry()
+        x = random.randint(scr.left() + 120, scr.right() - 120)
+        y = random.randint(scr.top() + 160, scr.bottom() - 120)
+        tail = TailWindow()
+        capture.register_own_window(int(tail.winId()))
+        tail.found.connect(self._hs_found)
+        tail.gave_up.connect(self._hs_gave_up)
+        self._pet.setVisible(False)
+        tail.appear_at(x, y)
+        self._tail = tail
+
+    def _hs_reveal(self, near: "QPoint | None") -> None:
+        if near is not None:
+            scr = self._app.primaryScreen().availableGeometry()
+            nx = max(scr.left(), min(near.x() - self._pet.width() // 2, scr.right() - self._pet.width()))
+            ny = max(scr.top(), min(near.y() - self._pet.height() // 2, scr.bottom() - self._pet.height()))
+            self._pet.move(nx, ny)
+        self._pet.setVisible(True)
+        self._pet.wake()
+
+    @Slot()
+    def _hs_found(self) -> None:
+        tail, self._tail = self._tail, None
+        pos = tail.pos() if tail is not None else None
+        self._hs_reveal(pos)
+        self._pet.react("celebrate")
+        emotion.apply("praised")
+        selector.set_emotion(*emotion.snapshot())
+        self._feed_pop(i18n.t("hs_found"))
+
+    @Slot()
+    def _hs_gave_up(self) -> None:
+        self._tail = None
+        self._hs_reveal(None)
+        self._feed_pop(i18n.t("hs_giveup"))
+
+    def _hs_abort(self) -> None:
+        """藏着的时候被召唤就直接现身"""
+        if self._tail is not None:
+            self._tail.stop()
+            self._tail = None
+            self._hs_reveal(None)
+
     def _toggle_focus(self) -> None:
         """番茄钟 开一轮或提前结束"""
         if time.time() < self._focus_until:
@@ -1605,6 +1701,8 @@ class PetApp(QObject):
             if self._maybe_peek():
                 return
             if self._maybe_occasion():
+                return
+            if self._maybe_hide_seek():
                 return
             if self._maybe_giveback():
                 return
