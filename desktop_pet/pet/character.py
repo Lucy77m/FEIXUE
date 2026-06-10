@@ -373,6 +373,10 @@ class BlobPet:
         self._lowbatt_e = 0.0
         self._blanket = False
         self._blanket_e = 0.0
+        self._cake = False
+        self._cake_e = 0.0
+        self._cake_lit = True
+        self._cake_smoke = 0.0
         self._settle = 0.0
         self._hold = 0.0
         self._busy = False
@@ -434,6 +438,21 @@ class BlobPet:
     def set_blanket(self, on: bool) -> None:
         """深夜盖小被子"""
         self._blanket = bool(on)
+
+    def set_cake(self, on: bool) -> None:
+        """端出纪念日蛋糕"""
+        self._cake = bool(on)
+        if on:
+            self._cake_lit = True
+            self._cake_smoke = 0.0
+
+    def blow_cake(self) -> bool:
+        """吹蜡烛 蜡烛亮着才有效"""
+        if not self._cake or not self._cake_lit:
+            return False
+        self._cake_lit = False
+        self._cake_smoke = 2.2
+        return True
 
     def set_expression(self, name: str) -> None:
         if name in _EXPRESSIONS:
@@ -609,12 +628,15 @@ class BlobPet:
         else:
             self._shy_e = max(0.0, self._shy_e - dt * 2.5)
         for flag, attr in (("_hot", "_hot_e"), ("_squeeze", "_squeeze_e"),
-                           ("_lowbatt", "_lowbatt_e"), ("_blanket", "_blanket_e")):
+                           ("_lowbatt", "_lowbatt_e"), ("_blanket", "_blanket_e"),
+                           ("_cake", "_cake_e")):
             e = getattr(self, attr)
             if getattr(self, flag):
                 setattr(self, attr, min(1.0, e + dt * 1.6))
             else:
                 setattr(self, attr, max(0.0, e - dt * 1.2))
+        if self._cake_smoke > 0.0:
+            self._cake_smoke = max(0.0, self._cake_smoke - dt)
         if self._hold > 0.0 and not self._busy and self._activity is None:
             self._hold -= dt
             if self._hold <= 0.0:
@@ -939,6 +961,8 @@ class BlobPet:
         painter.restore()
 
         self._draw_costume_ambient(painter, cx, head_y, bw, bh)
+        if self._cake_e > 0.01 or self._cake_smoke > 0.0:
+            self._draw_cake(painter, cx, head_y, bw, bh)
         if self._sleep_e > 0.01:
             self._draw_zzz(painter, cx, head_y, bw, bh, self._sleep_e)
 
@@ -968,13 +992,14 @@ class BlobPet:
     _FX_MUNCH = frozenset({"eating"})
     _FX_TICKLE = frozenset({"giggle"})
     _FX_WARM = frozenset({"snuggle"})
+    _FX_WAVE = frozenset({"wave"})
 
     def _draw_react_fx(self, painter: QPainter, name: str, p: float, cx: float, cy: float,
                        bw: float, bh: float) -> None:
         """按反应名分发到对应特效"""
         if name not in (self._FX_NOTES | self._FX_CONFETTI | self._FX_SWOOSH | self._FX_SHOCK
                         | self._FX_RING | self._FX_GLOOM | self._FX_MUNCH | self._FX_TICKLE
-                        | self._FX_WARM):
+                        | self._FX_WARM | self._FX_WAVE):
             return
         painter.save()
         self._fx_origin_y = cy
@@ -997,7 +1022,21 @@ class BlobPet:
             self._fx_tickle(painter, p, bw, bh)
         elif name in self._FX_WARM:
             self._fx_warm(painter, p, bw, bh)
+        elif name in self._FX_WAVE:
+            self._fx_wave(painter, p, bw, bh)
         painter.restore()
+
+    def _fx_wave(self, painter: QPainter, p: float, bw: float, bh: float) -> None:
+        """身侧的手画弧挥动"""
+        gate = math.sin(min(p * 4, 1.0, (1 - p) * 4) * math.pi / 2)
+        if gate <= 0.01:
+            return
+        swing = math.sin(p * math.pi * 6)
+        hx = bw * 0.55 + swing * bw * 0.10
+        hy = -bh * 0.30 - gate * bh * 0.16 - abs(swing) * bh * 0.05
+        painter.setPen(self._think_hand_pen(bw))
+        painter.setBrush(_SKIN)
+        painter.drawEllipse(QPointF(hx, hy), bw * 0.10 * gate, bw * 0.10 * gate)
 
     def _fx_warm(self, painter: QPainter, p: float, bw: float, bh: float) -> None:
         """身侧升起的热气波纹"""
@@ -1487,6 +1526,55 @@ class BlobPet:
             hx = sx * dx * (1.25 - 0.25 * k)
             hy = start_y + (ey - start_y) * k + wob
             painter.drawEllipse(QPointF(hx, hy), bw * 0.115, bw * 0.10)
+
+    def _draw_cake(self, painter: QPainter, cx: float, head_y: float, bw: float, bh: float) -> None:
+        """纪念日小蛋糕 两层三蜡烛 火苗会摆 吹灭冒烟"""
+        e = ease_out(self._cake_e)
+        gx = cx + bw * 0.72
+        gy = head_y + bh * 0.46 + (1 - e) * bh * 0.35  # 从下面端上来
+        painter.save()
+        painter.translate(gx, gy)
+        alpha = int(255 * min(1.0, self._cake_e * 1.4 + (0.4 if self._cake_smoke > 0 else 0.0)))
+        # 托盘
+        painter.setPen(QPen(QColor(120, 108, 96, alpha), max(1.3, bw * 0.012)))
+        painter.setBrush(QColor(238, 234, 244, alpha))
+        painter.drawEllipse(QPointF(0, bh * 0.020), bw * 0.30, bh * 0.045)
+        # 下层
+        painter.setBrush(QColor(248, 226, 198, alpha))
+        painter.drawRoundedRect(QRectF(-bw * 0.24, -bh * 0.10, bw * 0.48, bh * 0.12), 4, 4)
+        # 上层
+        painter.setBrush(QColor(252, 238, 214, alpha))
+        painter.drawRoundedRect(QRectF(-bw * 0.16, -bh * 0.19, bw * 0.32, bh * 0.10), 4, 4)
+        # 奶油波边
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(244, 168, 184, alpha))
+        for i in range(5):
+            px = -bw * 0.20 + i * bw * 0.10
+            painter.drawEllipse(QPointF(px, -bh * 0.10), bw * 0.030, bh * 0.020)
+        # 三根蜡烛
+        for i, px in enumerate((-bw * 0.09, 0.0, bw * 0.09)):
+            painter.setBrush(QColor(168, 196, 240, alpha))
+            painter.drawRect(QRectF(px - bw * 0.012, -bh * 0.265, bw * 0.024, bh * 0.075))
+            if self._cake_lit:
+                # 火苗 各自摆
+                fx_off = math.sin(self._t * 7 + i * 2.1) * bw * 0.008
+                fl = QColor(252, 186, 86, alpha)
+                painter.setBrush(fl)
+                painter.drawEllipse(QPointF(px + fx_off, -bh * 0.295), bw * 0.016, bh * 0.026)
+                painter.setBrush(QColor(255, 232, 150, alpha))
+                painter.drawEllipse(QPointF(px + fx_off, -bh * 0.288), bw * 0.008, bh * 0.013)
+        # 吹灭的烟
+        if self._cake_smoke > 0.0:
+            k = 1 - self._cake_smoke / 2.2
+            painter.setPen(Qt.PenStyle.NoPen)
+            for i, px in enumerate((-bw * 0.09, 0.0, bw * 0.09)):
+                ph = min(1.0, k * 1.6 + i * 0.08)
+                sa = max(0, int(150 * (1 - ph)))
+                painter.setBrush(QColor(170, 170, 184, sa))
+                sy = -bh * 0.30 - ph * bh * 0.22
+                sx2 = px + math.sin(ph * 5 + i) * bw * 0.02
+                painter.drawEllipse(QPointF(sx2, sy), bw * 0.014 + ph * bw * 0.012, bh * 0.018)
+        painter.restore()
 
     def _draw_hot(self, painter: QPainter, bw: float, bh: float, e: float) -> None:
         """热成这样 汗滴下滑 折扇狂扇"""

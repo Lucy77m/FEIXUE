@@ -506,6 +506,7 @@ class PetApp(QObject):
 
     def _connect(self) -> None:
         self._pet.clicked.connect(self._toggle_input)
+        self._pet.clicked.connect(self._on_pet_clicked_cake)
         self._pet.moved.connect(self._follow)
         self._pet.grabbed.connect(self._wake)
         self._pet.hid.connect(self._on_hide)
@@ -1682,8 +1683,55 @@ class PetApp(QObject):
             self._pet.move(rest)
             self._pet.show()
             self._pet.play_entrance(next_entrance_kind(), rest, screen)
+            QTimer.singleShot(5200, self._morning_ritual)
         else:
             self._pet.wake()
+
+    def _morning_ritual(self) -> None:
+        """每天第一次见面 起床气加心情预报 纪念日端蛋糕"""
+        today = datetime.now().date().isoformat()
+        if stats.get_note("forecast") != today:
+            stats.set_note("forecast", today)
+            self._pet.react("yawn")
+            val, _aro, rapport = emotion.snapshot()
+            if val >= 0.25:
+                key = "forecast_sunny"
+            elif val >= -0.15:
+                key = "forecast_cloudy"
+            else:
+                key = "forecast_rain"
+            text = i18n.t(key)
+            if rapport >= 0.6:
+                text += i18n.t("forecast_close_suffix")
+            QTimer.singleShot(1800, lambda: self._feed_pop(text))
+        # 纪念日
+        days = stats.snapshot()["days"]
+        milestone = days in (7, 30, 100, 200, 520) or (days > 0 and days % 365 == 0)
+        if milestone and stats.get_note("cake") != today:
+            stats.set_note("cake", today)
+            self._cake_on = True
+            QTimer.singleShot(4200, lambda: (
+                self._pet.set_cake(True),
+                self._feed_pop(i18n.t("cake_day").format(days=days)),
+            ))
+            QTimer.singleShot(10 * 60 * 1000, self._cake_timeout)
+
+    def _cake_timeout(self) -> None:
+        if getattr(self, "_cake_on", False):
+            self._cake_on = False
+            self._pet.set_cake(False)
+
+    def _on_pet_clicked_cake(self) -> None:
+        """点宠物时蛋糕亮着就是吹蜡烛"""
+        if not getattr(self, "_cake_on", False):
+            return
+        if self._pet.blow_cake():
+            self._cake_on = False
+            emotion.apply("praised")
+            selector.set_emotion(*emotion.snapshot())
+            QTimer.singleShot(900, lambda: self._pet.react("celebrate"))
+            QTimer.singleShot(1100, lambda: self._feed_pop(i18n.t("cake_blow")))
+            QTimer.singleShot(2600, lambda: self._pet.set_cake(False))
 
     def _bond_snapshot(self) -> dict:
         """控制面板羁绊页快照"""
@@ -1850,6 +1898,22 @@ class PetApp(QObject):
         self._do_quit()
 
     def _do_quit(self) -> None:
+        if self._entered and self._pet.isVisible() and not getattr(self, "_farewell_done", False):
+            # 走之前挥个手说晚安 再真正退
+            self._farewell_done = True
+            self._pet.react("wave")
+            line = ""
+            try:
+                today = datetime.now().date().isoformat()
+                for it in reversed(journal.recent(6)):
+                    if str(it.get("ts", "")).startswith(today):
+                        line = str(it.get("text", ""))[:42]
+                        break
+            except Exception:
+                pass
+            self._feed_pop(i18n.t("bye_with_note").format(note=line) if line else i18n.t("bye_plain"))
+            QTimer.singleShot(1700, self._do_quit)
+            return
         for _t in (self._presence_timer, self._reminder_timer, self._proactive_timer,
                    self._watch_timer, self._remote_timer):
             try:

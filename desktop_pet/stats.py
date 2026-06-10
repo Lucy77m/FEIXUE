@@ -45,6 +45,18 @@ def bump_interactions() -> None:
     _save(data)
 
 
+def get_note(key: str) -> str:
+    """读杂项标记"""
+    return str(_load().get("note_" + key, "") or "")
+
+
+def set_note(key: str, value: str) -> None:
+    """存杂项标记"""
+    data = _load()
+    data["note_" + key] = value
+    _save(data)
+
+
 def mark_late_night() -> int:
     """记一次熬夜 返回连续熬了几天 当天重复调用不重计"""
     data = _load()
