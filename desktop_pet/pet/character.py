@@ -333,6 +333,8 @@ class BlobPet:
         self._next_blink = random.uniform(1.0, 3.0)
         self._react: tuple[str, float, float] | None = None
         self._react_intensity = 1.0
+        self._shy = False
+        self._shy_e = 0.0
         self._settle = 0.0
         self._hold = 0.0
         self._busy = False
@@ -374,6 +376,10 @@ class BlobPet:
         self._catnap_timer = random.uniform(*_CATNAP_GAP)
         self._catnap_left = 0.0
 
+
+    def set_shy(self, on: bool) -> None:
+        """看到密码框捂眼回避"""
+        self._shy = bool(on)
 
     def set_expression(self, name: str) -> None:
         if name in _EXPRESSIONS:
@@ -544,6 +550,10 @@ class BlobPet:
             self._sleep_e = min(1.0, self._sleep_e + dt / _SLEEP_FADE)
         else:
             self._sleep_e = max(0.0, self._sleep_e - dt / _SLEEP_FADE * 1.5)
+        if self._shy:
+            self._shy_e = min(1.0, self._shy_e + dt * 3.5)
+        else:
+            self._shy_e = max(0.0, self._shy_e - dt * 2.5)
         if self._hold > 0.0 and not self._busy and self._activity is None:
             self._hold -= dt
             if self._hold <= 0.0:
@@ -824,6 +834,12 @@ class BlobPet:
             sxm *= a_sx
             sym *= a_sy
 
+        if self._shy_e > 0.0:
+            # 害羞侧身缩一点
+            rot += self._shy_e * 7
+            sxm *= 1 - 0.04 * self._shy_e
+            oy += self._shy_e * bh * 0.02
+
         head_y = cy + oy
         painter.save()
         painter.translate(cx + ox, head_y)
@@ -833,6 +849,8 @@ class BlobPet:
         self._draw_eyes(painter, bw, bh)
         self._draw_mouth(painter, bw, bh)
         self._draw_costume_worn(painter, bw, bh)
+        if self._shy_e > 0.01:
+            self._draw_shy_hands(painter, bw, bh, self._shy_e)
         if think_gate > 0.01 and not self._react and not self._worn_costume:
             self._draw_think_hand(painter, bw, bh, think_gate)
         if self._lecturing:
@@ -858,21 +876,22 @@ class BlobPet:
         return registry.evaluate(name, p, bw, bh)
 
 
-    _FX_NOTES = frozenset({"dance", "headbang"})
+    _FX_NOTES = frozenset({"dance", "headbang", "purr"})
     _FX_CONFETTI = frozenset({"cheer", "celebrate"})
     _FX_SWOOSH = frozenset({"spin", "jump_spin", "roll", "flip"})
     _FX_SHOCK = frozenset({"gasp", "double_take", "recoil"})
     _FX_RING = frozenset({"pop", "boing"})
 
 
-    _FX_GLOOM = frozenset({"slump", "droop", "deflate", "sigh"})
+    _FX_GLOOM = frozenset({"slump", "droop", "deflate", "sigh", "splat"})
     _FX_MUNCH = frozenset({"eating"})
+    _FX_TICKLE = frozenset({"giggle"})
 
     def _draw_react_fx(self, painter: QPainter, name: str, p: float, cx: float, cy: float,
                        bw: float, bh: float) -> None:
         """按反应名分发到对应特效"""
         if name not in (self._FX_NOTES | self._FX_CONFETTI | self._FX_SWOOSH | self._FX_SHOCK
-                        | self._FX_RING | self._FX_GLOOM | self._FX_MUNCH):
+                        | self._FX_RING | self._FX_GLOOM | self._FX_MUNCH | self._FX_TICKLE):
             return
         painter.save()
         self._fx_origin_y = cy
@@ -891,7 +910,35 @@ class BlobPet:
             self._fx_gloom(painter, p, bw, bh)
         elif name in self._FX_MUNCH:
             self._fx_munch(painter, p, bw, bh)
+        elif name in self._FX_TICKLE:
+            self._fx_tickle(painter, p, bw, bh)
         painter.restore()
+
+    def _fx_tickle(self, painter: QPainter, p: float, bw: float, bh: float) -> None:
+        """痒得乱蹦的小星和墨点"""
+        painter.setPen(Qt.PenStyle.NoPen)
+        for k in range(7):
+            ph = (p * 2.4 + k * 0.29) % 1.0
+            side = 1 if k % 2 == 0 else -1
+            x = side * (bw * 0.32 + ph * bw * 0.3) + math.sin(ph * math.pi * 3 + k) * bw * 0.04
+            y = bh * 0.1 - math.sin(ph * math.pi) * bh * 0.55
+            a = max(0, int(225 * (1 - ph)))
+            col = QColor(_DREAM_COLORS[k % len(_DREAM_COLORS)])
+            col.setAlpha(a)
+            if k % 3 == 0:
+                # 四角小星
+                pen = QPen(col)
+                pen.setWidthF(max(1.4, bw * 0.014))
+                pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+                painter.setPen(pen)
+                r = bw * 0.030 * (1 - ph * 0.4)
+                painter.drawLine(QPointF(x - r, y), QPointF(x + r, y))
+                painter.drawLine(QPointF(x, y - r), QPointF(x, y + r))
+                painter.setPen(Qt.PenStyle.NoPen)
+            else:
+                rr = bw * 0.018 * (1 - ph * 0.5)
+                painter.setBrush(col)
+                painter.drawEllipse(QPointF(x, y), rr, rr)
 
     def _fx_munch(self, painter: QPainter, p: float, bw: float, bh: float) -> None:
         """吃东西全程特效 文件落下 碎屑 咕咚 打嗝星"""
@@ -1231,6 +1278,30 @@ class BlobPet:
         if eat_p is not None:
             self._draw_eating_eyes(painter, eat_p, bw, bh)
             return
+        if self._react is not None:
+            rname, relapsed, rdur = self._react
+            rp = min(1.0, relapsed / max(rdur, 0.001))
+            gate = math.sin(min(rp * 3, 1.0, (1 - rp) * 3) * math.pi / 2)  # 进出渐变
+            if rname in ("giggle", "purr"):
+                self._draw_blush(painter, bw, bh, gate)
+                dx, ey, ew, eh = bw * 0.24, bh * 0.05, bw * 0.15, bh * 0.26
+                self._eye_arc(painter, -dx, ey, ew, eh)
+                self._eye_arc(painter, dx, ey, ew, eh)
+                return
+            if rname == "splat" and rp < 0.55:
+                # 摔懵了 X眼
+                pen = QPen(_INK)
+                pen.setWidthF(max(2.0, bw * 0.022))
+                pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+                painter.setPen(pen)
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                dx, ey = bw * 0.24, bh * 0.05
+                r = bw * 0.055
+                for sx in (-1, 1):
+                    cx = sx * dx
+                    painter.drawLine(QPointF(cx - r, ey - r), QPointF(cx + r, ey + r))
+                    painter.drawLine(QPointF(cx + r, ey - r), QPointF(cx - r, ey + r))
+                return
         dx, ey, ew, eh = bw * 0.24, bh * 0.05, bw * 0.15, bh * 0.26
         shift = self._turn * bw * 0.1           # 朝向偏移眼珠 远侧眼压扁
         scale_l = 1 - max(self._turn, 0.0) * 0.55
@@ -1289,6 +1360,28 @@ class BlobPet:
                 painter.setPen(pen)
                 painter.setBrush(Qt.BrushStyle.NoBrush)
                 painter.drawArc(QRectF(cx - ew, ey - eh * 0.1, ew * 2, eh * 0.5), 200 * 16, 140 * 16)
+
+    def _draw_blush(self, painter: QPainter, bw: float, bh: float, k: float) -> None:
+        """脸颊两团红晕"""
+        if k <= 0.01:
+            return
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(244, 142, 162, int(72 * k)))
+        for sx in (-1, 1):
+            painter.drawEllipse(QPointF(sx * bw * 0.31, bh * 0.17), bw * 0.085, bh * 0.05)
+
+    def _draw_shy_hands(self, painter: QPainter, bw: float, bh: float, e: float) -> None:
+        """双手从下面升起来捂住眼"""
+        k = ease_out(e)
+        dx, ey = bw * 0.24, bh * 0.05
+        start_y = bh * 0.42
+        painter.setPen(self._think_hand_pen(bw))
+        painter.setBrush(_SKIN)
+        wob = math.sin(self._t * 2.2) * bh * 0.012  # 捂着也会微微动
+        for sx in (-1, 1):
+            hx = sx * dx * (1.25 - 0.25 * k)
+            hy = start_y + (ey - start_y) * k + wob
+            painter.drawEllipse(QPointF(hx, hy), bw * 0.115, bw * 0.10)
 
     def _draw_eating_eyes(self, painter: QPainter, p: float, bw: float, bh: float) -> None:
         """吃东西的眼神 追着文件看 咀嚼眯眼 吞咽闭眼 打嗝瞪圆再变笑"""

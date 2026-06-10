@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import random
 import time
+from collections import deque
 
 from PySide6.QtCore import QPoint, Qt, QTimer, Signal
 from PySide6.QtGui import QEnterEvent, QMouseEvent, QPainter, QPaintEvent
@@ -33,8 +34,14 @@ _HOVER_COOLDOWN = 4.0
 _CLICK_REACTIONS = (
     "perk_up", "nod", "bounce", "peek", "wobble", "pop", "boing", "happy_wiggle",
 )
+_GRUDGE_REACTIONS = ("shake", "recoil", "droop", "deflate")  # 记仇期间不给好脸
 _CLICK_COOLDOWN = 2.5
 _COSTUME_CHANCE = 0.25
+_TOSS_SPEED = 650.0  # 甩出判定 像素每秒
+_TOSS_MAX = 2600.0
+_TOSS_GRAVITY = 3200.0
+_TOSS_BOUNCE = 0.48
+_TOSS_HURT = 1500.0  # 落地冲击超过这个算摔疼
 
 
 class PetWindow(QWidget):
@@ -45,6 +52,8 @@ class PetWindow(QWidget):
     wants_travel = Signal()
     context_requested = Signal(QPoint)
     fed = Signal(list)
+    tossed = Signal(float)
+    tickled = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -57,6 +66,18 @@ class PetWindow(QWidget):
         self._is_dragging = False
         self._last_hover = 0.0
         self._last_click = 0.0
+        self._click_times: list[float] = []  # 连点窗口 挠痒判定
+        self._long_fired = False
+        self._long_timer = QTimer(self)
+        self._long_timer.setSingleShot(True)
+        self._long_timer.timeout.connect(self._on_long_press)
+        self._drag_hist: deque[tuple[float, QPoint]] = deque(maxlen=6)  # 甩出去的速度采样
+        self._toss_timer = QTimer(self)
+        self._toss_timer.timeout.connect(self._tick_toss)
+        self._toss_vx = 0.0
+        self._toss_vy = 0.0
+        self._toss_impacted = False
+        self._grudge_until = 0.0
 
         self._blob = BlobPet()
         self._last = time.perf_counter()
@@ -155,6 +176,9 @@ class PetWindow(QWidget):
 
     def set_expression(self, name: str) -> None:
         self._blob.set_expression(name)
+
+    def set_shy(self, on: bool) -> None:
+        self._blob.set_shy(on)
 
     @property
     def is_reacting(self) -> bool:
@@ -334,10 +358,21 @@ class PetWindow(QWidget):
             self._press_pos = event.globalPosition().toPoint()
             self._drag_offset = self._press_pos - self.frameGeometry().topLeft()
             self._is_dragging = False
+            self._long_fired = False
+            self._end_toss()
+            if self._hideout is None and not self._blob.is_asleep:
+                self._long_timer.start(850)  # 长按抚摸判定
             event.accept()
         elif event.button() == Qt.MouseButton.RightButton:
             self.context_requested.emit(event.globalPosition().toPoint())
             event.accept()
+
+    def _on_long_press(self) -> None:
+        """按住不动够久 是在摸它"""
+        if self._is_dragging or self._hideout is not None or self._blob.is_asleep:
+            return
+        self._long_fired = True
+        self._blob.react("purr")
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         if event.buttons() & Qt.MouseButton.LeftButton:
@@ -345,11 +380,13 @@ class PetWindow(QWidget):
             # 超过 _CLICK_SLOP 才算拖拽 进了拖拽就掐掉藏边和传送
             if not self._is_dragging and (pos - self._press_pos).manhattanLength() >= _CLICK_SLOP:
                 self._is_dragging = True
+                self._long_timer.stop()
                 self.grabbed.emit()
                 self._blob.set_dragging(True)
                 self._end_hide()
                 self._end_travel()
             self.move(pos - self._drag_offset)
+            self._drag_hist.append((time.perf_counter(), pos))
             self.moved.emit()
             event.accept()
         elif self._hideout is None:
@@ -377,22 +414,113 @@ class PetWindow(QWidget):
             self._blob.set_hidden(False)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
-        # 松手三分支 拖完落地弹并试贴边 藏着就戳露头 否则算点击
+        # 松手四分支 甩出去抛飞 拖完落地弹并试贴边 藏着就戳露头 否则算点击
         if event.button() == Qt.MouseButton.LeftButton:
+            self._long_timer.stop()
             if self._is_dragging:
                 self._is_dragging = False
                 self._blob.set_dragging(False)
-                self._blob.react("bounce")
-                self._maybe_hide()
+                vx, vy = self._release_velocity()
+                self._drag_hist.clear()
+                if (vx * vx + vy * vy) ** 0.5 >= _TOSS_SPEED:
+                    self._start_toss(vx, vy)
+                else:
+                    self._blob.react("bounce")
+                    self._maybe_hide()
             elif self._hideout is not None:
                 self._hideout.poke()
+            elif self._long_fired:
+                pass  # 摸完了 不算点击
             elif (event.globalPosition().toPoint() - self._press_pos).manhattanLength() < _CLICK_SLOP:
                 now = time.perf_counter()
-                # 反应有冷却 睡着不演 clicked 信号照发
-                if now - self._last_click >= _CLICK_COOLDOWN and not self._blob.is_asleep:
+                # 两秒内连点三下是挠痒 优先于普通点击反应
+                self._click_times = [t for t in self._click_times if now - t < 2.0]
+                self._click_times.append(now)
+                if len(self._click_times) >= 3 and not self._blob.is_asleep:
+                    self._click_times.clear()
                     self._last_click = now
-                    name = selector.select(Category.REACTION, candidates=_CLICK_REACTIONS)
+                    self._blob.react("giggle")
+                    self.tickled.emit()
+                elif now - self._last_click >= _CLICK_COOLDOWN and not self._blob.is_asleep:
+                    self._last_click = now
+                    pool = _GRUDGE_REACTIONS if time.time() < self._grudge_until else _CLICK_REACTIONS
+                    name = selector.select(Category.REACTION, candidates=pool)
                     if name:
                         self._blob.react(name)
                 self.clicked.emit()
             event.accept()
+
+    def _release_velocity(self) -> tuple[float, float]:
+        """从最近拖动采样算松手速度 像素每秒"""
+        if len(self._drag_hist) < 2:
+            return 0.0, 0.0
+        t0, p0 = self._drag_hist[0]
+        t1, p1 = self._drag_hist[-1]
+        dt = t1 - t0
+        if dt < 0.005:
+            return 0.0, 0.0
+        return (p1.x() - p0.x()) / dt, (p1.y() - p0.y()) / dt
+
+    def _start_toss(self, vx: float, vy: float) -> None:
+        """被甩出去 抛体飞行"""
+        cap = _TOSS_MAX
+        self._toss_vx = max(-cap, min(vx, cap))
+        self._toss_vy = max(-cap, min(vy, cap))
+        self._toss_impacted = False
+        self._blob.set_dragging(True)  # 飞行中保持被拎的慌张样
+        self._end_hide()
+        self._end_travel()
+        self._toss_timer.start(16)
+
+    def _end_toss(self) -> None:
+        if self._toss_timer.isActive():
+            self._toss_timer.stop()
+            self._blob.set_dragging(False)
+
+    def _tick_toss(self) -> None:
+        dt = 0.016
+        scr = self.screen()
+        if scr is None:
+            self._end_toss()
+            return
+        avail = scr.availableGeometry()
+        self._toss_vy += _TOSS_GRAVITY * dt
+        self._toss_vx *= 0.998
+        x = self.x() + self._toss_vx * dt
+        y = self.y() + self._toss_vy * dt
+        floor = avail.bottom() - self.height()
+        impact = 0.0
+        # 左右墙弹
+        if x < avail.left():
+            x = avail.left()
+            self._toss_vx = abs(self._toss_vx) * _TOSS_BOUNCE
+        elif x > avail.right() - self.width():
+            x = avail.right() - self.width()
+            self._toss_vx = -abs(self._toss_vx) * _TOSS_BOUNCE
+        if y < avail.top():
+            y = avail.top()
+            self._toss_vy = abs(self._toss_vy) * _TOSS_BOUNCE
+        elif y >= floor:
+            y = floor
+            impact = abs(self._toss_vy)
+            self._toss_vy = -impact * _TOSS_BOUNCE
+            self._toss_vx *= 0.7
+            if not self._toss_impacted and impact >= _TOSS_HURT:
+                # 摔疼了 记仇半小时
+                self._toss_impacted = True
+                self._grudge_until = time.time() + 1800
+                self._toss_timer.stop()
+                self.move(int(x), int(y))
+                self._blob.set_dragging(False)
+                self._blob.react("splat")
+                self.tossed.emit(impact)
+                self.moved.emit()
+                return
+            if impact < 320:  # 弹不动了 收
+                self._toss_timer.stop()
+                self._blob.set_dragging(False)
+                self._blob.react("boing")
+                self.moved.emit()
+                return
+        self.move(int(x), int(y))
+        self.moved.emit()

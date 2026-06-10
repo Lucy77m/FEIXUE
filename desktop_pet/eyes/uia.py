@@ -25,6 +25,22 @@ def available() -> bool:
     return _auto is not None
 
 
+_UIA_IS_PASSWORD = 30019
+
+
+def focused_is_password() -> bool:
+    """当前焦点控件是不是密码框"""
+    if _auto is None:
+        return False
+    try:
+        ctrl = _auto.GetFocusedControl()
+        if ctrl is None:
+            return False
+        return bool(ctrl.GetPropertyValue(_UIA_IS_PASSWORD))
+    except Exception:
+        return False
+
+
 def _window(title: str | None):
     """按标题找窗口 无标题取前台"""
     if _auto is None:

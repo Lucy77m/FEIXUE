@@ -243,6 +243,43 @@ def _eating(p: float, bw: float, bh: float) -> PoseDelta:
                      1 + 0.08 * hop, 1 - 0.1 * hop)
 
 
+def _giggle(p: float, bw: float, bh: float) -> PoseDelta:
+    """被挠痒笑得乱颤 高频小抖加左右倒"""
+    fade = math.sin(min(p * 4, 1.0) * math.pi / 2) * (1 - max(0.0, p - 0.75) * 4)
+    fade = max(0.0, fade)
+    shiver = math.sin(p * math.pi * 16) * fade
+    lean = math.sin(p * math.pi * 4.5) * fade
+    hop = abs(math.sin(p * math.pi * 8)) * fade
+    return PoseDelta(lean * bw * 0.05, -hop * bh * 0.07 + shiver * bh * 0.012,
+                     lean * 9 + shiver * 2.5, 1 + 0.07 * hop, 1 - 0.08 * hop)
+
+
+def _purr(p: float, bw: float, bh: float) -> PoseDelta:
+    """被摸舒服了咕噜 缓慢律动加蹭"""
+    ease = math.sin(min(p * 3, 1.0) * math.pi / 2) * (1 - max(0.0, p - 0.8) * 5)
+    ease = max(0.0, ease)
+    rumble = math.sin(p * math.pi * 10) * 0.012 * ease  # 细微咕噜震动
+    nuzzle = math.sin(p * math.pi * 2.2) * ease  # 大幅蹭
+    return PoseDelta(nuzzle * bw * 0.04, bh * 0.02 * ease, nuzzle * 6,
+                     1 + 0.04 * ease + rumble, 1 - 0.05 * ease + rumble)
+
+
+def _splat(p: float, bw: float, bh: float) -> PoseDelta:
+    """重摔 压超扁 缓回弹 抖两下喘"""
+    if p < 0.12:
+        k = ease_in(p / 0.12)
+        return PoseDelta(0.0, bh * 0.18 * k, 0.0, 1 + 0.5 * k, 1 - 0.55 * k)
+    if p < 0.45:  # 趴着不动 喘
+        q = (p - 0.12) / 0.33
+        pant = math.sin(q * math.pi * 5) * 0.02
+        return PoseDelta(0.0, bh * 0.18, 0.0, 1.5 - pant, 0.45 + pant)
+    q = (p - 0.45) / 0.55  # 慢慢爬起来 带余颤
+    k = ease_out(q)
+    wob = math.sin(q * math.pi * 6) * (1 - q) * 0.05
+    return PoseDelta(0.0, bh * 0.18 * (1 - k), wob * 60,
+                     1.5 - 0.5 * k + wob, 0.45 + 0.55 * k - wob)
+
+
 # 一行一个反应 名字 时长 曲线 valence arousal weight rarity
 _REACTIONS = (
     ("hold_still", 1.2, _hold_still, 0.0, 0.2, 1.4, COMMON),
@@ -277,6 +314,9 @@ _REACTIONS = (
     ("celebrate", 3.6, _celebrate, 0.9, 0.8, 0.5, UNCOMMON),
     ("slump", 2.6, _slump, -0.7, 0.2, 0.5, UNCOMMON),
     ("eating", 2.6, _eating, 0.6, 0.5, 0.0, COMMON),  # 投喂专用 权重0不进随机池
+    ("giggle", 1.9, _giggle, 0.8, 0.8, 0.0, COMMON),  # 挠痒专用
+    ("purr", 2.8, _purr, 0.7, 0.25, 0.0, COMMON),  # 长按专用
+    ("splat", 2.4, _splat, -0.5, 0.7, 0.0, COMMON),  # 摔疼专用
 )
 
 # 亲密向动作 好感度够高才放出来

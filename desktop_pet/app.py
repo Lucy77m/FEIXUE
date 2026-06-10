@@ -65,6 +65,8 @@ _GIVEBACK_MIN_AGE_H = 2.0  # 收藏攒够这么久才值得拿出来
 _GIVEBACK_RAPPORT_GATE = 0.45
 _BUG_SCAN_MS = 45 * 60 * 1000
 _BUG_TEMP_BYTES = 500 * 1024 * 1024  # temp堆到这么大就生虫
+_SHY_POLL_MS = 2500
+_SHY_POP_COOLDOWN_S = 120.0
 _PROACTIVE_RAPPORT_GATE = {"安静": 0.45, "正常": 0.30, "话痨": 0.15}
 _PROACTIVE_RAPPORT_GATE_DEFAULT = 0.30
 _CELEBRATE_CHANCE = 0.25
@@ -358,6 +360,7 @@ class PetApp(QObject):
     _feed_note = Signal(str)
     _bug_found = Signal(int)
     _bug_cleaned = Signal(int, int)
+    _shy_changed = Signal(bool)
     _voice_chunk_done = Signal(int)
     _voice_chunk_start = Signal(int)
     _voice_chunk_progress = Signal(int, int)
@@ -453,6 +456,12 @@ class PetApp(QObject):
         self._bug_scanning = False
         self._bug_found.connect(self._on_bug_found)
         self._bug_cleaned.connect(self._on_bug_cleaned)
+        self._shy_timer = QTimer(self)
+        self._shy_timer.timeout.connect(self._check_password_focus)
+        self._shy_now = False
+        self._shy_checking = False
+        self._shy_last_pop = 0.0
+        self._shy_changed.connect(self._on_shy_changed)
         from collections import deque
         self._clip_treasures: deque = deque(maxlen=12)  # 帮用户收着的剪贴小宝贝 只在内存
         self._last_giveback: datetime | None = None
@@ -517,6 +526,8 @@ class PetApp(QObject):
         self._pet.fed.connect(self._on_fed)
         self._feed_confirm.answered.connect(self._on_feed_answer)
         self._feed_note.connect(self._on_feed_note)
+        self._pet.tossed.connect(self._on_tossed)
+        self._pet.tickled.connect(self._on_tickled)
         self._hotkeys.summon.connect(self._summon)
         self._hotkeys.ask_selection.connect(self._ask_selection)
         self._hotkeys.quick_rewrite.connect(self._quick_rewrite)
@@ -1004,6 +1015,51 @@ class PetApp(QObject):
 
     def _feed_pop(self, text: str) -> None:
         self._thought.pop(text, self._pet)
+
+    @Slot(float)
+    def _on_tossed(self, impact: float) -> None:
+        """被重摔了 疼一下还要哄"""
+        emotion.apply("hurt")
+        selector.set_emotion(*emotion.snapshot())
+        self._pet.set_expression("sad")
+        self._feed_pop(i18n.t("toss_ouch"))
+
+    @Slot()
+    def _on_tickled(self) -> None:
+        """被挠痒 开心计入互动"""
+        emotion.apply("praised")
+        selector.set_emotion(*emotion.snapshot())
+        stats.bump_interactions()
+
+    def _check_password_focus(self) -> None:
+        """低频看一眼焦点是不是密码框 是就捂眼"""
+        if self._shy_checking or not self._settings.allow_control:
+            return
+        if not self._pet.isVisible():
+            return
+        self._shy_checking = True
+        threading.Thread(target=self._shy_probe_thread, daemon=True).start()
+
+    def _shy_probe_thread(self) -> None:
+        try:
+            from desktop_pet.eyes import uia
+            is_pwd = uia.focused_is_password()
+            if is_pwd != self._shy_now:
+                self._shy_changed.emit(is_pwd)
+        except Exception:
+            pass
+        finally:
+            self._shy_checking = False
+
+    @Slot(bool)
+    def _on_shy_changed(self, shy: bool) -> None:
+        self._shy_now = shy
+        self._pet.set_shy(shy)
+        if shy:
+            now = time.time()
+            if now - self._shy_last_pop > _SHY_POP_COOLDOWN_S:
+                self._shy_last_pop = now
+                self._feed_pop(i18n.t("pwd_shy"))
 
     def _check_bugs(self) -> None:
         """定时扫temp 垃圾堆大了生一只虫"""
@@ -1732,6 +1788,7 @@ class PetApp(QObject):
         self._remote_timer.start(_REMOTE_POLL_MS)
         self._bgwatch_timer.start(_BGWATCH_POLL_MS)
         self._bug_timer.start(_BUG_SCAN_MS)
+        self._shy_timer.start(_SHY_POLL_MS)
         if self._settings.remote_inbox:
             remote_inbox.ensure_dir()
         self._hotkeys.start()
