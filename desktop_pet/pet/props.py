@@ -815,6 +815,64 @@ def draw_sprout(painter: QPainter, bw: float, bh: float, t: float, stage: str, s
     painter.restore()
 
 
+def draw_yarn(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
+    """画毛线球 盯 拍 追 缠 抱"""
+    ground = bh * 0.40
+    r = bw * 0.15
+    tangle_k = 0.0
+    if stage == "eye":
+        bx, roll = bw * 0.60, math.sin(t * 3) * 4
+    elif stage == "bat":
+        sw = math.sin(stage_p * math.pi * 4)
+        bx = bw * 0.42 + sw * bw * 0.30
+        roll = sw * 230
+    elif stage == "chase":
+        bx = math.sin(stage_p * math.pi * 2) * bw * 0.80
+        roll = stage_p * 720
+    elif stage == "tangle":
+        bx, roll = bw * 0.34, 90 + stage_p * 60
+        tangle_k = ease_out(stage_p)
+    else:  # rest
+        bx, roll = bw * 0.38, 150.0
+    # 缠到身上的线圈
+    if tangle_k > 0.01:
+        pen = QPen(QColor(214, 110, 124, int(230 * tangle_k)))
+        pen.setWidthF(max(1.8, bw * 0.020))
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        for i in range(3):
+            sweep = 200 * tangle_k
+            painter.drawArc(QRectF(-bw * 0.52, -bh * 0.10 + i * bh * 0.14, bw * 1.04, bh * 0.16),
+                            int((20 + i * 30) * 16), int(sweep * 16))
+    # 线头 从球往身边拖一条松线
+    pen = QPen(QColor(214, 110, 124, 235))
+    pen.setWidthF(max(1.8, bw * 0.020))
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    painter.setPen(pen)
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    path = QPainterPath(QPointF(bx - r * 0.6, ground + r * 0.4))
+    path.cubicTo(QPointF(bx - bw * 0.32, ground + r * 0.85 + math.sin(t * 2.5) * bh * 0.02),
+                 QPointF(bx - bw * 0.52, ground - r * 0.2),
+                 QPointF(bx - bw * 0.72, ground + r * 0.45))
+    painter.drawPath(path)
+    # 球体带绕线纹
+    painter.save()
+    painter.translate(bx, ground)
+    painter.rotate(roll)
+    painter.setPen(QPen(QColor(150, 64, 78), max(1.4, bw * 0.014)))
+    painter.setBrush(QColor(226, 128, 142))
+    painter.drawEllipse(QPointF(0, 0), r, r)
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    pen2 = QPen(QColor(170, 78, 92, 220))
+    pen2.setWidthF(max(1.4, bw * 0.016))
+    painter.setPen(pen2)
+    painter.drawArc(QRectF(-r, -r * 0.95, r * 2, r * 1.4), 30 * 16, 130 * 16)
+    painter.drawArc(QRectF(-r * 0.95, -r * 0.5, r * 1.9, r * 1.5), 190 * 16, 140 * 16)
+    painter.drawArc(QRectF(-r * 0.6, -r, r * 1.4, r * 2), 70 * 16, 120 * 16)
+    painter.restore()
+
+
 # 装扮注册表 worn 穿身上 ambient 撒周围 二者互斥
 COSTUME_LAYERS = {
     "sherlock": (draw_sherlock, None),
@@ -831,6 +889,7 @@ COSTUME_LAYERS = {
     "clone": (None, draw_clone),
     "meteor": (None, draw_meteor),
     "sprout": (None, draw_sprout),
+    "yarn": (None, draw_yarn),
 }
 COSTUMES = frozenset(COSTUME_LAYERS)
 WORN_COSTUMES = frozenset(name for name, (worn, _ambient) in COSTUME_LAYERS.items() if worn)

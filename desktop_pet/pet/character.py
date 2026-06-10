@@ -121,6 +121,13 @@ _ACTIVITIES = {
         ("bloom", 3.5, "★"),
         ("sniff", 3.0, "♥"),
     ]),
+    "yarn": ("yarn", 0.3, "happy_wiggle", [
+        ("eye", 2.2, "?"),
+        ("bat", 5.5, "!"),
+        ("chase", 4.0, "✦"),
+        ("tangle", 3.5, "～"),
+        ("rest", 2.5, "♥"),
+    ]),
 }
 _ACTIVITY_GAP = (150.0, 300.0)
 _TRAVEL = "__travel__"
@@ -221,11 +228,34 @@ def _sprout_body(stage, p, t, bw, bh):
     return 0.0, 0.0, 0.0, 1.0, 1.0
 
 
+def _yarn_body(stage, p, t, bw, bh):
+    """玩毛线球的身体位姿"""
+    if stage == "eye":
+        e = ease_out(p)
+        # 歪头盯球 屁股微撅蓄势
+        return 0.05 * bw * e, 0.03 * bh * e, 9.0 * e, 1.0 + 0.04 * e, 1.0 - 0.05 * e
+    if stage == "bat":
+        sw = math.sin(p * math.pi * 4)  # 跟球的节奏扑
+        pounce = abs(math.sin(p * math.pi * 8))
+        return sw * bw * 0.13, 0.05 * bh + pounce * bh * 0.025, sw * 10, 1 + 0.05 * pounce, 1 - 0.07 * pounce
+    if stage == "chase":
+        sw = math.sin(p * math.pi * 2)
+        return sw * bw * 0.22, 0.04 * bh, sw * 14, 1.02, 0.96
+    if stage == "tangle":
+        wig = math.sin(t * 7) * ease_out(p)
+        return wig * bw * 0.03, 0.05 * bh, wig * 6, 1.0 + 0.03 * abs(wig), 1.0 - 0.04 * abs(wig)
+    if stage == "rest":
+        e = ease_out(p)
+        return 0.05 * bw, 0.08 * bh * e, 4.0, 1.0 - 0.03 * e, 1.0 - 0.04 * e
+    return 0.0, 0.0, 0.0, 1.0, 1.0
+
+
 _ACTIVITY_BODY = {
     "void": _void_body,
     "clone": _clone_body,
     "meteor": _meteor_body,
     "sprout": _sprout_body,
+    "yarn": _yarn_body,
 }
 
 

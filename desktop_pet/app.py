@@ -1166,6 +1166,13 @@ class PetApp(QObject):
             self._snuggle_last = now
             self._pet.react("snuggle")
             self._feed_pop(i18n.t("snuggle_warm"))
+        # 机器真闲了五分钟 拿毛线球出来玩
+        self._cpu_idle_n = self._cpu_idle_n + 1 if cpu < 15 else 0
+        if (self._cpu_idle_n >= 30 and now - getattr(self, "_yarn_last", 0.0) > 7200
+                and not self._engaged() and not self._pet.is_asleep):
+            self._yarn_last = now
+            self._cpu_idle_n = 0
+            self._pet.perform("yarn")
 
     def _check_bugs(self) -> None:
         """定时扫temp 垃圾堆大了生一只虫"""
