@@ -409,7 +409,8 @@ class PetWindow(QWidget):
         self._long_fired = True
         self._blob.react("purr")
         from desktop_pet import somatic
-        somatic.note("被主人温柔地摸了 舒服得咕噜咕噜")
+        from desktop_pet.agent import prompts
+        somatic.note(prompts.SOMA_PETTED)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         if event.buttons() & Qt.MouseButton.LeftButton:

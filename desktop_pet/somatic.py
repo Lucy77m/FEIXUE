@@ -27,6 +27,7 @@ def set_state(key: str, text: str | None) -> None:
 
 def context() -> str:
     """拼身体近况注记 没东西给空串"""
+    from desktop_pet.agent import prompts
     now = time.time()
     lines = list(_states.values())
     for ts, text in _events:
@@ -34,12 +35,11 @@ def context() -> str:
         if age > _LOOK_BACK:
             continue
         mins = int(age // 60)
-        when = "刚刚" if mins < 1 else f"{mins}分钟前"
-        lines.append(f"{when} {text}")
+        when = prompts.SOMA_JUST_NOW if mins < 1 else prompts.SOMA_MIN_AGO.format(m=mins)
+        lines.append(f"({when}) {text}")
     if not lines:
         return ""
-    return ("[身体近况——你的身体(桌宠本体)刚经历的事和正处的状态 聊天时可自然提起 不必每次都提]\n"
-            + "\n".join("- " + ln for ln in lines))
+    return prompts.SOMATIC_HEADER + "\n" + "\n".join("- " + ln for ln in lines)
 
 
 def clear() -> None:

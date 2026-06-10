@@ -12,6 +12,14 @@ from PySide6.QtWidgets import QMenu, QSystemTrayIcon
 from desktop_pet import i18n
 from desktop_pet.pet.icon import mochi_icon
 
+# 表演子菜单 名字对应小品或反应
+_PERFORM_ITEMS = (
+    ("yarn", "act_yarn"), ("fish", "act_fish"), ("coffee", "act_coffee"),
+    ("read", "act_read"), ("stars", "act_stars"), ("dance", "act_dance"),
+    ("celebrate", "act_celebrate"), ("flip", "act_flip"),
+    ("purr", "act_purr"), ("wave", "act_wave"),
+)
+
 
 class Tray(QSystemTrayIcon):
     def __init__(
@@ -25,6 +33,7 @@ class Tray(QSystemTrayIcon):
         is_shown: Callable[[], bool] | None = None,
         on_focus: Callable[[], None] | None = None,
         on_ball: Callable[[], None] | None = None,
+        on_perform: Callable[[str], None] | None = None,
     ) -> None:
         super().__init__(mochi_icon())
         self.setToolTip(i18n.t("tray_tooltip"))
@@ -37,6 +46,12 @@ class Tray(QSystemTrayIcon):
         self._act_new_topic = self._add(menu, "tray_new_topic", on_new_topic)
         self._act_focus = self._add(menu, "tray_focus", on_focus)
         self._act_ball = self._add(menu, "tray_ball", on_ball)
+        if on_perform is not None:
+            sub = menu.addMenu(i18n.t("tray_perform"))
+            for name, key in _PERFORM_ITEMS:
+                act = QAction(i18n.t(key), sub)
+                act.triggered.connect(lambda _checked=False, n=name: on_perform(n))
+                sub.addAction(act)
         self._act_toggle = self._add(menu, "tray_hide", on_toggle_show)
         # 全没建就不画分隔线
         if any((self._act_talk, self._act_peek, self._act_new_topic, self._act_toggle)):
