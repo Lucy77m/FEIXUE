@@ -149,6 +149,23 @@ def _strip_think_leak(text: str) -> str:
     return text.replace("<think>", "").replace("</think>", "").strip()
 
 
+# 工具调用本该走tool_calls字段 有时模型当正文吐出来 这些标记打头就是泄漏
+_TOOLCALL_MARK_RE = re.compile(
+    r"(?:\bcall\b\s*)?<\s*/?\s*(?:antml:)?(?:invoke|function_calls|parameter|tool_call)\b",
+    re.IGNORECASE,
+)
+
+
+def _strip_toolcall_leak(text: str) -> str:
+    """工具调用语法漏进正文就从第一处标记起整段切掉 正常回复绝不含这些"""
+    if not text:
+        return text
+    m = _TOOLCALL_MARK_RE.search(text)
+    if m is None:
+        return text
+    return text[: m.start()].rstrip()
+
+
 _PLAN_STATUS_ALIAS = {
     "done": "done", "completed": "done", "complete": "done", "finished": "done",
     "finish": "done", "ok": "done", "success": "done", "✓": "done", "x": "done",
@@ -568,7 +585,7 @@ class Agent:
                 self._seal_pending_tool_calls("[这一步请求出错中断了，没有拿到结果。]")
                 raise
             if message.content:
-                message.content = _strip_think_leak(message.content)
+                message.content = _strip_toolcall_leak(_strip_think_leak(message.content))
             self._messages.append(self._as_dict(message))
             if not message.tool_calls:
                 reply = message.content or ""
@@ -690,7 +707,7 @@ class Agent:
         try:
             message = self._complete(think, offer_tools=False)
             self._messages.append(self._as_dict(message))
-            reply = _strip_think_leak(message.content or "")
+            reply = _strip_toolcall_leak(_strip_think_leak(message.content or ""))
         except Exception as exc:
             audit.reply(f"[step-limit 收尾调用失败: {type(exc).__name__}: {exc}]")
             reply = ""
@@ -1163,7 +1180,7 @@ class Agent:
             content = (resp.choices[0].message.content or "").strip()
         except Exception:
             content = ""
-        content = _strip_think_leak(content)
+        content = _strip_toolcall_leak(_strip_think_leak(content))
         if not content:
             content = f"[neutral]\n{what}"
         audit.reply(content, proactive=True)
