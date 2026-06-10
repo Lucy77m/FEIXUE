@@ -52,6 +52,27 @@ class Playtime(QObject):
     def start(self) -> None:
         self._bug_timer.start(_BUG_SCAN_MS)
 
+    def stop(self) -> None:
+        """退出前停轮询关掉所有玩耍小窗"""
+        for t in (self._bug_timer, self._perch_timer):
+            try:
+                t.stop()
+            except Exception:
+                pass
+        for w in (self._bug, self._tail, self._ball):
+            if w is not None:
+                try:
+                    w._timer.stop()
+                    w.close()
+                except Exception:
+                    pass
+        self._bug = self._tail = self._ball = None
+        try:
+            self._paws._timer.stop()
+            self._paws.hide()
+        except Exception:
+            pass
+
     @Slot(float)
     def _on_tossed(self, impact: float) -> None:
         """被重摔了 疼一下还要哄"""

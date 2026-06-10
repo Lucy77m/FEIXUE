@@ -89,6 +89,15 @@ class Sensors(QObject):
         self._desk_timer.start(_DESK_POLL_MS)
         self._weather_timer.start(2 * 3600 * 1000)
 
+    def stop(self) -> None:
+        """退出前停全部轮询 不再孵新线程"""
+        for t in (self._shy_timer, self._vitals_timer, self._dl_timer,
+                  self._mic_timer, self._desk_timer, self._weather_timer):
+            try:
+                t.stop()
+            except Exception:
+                pass
+
     def _check_password_focus(self) -> None:
         """低频看一眼焦点是不是密码框 是就捂眼"""
         if self._shy_checking or not self._host._settings.allow_control:

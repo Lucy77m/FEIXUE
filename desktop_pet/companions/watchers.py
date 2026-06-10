@@ -38,6 +38,12 @@ class Watchers(QObject):
     def start(self) -> None:
         self._bgwatch_timer.start(_BGWATCH_POLL_MS)
 
+    def stop(self) -> None:
+        try:
+            self._bgwatch_timer.stop()
+        except Exception:
+            pass
+
     def add_treasure(self, kind: str, text: str) -> None:
         """顺手收藏一份留着回赠 只进内存不落盘 胸前吊牌跟着变"""
         if all(text != t for _k, t, _ts in self._clip_treasures):

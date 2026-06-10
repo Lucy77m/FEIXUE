@@ -29,14 +29,22 @@ _UIA_IS_PASSWORD = 30019
 
 
 def focused_is_password() -> bool:
-    """当前焦点控件是不是密码框"""
+    """当前焦点控件是不是密码框 后台线程调用须先初始化com"""
     if _auto is None:
         return False
-    try:
+
+    def _probe() -> bool:
         ctrl = _auto.GetFocusedControl()
         if ctrl is None:
             return False
         return bool(ctrl.GetPropertyValue(_UIA_IS_PASSWORD))
+
+    try:
+        init = getattr(_auto, "UIAutomationInitializerInThread", None)
+        if init is not None:
+            with init():
+                return _probe()
+        return _probe()
     except Exception:
         return False
 

@@ -37,6 +37,9 @@ class FeedingCtrl(QObject):
     def start(self) -> None:
         pass
 
+    def stop(self) -> None:
+        pass
+
     @Slot(list)
     def _on_fed(self, paths: list) -> None:
         """投喂入口 按类型分流"""

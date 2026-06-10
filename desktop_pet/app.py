@@ -1483,6 +1483,12 @@ class PetApp(QObject):
         self._do_quit()
 
     def _do_quit(self) -> None:
+        # 先掐死全部伴生轮询 退出过程不再孵新线程
+        for c in (self._sensors, self._playtime, self._watchers, self._rituals, self._feeding):
+            try:
+                c.stop()
+            except Exception:
+                pass
         if self._rituals.farewell():
             return
         for _t in (self._presence_timer, self._reminder_timer, self._proactive_timer,

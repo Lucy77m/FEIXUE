@@ -30,6 +30,12 @@ class Rituals(QObject):
     def start(self) -> None:
         pass
 
+    def stop(self) -> None:
+        try:
+            self._focus_timer.stop()
+        except Exception:
+            pass
+
     def morning_ritual(self) -> None:
         """每天第一次见面 起床气加心情预报 纪念日端蛋糕"""
         today = datetime.now().date().isoformat()
