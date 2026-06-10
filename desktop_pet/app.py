@@ -16,6 +16,8 @@ from PySide6.QtCore import QObject, QPoint, QThread, QTimer, Signal, Slot, qInst
 from PySide6.QtGui import QColor, QCursor, QFont, QPalette
 from PySide6.QtWidgets import QApplication
 
+from pathlib import Path
+
 from desktop_pet import i18n, journal, occasions, persona, presence, stats, voice
 from desktop_pet.audit import audit
 from desktop_pet.docs import docs
@@ -32,6 +34,7 @@ from desktop_pet.pet.chat import InputBox, SpeechText, ThoughtBubble, ThoughtBub
 from desktop_pet.pet.todo_board import TodoBoard
 from desktop_pet.pet.control_panel import ControlPanel
 from desktop_pet.pet.media import MediaFrame
+from desktop_pet.pet import feeding
 from desktop_pet.pet.confirm import ConfirmBox
 from desktop_pet.pet.entrance import next_entrance_kind
 from desktop_pet.pet.tray import Tray
@@ -343,6 +346,7 @@ class PetApp(QObject):
     request_confirm = Signal(str)
     request_rewrite = Signal(str)
     request_clip_alchemy = Signal(str, str)
+    _feed_note = Signal(str)
     _voice_chunk_done = Signal(int)
     _voice_chunk_start = Signal(int)
     _voice_chunk_progress = Signal(int, int)
@@ -378,6 +382,8 @@ class PetApp(QObject):
         self._confirm_event = threading.Event()
         self._confirm_result = False
         self._confirm_pending = False
+        self._feed_pending: tuple[list, int] | None = None
+        self._feed_doc: str | None = None
 
         from desktop_pet.agent.loop import Agent
 
@@ -393,11 +399,12 @@ class PetApp(QObject):
         self._todo = TodoBoard()
         self._media = MediaFrame()
         self._confirm_box = ConfirmBox()
+        self._feed_confirm = ConfirmBox()
         self._thought = ThoughtBubble()
         self._think = ThoughtBubbles()
 
         from desktop_pet.eyes import capture
-        for _w in (self._pet, self._speech, self._input, self._board, self._todo, self._media, self._confirm_box, self._thought, self._think):
+        for _w in (self._pet, self._speech, self._input, self._board, self._todo, self._media, self._confirm_box, self._feed_confirm, self._thought, self._think):
             capture.register_own_window(int(_w.winId()))
 
         self._lecturing = False
@@ -484,6 +491,9 @@ class PetApp(QObject):
         self._remote_action.connect(self._on_remote_action)
         self.request_confirm.connect(self._on_confirm_requested)
         self._confirm_box.answered.connect(self._on_confirm_answered)
+        self._pet.fed.connect(self._on_fed)
+        self._feed_confirm.answered.connect(self._on_feed_answer)
+        self._feed_note.connect(self._on_feed_note)
         self._hotkeys.summon.connect(self._summon)
         self._hotkeys.ask_selection.connect(self._ask_selection)
         self._hotkeys.quick_rewrite.connect(self._quick_rewrite)
@@ -880,6 +890,93 @@ class PetApp(QObject):
             return
         self._confirm_result = ok
         self._confirm_event.set()
+
+    @Slot(list)
+    def _on_fed(self, paths: list) -> None:
+        """投喂入口 按类型分流"""
+        kind = feeding.classify(paths)
+        if kind == "missing":
+            self._feed_pop(i18n.t("feed_missing"))
+            return
+        if kind == "protected":
+            self._pet.react("recoil")
+            self._feed_pop(i18n.t("feed_protected"))
+            return
+        if kind == "risky":
+            self._pet.react("shake")
+            self._feed_pop(i18n.t("feed_risky"))
+            return
+        if kind == "image":
+            if self._worker.is_running:
+                self._feed_pop(i18n.t("feed_busy"))
+                return
+            path = str(Path(paths[0]).expanduser().resolve())
+            self._pet.react("perk_up")
+            self.request_message.emit(i18n.t("feed_image_msg").format(name=Path(path).name, path=path))
+            return
+        if kind == "doc":
+            self._feed_doc = paths[0]
+            screen = self._app.primaryScreen().availableGeometry()
+            self._feed_confirm.ask(i18n.t("feed_doc_ask").format(name=Path(paths[0]).name), self._pet, screen)
+            return
+        total, truncated = feeding.total_size(paths)
+        if total > feeding._BIG_BYTES or feeding.has_dir(paths) or truncated:
+            self._feed_pending = (paths, total)
+            name = Path(paths[0]).name + (f" +{len(paths) - 1}" if len(paths) > 1 else "")
+            screen = self._app.primaryScreen().availableGeometry()
+            self._feed_confirm.ask(
+                i18n.t("feed_confirm").format(name=name, size=feeding.human_size(total)), self._pet, screen)
+            return
+        self._eat(paths, total)
+
+    @Slot(bool)
+    def _on_feed_answer(self, ok: bool) -> None:
+        """投喂确认回来 文档和大餐两种等待"""
+        if self._feed_doc is not None:
+            path, self._feed_doc = self._feed_doc, None
+            if not ok:
+                return
+            self._pet.react("eating")
+            threading.Thread(target=self._ingest_doc, args=(path,), daemon=True).start()
+            return
+        if self._feed_pending is not None:
+            (paths, total), self._feed_pending = self._feed_pending, None
+            if ok:
+                self._eat(paths, total)
+
+    def _ingest_doc(self, path: str) -> None:
+        """后台线程读文档进知识库"""
+        try:
+            docs.ingest(path)
+            self._feed_note.emit(i18n.t("feed_doc_done"))
+        except Exception:
+            self._feed_note.emit(i18n.t("feed_doc_fail"))
+
+    def _eat(self, paths: list, total: int) -> None:
+        """播吃动画 咽下去时真删"""
+        self._pet.react("eating")
+        QTimer.singleShot(1700, lambda: self._finish_eat(paths, total))
+
+    def _finish_eat(self, paths: list, total: int) -> None:
+        err = feeding.recycle(paths)
+        if err:
+            self._pet.react("droop")
+            self._feed_pop(i18n.t("feed_eat_fail"))
+            audit.reply(f"feed recycle failed: {err}")
+            return
+        stats.add_eaten(total, len(paths))
+        emotion.apply("fed")
+        selector.set_emotion(*emotion.snapshot())
+        if total > 100 * 1024 * 1024:
+            journal.add(f"主人喂我吃了 {feeding.human_size(total)} 的垃圾文件 饱了")
+        self._feed_pop(i18n.t("feed_eaten").format(size=feeding.human_size(total)))
+
+    @Slot(str)
+    def _on_feed_note(self, text: str) -> None:
+        self._feed_pop(text)
+
+    def _feed_pop(self, text: str) -> None:
+        self._thought.pop(text, self._pet)
 
     @Slot(bool)
     def _on_busy(self, busy: bool) -> None:
@@ -1291,6 +1388,8 @@ class PetApp(QObject):
             "rapport": rapport,
             "days": st["days"],
             "interactions": st["interactions"],
+            "files_eaten": st.get("files_eaten", 0),
+            "eaten_human": feeding.human_size(st.get("bytes_eaten", 0)),
         }
 
     def _toggle_power(self) -> None:

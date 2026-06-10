@@ -44,12 +44,14 @@ class PetWindow(QWidget):
     hid = Signal()
     wants_travel = Signal()
     context_requested = Signal(QPoint)
+    fed = Signal(list)
 
     def __init__(self) -> None:
         super().__init__()
         make_floating(self)
         self.resize(250, 220)
         self.setMouseTracking(True)
+        self.setAcceptDrops(True)
         self._press_pos = QPoint()
         self._drag_offset = QPoint()
         self._is_dragging = False
@@ -147,6 +149,9 @@ class PetWindow(QWidget):
 
     def perform(self, name: str) -> bool:
         return self._blob.perform(name)
+
+    def react(self, name: str, intensity: float = 1.0) -> None:
+        self._blob.react(name, intensity)
 
     @property
     def is_reacting(self) -> bool:
@@ -303,6 +308,23 @@ class PetWindow(QWidget):
                 self._last_hover = now
                 self._blob.react("perk_up")
         super().enterEvent(event)
+
+    def dragEnterEvent(self, event) -> None:
+        # 拖着文件靠近 张望期待
+        if event.mimeData().hasUrls() and any(u.isLocalFile() for u in event.mimeData().urls()):
+            event.acceptProposedAction()
+            if self._hideout is None and not self._blob.is_asleep:
+                self._blob.react("perk_up")
+            return
+        event.ignore()
+
+    def dropEvent(self, event) -> None:
+        paths = [u.toLocalFile() for u in event.mimeData().urls() if u.isLocalFile()]
+        if paths:
+            event.acceptProposedAction()
+            self.fed.emit(paths)
+            return
+        event.ignore()
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:

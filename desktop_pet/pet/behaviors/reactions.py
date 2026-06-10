@@ -219,6 +219,24 @@ def _slump(p: float, bw: float, bh: float) -> PoseDelta:
     return PoseDelta(0.0, sink * bh * 0.12, math.sin(p * math.pi * 2) * 3, 1 + 0.1 * s, 1 - 0.16 * s)
 
 
+def _eating(p: float, bw: float, bh: float) -> PoseDelta:
+    """吃东西 凑近期待 咀嚼 吞咽 满足小跳"""
+    if p < 0.15:
+        k = ease_in(p / 0.15)
+        return PoseDelta(0.0, k * bh * 0.05, -5.0 * k, 1 + 0.06 * k, 1 - 0.04 * k)
+    if p < 0.55:
+        q = (p - 0.15) / 0.4
+        chew = abs(math.sin(q * math.pi * 6))
+        return PoseDelta(0.0, chew * bh * 0.03, math.sin(q * math.pi * 6) * 2, 1 + 0.05 * chew, 1 - 0.06 * chew)
+    if p < 0.75:
+        q = (p - 0.55) / 0.2
+        s = math.sin(q * math.pi)
+        return PoseDelta(0.0, -s * bh * 0.04, 0.0, 1 - 0.05 * s, 1 + 0.1 * s)
+    q = (p - 0.75) / 0.25
+    hic = abs(math.sin(q * math.pi * 2)) * (1 - q * 0.5)
+    return PoseDelta(0.0, -hic * bh * 0.1, 0.0, 1 + 0.1 * hic, 1 - 0.06 * hic)
+
+
 # 一行一个反应 名字 时长 曲线 valence arousal weight rarity
 _REACTIONS = (
     ("hold_still", 1.2, _hold_still, 0.0, 0.2, 1.4, COMMON),
@@ -252,6 +270,7 @@ _REACTIONS = (
     ("yawn", 2.2, _yawn, -0.05, 0.15, 0.3, UNCOMMON),
     ("celebrate", 3.6, _celebrate, 0.9, 0.8, 0.5, UNCOMMON),
     ("slump", 2.6, _slump, -0.7, 0.2, 0.5, UNCOMMON),
+    ("eating", 2.6, _eating, 0.6, 0.5, 0.0, COMMON),  # 投喂专用 权重0不进随机池
 )
 
 # 亲密向动作 好感度够高才放出来

@@ -649,8 +649,11 @@ class ControlPanel(QDialog):
         except Exception:
             return
         rap = int(round(float(s.get("rapport", 0.0)) * 100))
+        eaten = ""
+        if s.get("files_eaten"):
+            eaten = self._t("bond_eaten_fmt").format(n=s.get("files_eaten", 0), size=s.get("eaten_human", "0B"))
         self._bond_stat.setText(self._t("bond_stat_fmt").format(
-            days=s.get("days", 0), n=s.get("interactions", 0), rap=rap, sk=s.get("skills", 0)))
+            days=s.get("days", 0), n=s.get("interactions", 0), rap=rap, sk=s.get("skills", 0), eaten=eaten))
         portrait = (s.get("persona") or "").strip()
         self._bond_persona.setText(portrait or self._t("bond_persona_empty"))
         prefs = s.get("preferences") or []

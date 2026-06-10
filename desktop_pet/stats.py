@@ -45,6 +45,14 @@ def bump_interactions() -> None:
     _save(data)
 
 
+def add_eaten(nbytes: int, nfiles: int = 1) -> None:
+    """投喂吃掉的量记账"""
+    data = _load()
+    data["bytes_eaten"] = int(data.get("bytes_eaten", 0) or 0) + max(0, int(nbytes))
+    data["files_eaten"] = int(data.get("files_eaten", 0) or 0) + max(0, int(nfiles))
+    _save(data)
+
+
 def snapshot() -> dict:
     """给 ui 的汇总 days 现算不落盘"""
     data = _load()
@@ -56,7 +64,12 @@ def snapshot() -> dict:
             days = max(0, (date.today() - datetime.fromisoformat(first).date()).days)
         except (ValueError, TypeError):
             days = 0
-    return {"first_seen": first, "days": days, "interactions": int(data.get("interactions", 0) or 0)}
+    return {
+        "first_seen": first, "days": days,
+        "interactions": int(data.get("interactions", 0) or 0),
+        "bytes_eaten": int(data.get("bytes_eaten", 0) or 0),
+        "files_eaten": int(data.get("files_eaten", 0) or 0),
+    }
 
 
 def clear() -> None:
