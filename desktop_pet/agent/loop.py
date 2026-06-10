@@ -255,6 +255,7 @@ class Agent:
         self._last_active = 0.0
         self._turn_user_idx = -1
         self._strip_extra_body = False  # 网关不认非标参数 400后记下不再发
+        self._strip_temperature = False  # 新claude等模型不收temperature 同样剥
         self._strip_stream_options = False
         if depth == 0:
             self._try_restore_session()  # 只主代理恢复上次会话
@@ -709,6 +710,7 @@ class Agent:
                 self._oa_creds = creds
                 self._strip_extra_body = False
                 self._strip_stream_options = False
+                self._strip_temperature = False
                 if old is not None:
                     try:
                         old.close()
@@ -730,8 +732,9 @@ class Agent:
             "model": self._model_name(),
             "messages": self._messages,
             "stream": True,
-            "temperature": self._settings.temperature,
         }
+        if not self._strip_temperature:
+            params["temperature"] = self._settings.temperature
         if offer_tools:
             params["tools"] = self._tools
         if self._settings.max_tokens > 0:
@@ -742,26 +745,27 @@ class Agent:
             params["stream_options"] = {"include_usage": True}
         try:
             stream = self._client().chat.completions.create(**params)
-        except BadRequestError:
-            # 先剥extra_body再剥stream_options 都不行就抛
-            if "extra_body" in params:
-                params.pop("extra_body")
+        except BadRequestError as exc:
+            # 非标参数400就逐个剥掉重试 错误消息点名的先剥 剥光还炸才抛
+            order = [("extra_body", "_strip_extra_body"),
+                     ("temperature", "_strip_temperature"),
+                     ("stream_options", "_strip_stream_options")]
+            if "temperature" in str(exc).lower():
+                order.insert(0, order.pop(1))
+            last = exc
+            stream = None
+            for key, flag in order:
+                if key not in params:
+                    continue
+                params.pop(key)
+                setattr(self, flag, True)
                 try:
                     stream = self._client().chat.completions.create(**params)
-                    self._strip_extra_body = True
-                except BadRequestError:
-                    if "stream_options" not in params:
-                        raise
-                    params.pop("stream_options")
-                    stream = self._client().chat.completions.create(**params)
-                    self._strip_extra_body = True
-                    self._strip_stream_options = True
-            elif "stream_options" in params:
-                params.pop("stream_options")
-                stream = self._client().chat.completions.create(**params)
-                self._strip_stream_options = True
-            else:
-                raise
+                    break
+                except BadRequestError as retry_exc:
+                    last = retry_exc
+            if stream is None:
+                raise last
         message = reassemble(stream, on_think, should_cancel=self._cancel.is_set)
         if message.usage:
             usage_meter.add(message.usage["input"], message.usage["output"], message.usage.get("cached", 0))
