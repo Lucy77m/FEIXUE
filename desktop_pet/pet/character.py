@@ -381,6 +381,7 @@ class BlobPet:
         self.on_activity_done = None  # 小品演完的回调 上层挂
         self._weather = ""  # rain snow melt
         self._weather_e = 0.0
+        self._calm_e = 1.0  # 非演出的渐变量 装饰让位演出
         self._settle = 0.0
         self._hold = 0.0
         self._busy = False
@@ -505,6 +506,13 @@ class BlobPet:
     @property
     def _pondering(self) -> bool:
         return self._busy or self._expr == "thinking"
+
+    @property
+    def _performing(self) -> bool:
+        """正在说话思考演反应或小品 环境装饰要让位"""
+        return (self._talking or self._busy or self._lecturing or self._dragging
+                or self._hidden or self._react is not None or self._activity is not None
+                or self._expr == "thinking")
 
     @property
     def _worn_costume(self) -> bool:
@@ -643,13 +651,22 @@ class BlobPet:
         else:
             self._shy_e = max(0.0, self._shy_e - dt * 2.5)
         for flag, attr in (("_hot", "_hot_e"), ("_squeeze", "_squeeze_e"),
-                           ("_lowbatt", "_lowbatt_e"), ("_blanket", "_blanket_e"),
-                           ("_cake", "_cake_e")):
+                           ("_lowbatt", "_lowbatt_e"), ("_cake", "_cake_e")):
             e = getattr(self, attr)
             if getattr(self, flag):
                 setattr(self, attr, min(1.0, e + dt * 1.6))
             else:
                 setattr(self, attr, max(0.0, e - dt * 1.2))
+        # 被子只有真睡着才盖 醒了就掀
+        if self._blanket and self._asleep:
+            self._blanket_e = min(1.0, self._blanket_e + dt * 1.6)
+        else:
+            self._blanket_e = max(0.0, self._blanket_e - dt * 2.0)
+        # 演出时环境装饰平滑退场
+        if self._performing:
+            self._calm_e = max(0.0, self._calm_e - dt * 3.5)
+        else:
+            self._calm_e = min(1.0, self._calm_e + dt * 2.0)
         if self._cake_smoke > 0.0:
             self._cake_smoke = max(0.0, self._cake_smoke - dt)
         if self._weather:
@@ -947,23 +964,27 @@ class BlobPet:
             rot += self._shy_e * 7
             sxm *= 1 - 0.04 * self._shy_e
             oy += self._shy_e * bh * 0.02
-        if self._squeeze_e > 0.0:
+        calm = self._calm_e  # 演出期间环境拟态全部让位
+        if self._squeeze_e > 0.0 and calm > 0.0:
             # 被内存挤扁
-            sym *= 1 - 0.22 * self._squeeze_e
-            sxm *= 1 + 0.16 * self._squeeze_e
-            oy += bh * 0.1 * self._squeeze_e
-        if self._hot_e > 0.0:
+            k = self._squeeze_e * calm
+            sym *= 1 - 0.22 * k
+            sxm *= 1 + 0.16 * k
+            oy += bh * 0.1 * k
+        if self._hot_e > 0.0 and calm > 0.0:
             # 热得发蔫 缓慢晃
-            oy += bh * 0.02 * self._hot_e
-            rot += math.sin(self._t * 1.1) * 2.0 * self._hot_e
-        if self._lowbatt_e > 0.0:
+            k = self._hot_e * calm
+            oy += bh * 0.02 * k
+            rot += math.sin(self._t * 1.1) * 2.0 * k
+        if self._lowbatt_e > 0.0 and calm > 0.0:
             # 没电焦躁 高频小颤
-            ox += math.sin(self._t * 23) * bw * 0.008 * self._lowbatt_e
-        if self._weather == "melt" and self._weather_e > 0.0:
+            ox += math.sin(self._t * 23) * bw * 0.008 * self._lowbatt_e * calm
+        if self._weather == "melt" and self._weather_e > 0.0 and calm > 0.0:
             # 热到化了 摊下去
-            sym *= 1 - 0.14 * self._weather_e
-            sxm *= 1 + 0.10 * self._weather_e
-            oy += bh * 0.07 * self._weather_e
+            k = self._weather_e * calm
+            sym *= 1 - 0.14 * k
+            sxm *= 1 + 0.10 * k
+            oy += bh * 0.07 * k
 
         head_y = cy + oy
         painter.save()
@@ -978,17 +999,17 @@ class BlobPet:
             self._draw_pendant(painter, bw, bh)
         if self._shy_e > 0.01:
             self._draw_shy_hands(painter, bw, bh, self._shy_e)
-        if self._squeeze_e > 0.01:
-            self._draw_squeeze_marks(painter, bw, bh, self._squeeze_e)
-        if self._hot_e > 0.01:
-            self._draw_hot(painter, bw, bh, self._hot_e)
+        if self._squeeze_e > 0.01 and self._calm_e > 0.05:
+            self._draw_squeeze_marks(painter, bw, bh, self._squeeze_e * self._calm_e)
+        if self._hot_e > 0.01 and self._calm_e > 0.05:
+            self._draw_hot(painter, bw, bh, self._hot_e * self._calm_e)
         if self._blanket_e > 0.01:
             self._draw_blanket(painter, bw, bh, self._blanket_e)
-        if self._lowbatt_e > 0.01:
-            self._draw_lowbatt(painter, bw, bh, self._lowbatt_e)
-        if self._weather_e > 0.01:
-            self._draw_weather(painter, bw, bh, self._weather_e)
-        if think_gate > 0.01 and not self._react and not self._worn_costume:
+        if self._lowbatt_e > 0.01 and self._calm_e > 0.05:
+            self._draw_lowbatt(painter, bw, bh, self._lowbatt_e * self._calm_e)
+        if self._weather_e > 0.01 and self._calm_e > 0.05:
+            self._draw_weather(painter, bw, bh, self._weather_e * self._calm_e)
+        if think_gate > 0.01 and not self._react and not self._worn_costume and self._shy_e < 0.3:
             self._draw_think_hand(painter, bw, bh, think_gate)
         if self._lecturing:
             props.draw_pointer(painter, bw, bh, self._t)
