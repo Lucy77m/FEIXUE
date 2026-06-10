@@ -377,7 +377,6 @@ class BlobPet:
         self._cake_e = 0.0
         self._cake_lit = True
         self._cake_smoke = 0.0
-        self._pendant_n = 0
         self.on_activity_done = None  # 小品演完的回调 上层挂
         self._weather = ""  # rain snow melt
         self._weather_e = 0.0
@@ -458,10 +457,6 @@ class BlobPet:
         self._cake_lit = False
         self._cake_smoke = 2.2
         return True
-
-    def set_pendant(self, n: int) -> None:
-        """脖子上的小吊牌 收着几件剪贴宝贝"""
-        self._pendant_n = max(0, int(n))
 
     def set_weather(self, kind: str) -> None:
         """天气拟态 rain打伞 snow堆雪人 melt热化"""
@@ -995,8 +990,6 @@ class BlobPet:
         self._draw_eyes(painter, bw, bh)
         self._draw_mouth(painter, bw, bh)
         self._draw_costume_worn(painter, bw, bh)
-        if self._pendant_n > 0 and self._blanket_e < 0.3:
-            adornments.draw_pendant(painter, bw, bh, self._t)
         if self._shy_e > 0.01:
             adornments.draw_shy_hands(painter, bw, bh, self._shy_e, self._t)
         if self._squeeze_e > 0.01 and self._calm_e > 0.05:

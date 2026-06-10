@@ -113,27 +113,6 @@ def draw_weather(painter: QPainter, bw: float, bh: float, kind: str, e: float, t
             painter.drawEllipse(QPointF(bw * 0.40, -bh * 0.28 + ph * bh * 0.4), bw * 0.024, bw * 0.030)
 
 
-def draw_pendant(painter: QPainter, bw: float, bh: float, t: float) -> None:
-    """胸前小吊牌 替用户收着东西的标记"""
-    sway = math.sin(t * 1.6) * bw * 0.008
-    cy = bh * 0.40
-    pen = QPen(QColor(110, 104, 130, 200))
-    pen.setWidthF(max(1.2, bw * 0.010))
-    painter.setPen(pen)
-    painter.setBrush(Qt.BrushStyle.NoBrush)
-    # 挂绳两段
-    painter.drawLine(QPointF(-bw * 0.16, bh * 0.30), QPointF(sway, cy))
-    painter.drawLine(QPointF(bw * 0.16, bh * 0.30), QPointF(sway, cy))
-    # 圆牌带高光
-    painter.setPen(QPen(_INK, max(1.2, bw * 0.012)))
-    painter.setBrush(QColor(98, 90, 124))
-    r = bw * 0.045
-    painter.drawEllipse(QPointF(sway, cy + r * 0.6), r, r)
-    painter.setPen(Qt.PenStyle.NoPen)
-    painter.setBrush(QColor(190, 182, 214, 190))
-    painter.drawEllipse(QPointF(sway - r * 0.3, cy + r * 0.3), r * 0.28, r * 0.28)
-
-
 def draw_cake(
     painter: QPainter, cx: float, head_y: float, bw: float, bh: float,
     e: float, lit: bool, smoke: float, t: float,

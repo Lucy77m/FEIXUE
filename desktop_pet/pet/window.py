@@ -198,9 +198,6 @@ class PetWindow(QWidget):
     def blow_cake(self) -> bool:
         return self._blob.blow_cake()
 
-    def set_pendant(self, n: int) -> None:
-        self._blob.set_pendant(n)
-
     def bind_activity_done(self, callback) -> None:
         self._blob.on_activity_done = callback
 

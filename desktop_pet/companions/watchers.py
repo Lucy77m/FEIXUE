@@ -45,10 +45,9 @@ class Watchers(QObject):
             pass
 
     def add_treasure(self, kind: str, text: str) -> None:
-        """顺手收藏一份留着回赠 只进内存不落盘 胸前吊牌跟着变"""
+        """顺手收藏一份留着回赠 只进内存不落盘"""
         if all(text != t for _k, t, _ts in self._clip_treasures):
             self._clip_treasures.append((kind, text, datetime.now()))
-            self._host._pet.set_pendant(len(self._clip_treasures))
 
     def _scan_background_shells(self) -> None:
         """守望后台shell 跑完庆祝 挂了安慰并叫agent看"""
@@ -94,7 +93,6 @@ class Watchers(QObject):
         if age_h < _GIVEBACK_MIN_AGE_H:
             return False
         self._clip_treasures.popleft()
-        self._host._pet.set_pendant(len(self._clip_treasures))
         self._last_giveback = now
         snippet = text.strip().replace("\n", " ")[:60]
         self._host._pet.react("peek")
