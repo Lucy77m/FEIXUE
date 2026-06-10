@@ -377,6 +377,7 @@ class BlobPet:
         self._cake_e = 0.0
         self._cake_lit = True
         self._cake_smoke = 0.0
+        self._pendant_n = 0
         self._settle = 0.0
         self._hold = 0.0
         self._busy = False
@@ -453,6 +454,10 @@ class BlobPet:
         self._cake_lit = False
         self._cake_smoke = 2.2
         return True
+
+    def set_pendant(self, n: int) -> None:
+        """脖子上的小吊牌 收着几件剪贴宝贝"""
+        self._pendant_n = max(0, int(n))
 
     def set_expression(self, name: str) -> None:
         if name in _EXPRESSIONS:
@@ -944,6 +949,8 @@ class BlobPet:
         self._draw_eyes(painter, bw, bh)
         self._draw_mouth(painter, bw, bh)
         self._draw_costume_worn(painter, bw, bh)
+        if self._pendant_n > 0 and self._blanket_e < 0.3:
+            self._draw_pendant(painter, bw, bh)
         if self._shy_e > 0.01:
             self._draw_shy_hands(painter, bw, bh, self._shy_e)
         if self._squeeze_e > 0.01:
@@ -1526,6 +1533,26 @@ class BlobPet:
             hx = sx * dx * (1.25 - 0.25 * k)
             hy = start_y + (ey - start_y) * k + wob
             painter.drawEllipse(QPointF(hx, hy), bw * 0.115, bw * 0.10)
+
+    def _draw_pendant(self, painter: QPainter, bw: float, bh: float) -> None:
+        """胸前小吊牌 替用户收着东西的标记"""
+        sway = math.sin(self._t * 1.6) * bw * 0.008
+        cy = bh * 0.40
+        pen = QPen(QColor(110, 104, 130, 200))
+        pen.setWidthF(max(1.2, bw * 0.010))
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        # 挂绳两段
+        painter.drawLine(QPointF(-bw * 0.16, bh * 0.30), QPointF(sway, cy))
+        painter.drawLine(QPointF(bw * 0.16, bh * 0.30), QPointF(sway, cy))
+        # 圆牌带高光
+        painter.setPen(QPen(_INK, max(1.2, bw * 0.012)))
+        painter.setBrush(QColor(98, 90, 124))
+        r = bw * 0.045
+        painter.drawEllipse(QPointF(sway, cy + r * 0.6), r, r)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(190, 182, 214, 190))
+        painter.drawEllipse(QPointF(sway - r * 0.3, cy + r * 0.3), r * 0.28, r * 0.28)
 
     def _draw_cake(self, painter: QPainter, cx: float, head_y: float, bw: float, bh: float) -> None:
         """纪念日小蛋糕 两层三蜡烛 火苗会摆 吹灭冒烟"""

@@ -198,6 +198,9 @@ class PetWindow(QWidget):
     def blow_cake(self) -> bool:
         return self._blob.blow_cake()
 
+    def set_pendant(self, n: int) -> None:
+        self._blob.set_pendant(n)
+
     @property
     def is_reacting(self) -> bool:
         return self._blob.is_reacting

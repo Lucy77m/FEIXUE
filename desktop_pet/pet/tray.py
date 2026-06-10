@@ -23,6 +23,7 @@ class Tray(QSystemTrayIcon):
         on_new_topic: Callable[[], None] | None = None,
         on_toggle_show: Callable[[], None] | None = None,
         is_shown: Callable[[], bool] | None = None,
+        on_focus: Callable[[], None] | None = None,
     ) -> None:
         super().__init__(mochi_icon())
         self.setToolTip(i18n.t("tray_tooltip"))
@@ -33,6 +34,7 @@ class Tray(QSystemTrayIcon):
         self._act_talk = self._add(menu, "tray_talk", on_talk)
         self._act_peek = self._add(menu, "tray_peek", on_peek)
         self._act_new_topic = self._add(menu, "tray_new_topic", on_new_topic)
+        self._act_focus = self._add(menu, "tray_focus", on_focus)
         self._act_toggle = self._add(menu, "tray_hide", on_toggle_show)
         # 全没建就不画分隔线
         if any((self._act_talk, self._act_peek, self._act_new_topic, self._act_toggle)):

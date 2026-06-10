@@ -71,6 +71,12 @@ _VITALS_POLL_MS = 10_000
 _HOT_POP_COOLDOWN_S = 600.0
 _MEM_POP_COOLDOWN_S = 900.0
 _SNUGGLE_COOLDOWN_S = 3600.0
+_DL_POLL_MS = 30_000
+_MIC_POLL_MS = 30_000
+_DESK_POLL_MS = 3600_000
+_DESK_LIMIT = 40
+_FOCUS_MINUTES = 25
+_SHOT_COOLDOWN_S = 300.0
 _PROACTIVE_RAPPORT_GATE = {"安静": 0.45, "正常": 0.30, "话痨": 0.15}
 _PROACTIVE_RAPPORT_GATE_DEFAULT = 0.30
 _CELEBRATE_CHANCE = 0.25
@@ -366,6 +372,9 @@ class PetApp(QObject):
     _bug_cleaned = Signal(int, int)
     _shy_changed = Signal(bool)
     _vitals_ready = Signal(object)
+    _dl_found = Signal(str)
+    _mic_changed = Signal(bool)
+    _desk_crowded = Signal(int)
     _voice_chunk_done = Signal(int)
     _voice_chunk_start = Signal(int)
     _voice_chunk_progress = Signal(int, int)
@@ -471,6 +480,26 @@ class PetApp(QObject):
         self._vitals_timer.timeout.connect(self._check_vitals)
         self._vitals_busy = False
         self._vitals_ready.connect(self._on_vitals)
+        self._dl_timer = QTimer(self)
+        self._dl_timer.timeout.connect(self._check_downloads)
+        self._dl_busy = False
+        self._dl_seen: set[str] = set()
+        self._dl_baseline = time.time()
+        self._dl_found.connect(self._on_dl_found)
+        self._mic_timer = QTimer(self)
+        self._mic_timer.timeout.connect(self._check_mic)
+        self._mic_busy = False
+        self._meeting_mode = False
+        self._mic_changed.connect(self._on_mic_changed)
+        self._desk_timer = QTimer(self)
+        self._desk_timer.timeout.connect(self._check_desktop)
+        self._desk_busy = False
+        self._desk_crowded.connect(self._on_desk_crowded)
+        self._focus_until = 0.0
+        self._focus_timer = QTimer(self)
+        self._focus_timer.setSingleShot(True)
+        self._focus_timer.timeout.connect(self._end_focus)
+        self._shot_last = 0.0
         self._hot_on = False
         self._cpu_high_n = 0
         self._hot_last_pop = 0.0
@@ -495,6 +524,7 @@ class PetApp(QObject):
             on_new_topic=self._new_topic,
             on_toggle_show=self._toggle_power,
             is_shown=lambda: self._shown,
+            on_focus=self._toggle_focus,
         )
         self._hotkeys = GlobalHotkeys({
             "summon": self._settings.hotkey_summon,
@@ -717,15 +747,25 @@ class PetApp(QObject):
     @Slot()
     def _on_clipboard_changed(self) -> None:
         try:
-            sampler.feed(self._app.clipboard().text())
+            cb = self._app.clipboard()
+            # 剪贴板进了图多半是刚截图 凑过来搭把手
+            if cb.mimeData().hasImage() and not cb.mimeData().hasText():
+                now = time.time()
+                if now - self._shot_last > _SHOT_COOLDOWN_S and not self._worker.is_running:
+                    self._shot_last = now
+                    self._pet.react("peek")
+                    self._feed_pop(i18n.t("shot_offer"))
+                return
+            sampler.feed(cb.text())
         except Exception:
             pass
 
     @Slot(str, str)
     def _on_clip_interesting(self, kind: str, text: str) -> None:
-        # 顺手收藏一份留着回赠 只进内存不落盘
+        # 顺手收藏一份留着回赠 只进内存不落盘 胸前吊牌跟着变
         if all(text != t for _k, t, _ts in self._clip_treasures):
             self._clip_treasures.append((kind, text, datetime.now()))
+            self._pet.set_pendant(len(self._clip_treasures))
         s = self._settings
         if not s.clip_alchemy:
             return
@@ -1035,6 +1075,8 @@ class PetApp(QObject):
         self._feed_pop(text)
 
     def _feed_pop(self, text: str) -> None:
+        if self._meeting_mode:
+            return  # 开会静音 主动气泡全咽下去
         self._thought.pop(text, self._pet)
 
     @Slot(float)
@@ -1174,6 +1216,140 @@ class PetApp(QObject):
             self._yarn_last = now
             self._cpu_idle_n = 0
             self._pet.perform("yarn")
+
+    def _check_downloads(self) -> None:
+        """盯下载目录 新文件落地就提一嘴"""
+        if self._dl_busy or self._meeting_mode or not self._pet.isVisible():
+            return
+        self._dl_busy = True
+        threading.Thread(target=self._dl_thread, daemon=True).start()
+
+    def _dl_thread(self) -> None:
+        try:
+            folder = Path.home() / "Downloads"
+            if not folder.is_dir():
+                return
+            now = time.time()
+            for p in folder.iterdir():
+                try:
+                    if not p.is_file() or p.suffix.lower() in (".crdownload", ".part", ".tmp", ".download"):
+                        continue
+                    st = p.stat()
+                    # 启动之后新出现的 且写完稳定了几秒
+                    if st.st_mtime > self._dl_baseline and 4 < now - st.st_mtime < 120 and p.name not in self._dl_seen:
+                        self._dl_seen.add(p.name)
+                        self._dl_found.emit(p.name)
+                        return
+                except OSError:
+                    continue
+        except Exception:
+            pass
+        finally:
+            self._dl_busy = False
+
+    @Slot(str)
+    def _on_dl_found(self, name: str) -> None:
+        self._pet.react("perk_up")
+        self._feed_pop(i18n.t("dl_done").format(name=name[:36]))
+
+    def _check_mic(self) -> None:
+        """读注册表看麦克风是否被占用 开会自动安静"""
+        if self._mic_busy:
+            return
+        self._mic_busy = True
+        threading.Thread(target=self._mic_thread, daemon=True).start()
+
+    def _mic_thread(self) -> None:
+        try:
+            import winreg
+            in_use = False
+            base = r"SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\microphone\NonPackaged"
+            try:
+                root = winreg.OpenKey(winreg.HKEY_CURRENT_USER, base)
+            except OSError:
+                root = None
+            if root is not None:
+                i = 0
+                while True:
+                    try:
+                        sub = winreg.EnumKey(root, i)
+                        i += 1
+                    except OSError:
+                        break
+                    try:
+                        with winreg.OpenKey(root, sub) as k:
+                            stop, _ = winreg.QueryValueEx(k, "LastUsedTimeStop")
+                            if int(stop) == 0:  # 还没停 = 正在用
+                                in_use = True
+                                break
+                    except OSError:
+                        continue
+                winreg.CloseKey(root)
+            if in_use != self._meeting_mode:
+                self._mic_changed.emit(in_use)
+        except Exception:
+            pass
+        finally:
+            self._mic_busy = False
+
+    @Slot(bool)
+    def _on_mic_changed(self, in_use: bool) -> None:
+        if in_use and not self._meeting_mode:
+            self._thought.pop(i18n.t("meeting_on"), self._pet)  # 进静音前最后说一句
+            self._meeting_mode = True
+        elif not in_use and self._meeting_mode:
+            self._meeting_mode = False
+            self._thought.pop(i18n.t("meeting_off"), self._pet)
+
+    def _check_desktop(self) -> None:
+        """桌面图标太多了 让agent提议收拾"""
+        if self._desk_busy or self._meeting_mode:
+            return
+        self._desk_busy = True
+        threading.Thread(target=self._desk_thread, daemon=True).start()
+
+    def _desk_thread(self) -> None:
+        try:
+            desk = Path.home() / "Desktop"
+            if not desk.is_dir():
+                return
+            n = sum(1 for p in desk.iterdir() if p.is_file() and p.suffix.lower() != ".lnk")
+            if n >= _DESK_LIMIT:
+                today = datetime.now().date().isoformat()
+                if stats.get_note("desk_tidy") != today:
+                    stats.set_note("desk_tidy", today)
+                    self._desk_crowded.emit(n)
+        except Exception:
+            pass
+        finally:
+            self._desk_busy = False
+
+    @Slot(int)
+    def _on_desk_crowded(self, n: int) -> None:
+        if self._worker.is_running:
+            return
+        self.request_message.emit(i18n.t("desk_tidy_msg").format(n=n))
+
+    def _toggle_focus(self) -> None:
+        """番茄钟 开一轮或提前结束"""
+        if time.time() < self._focus_until:
+            self._focus_timer.stop()
+            self._focus_until = 0.0
+            self._feed_pop(i18n.t("focus_cancel"))
+            return
+        self._focus_until = time.time() + _FOCUS_MINUTES * 60
+        self._focus_timer.start(_FOCUS_MINUTES * 60 * 1000)
+        self._pet.perform("read")
+        self._feed_pop(i18n.t("focus_start").format(m=_FOCUS_MINUTES))
+
+    def _end_focus(self) -> None:
+        if self._focus_until <= 0:
+            return
+        self._focus_until = 0.0
+        self._pet.react("celebrate")
+        emotion.apply("task_done")
+        selector.set_emotion(*emotion.snapshot())
+        self._feed_pop(i18n.t("focus_done").format(m=_FOCUS_MINUTES))
 
     def _check_bugs(self) -> None:
         """定时扫temp 垃圾堆大了生一只虫"""
@@ -1424,6 +1600,8 @@ class PetApp(QObject):
     @Slot()
     def _check_proactive(self) -> None:
         try:
+            if self._meeting_mode:
+                return  # 开会不主动出声
             if self._maybe_peek():
                 return
             if self._maybe_occasion():
@@ -1453,6 +1631,7 @@ class PetApp(QObject):
         if age_h < _GIVEBACK_MIN_AGE_H:
             return False
         self._clip_treasures.popleft()
+        self._pet.set_pendant(len(self._clip_treasures))
         self._last_giveback = now
         snippet = text.strip().replace("\n", " ")[:60]
         self._pet.react("peek")
@@ -1967,6 +2146,9 @@ class PetApp(QObject):
         self._bug_timer.start(_BUG_SCAN_MS)
         self._shy_timer.start(_SHY_POLL_MS)
         self._vitals_timer.start(_VITALS_POLL_MS)
+        self._dl_timer.start(_DL_POLL_MS)
+        self._mic_timer.start(_MIC_POLL_MS)
+        self._desk_timer.start(_DESK_POLL_MS)
         if self._settings.remote_inbox:
             remote_inbox.ensure_dir()
         self._hotkeys.start()
