@@ -482,7 +482,8 @@ class ControlPanel(QDialog):
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setFixedHeight(452)  # 写死高度卡住卡片内沿
-        scroll.viewport().setStyleSheet("background: transparent;")
+        scroll.viewport().setObjectName("scrollViewport")
+        scroll.viewport().setStyleSheet("#scrollViewport { background: transparent; }")  # 带选择器 不然会级联盖掉子控件背景
         col.addWidget(scroll)
         return page, fields
 
@@ -941,7 +942,8 @@ class ControlPanel(QDialog):
         scroll.setWidget(page)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.viewport().setStyleSheet("background: transparent;")
+        scroll.viewport().setObjectName("scrollViewport")
+        scroll.viewport().setStyleSheet("#scrollViewport { background: transparent; }")  # 带选择器 不然会级联盖掉子控件背景
         return scroll
 
     def _on_gui_model(self) -> None:
