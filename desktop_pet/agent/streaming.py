@@ -119,5 +119,6 @@ def reassemble(
         if cid in seen:
             cid = f"{cid}_{i}"  # id撞了缀index拆开
         seen.add(cid)
-        tool_calls.append(StreamToolCall(cid, calls[i]["name"], "".join(calls[i]["args"])))
+        args_text = "".join(calls[i]["args"]).strip() or "{}"  # 无参工具给空串 有些网关回发会炸 归一成{}
+        tool_calls.append(StreamToolCall(cid, calls[i]["name"], args_text))
     return StreamMessage("".join(content) or None, tool_calls or None, finish, usage)

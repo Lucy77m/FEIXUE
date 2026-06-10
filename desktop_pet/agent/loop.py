@@ -406,8 +406,19 @@ class Agent:
     def _prepare(self) -> None:
         """请求前裁历史 重建system 重算工具单"""
         self._trim_history()
+        self._sanitize_tool_args()
         self._messages[0] = self._system_message()
         self._tools = self._build_tools()
+
+    def _sanitize_tool_args(self) -> None:
+        """历史里空arguments补成{} 有些网关空串marshal会炸 也救恢复进来的旧会话"""
+        for m in self._messages:
+            if not isinstance(m, dict):
+                continue
+            for c in m.get("tool_calls") or []:
+                fn = c.get("function") if isinstance(c, dict) else None
+                if fn is not None and not (fn.get("arguments") or "").strip():
+                    fn["arguments"] = "{}"
 
     def _history_budget(self) -> int:
         """取历史token预算 非法退回默认"""
