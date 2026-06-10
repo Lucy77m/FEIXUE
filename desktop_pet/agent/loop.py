@@ -79,7 +79,7 @@ _CONTROL_TOOLS = frozenset({
     _WATCH_TOOL,
 })
 _SHELL_TOOLS = frozenset({
-    "run_shell", "run_python", "run_skill", "create_skill", "edit_skill", "write_file", "edit_file",
+    "run_shell", "check_shell", "run_python", "run_skill", "create_skill", "edit_skill", "write_file", "edit_file",
     "review_diff", "run_tests",
 })
 _MAX_PARALLEL_SUBAGENTS = 4

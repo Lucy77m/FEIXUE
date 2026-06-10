@@ -230,6 +230,142 @@ def new_session() -> _PowerShell:
     return _PowerShell()
 
 
+_BG_CAP = 100_000
+_BG_KEEP_DONE = 8
+
+
+class _BgShell:
+    """独立后台 powershell 进程 输出进环形缓冲随时增量读"""
+
+    def __init__(self, task_id: int, command: str) -> None:
+        self.id = task_id
+        self.command = command
+        self.started = time.time()
+        self.lines: list[str] = []
+        self.size = 0
+        self.dropped = 0
+        self.pos = 0  # 增量读游标
+        self.lock = threading.Lock()
+        encoded = base64.b64encode(command.encode("utf-8")).decode("ascii")
+        wrapped = (
+            _ENCODING_SETUP + ";" + _NONINTERACTIVE_ENV + "; "
+            "Invoke-Expression ([Text.Encoding]::UTF8.GetString("
+            f"[Convert]::FromBase64String('{encoded}')))"
+        )
+        self.proc = subprocess.Popen(
+            ["powershell", "-NoProfile", "-NoLogo", "-Command", wrapped],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            bufsize=1,
+            creationflags=_NO_WINDOW,
+        )
+        threading.Thread(target=self._pump, daemon=True).start()
+
+    def _pump(self) -> None:
+        try:
+            for line in self.proc.stdout:
+                with self.lock:
+                    self.lines.append(line)
+                    self.size += len(line)
+                    # 超容量从头丢 游标跟着挪
+                    while self.size > _BG_CAP and len(self.lines) > 1:
+                        evicted = self.lines.pop(0)
+                        self.size -= len(evicted)
+                        self.dropped += len(evicted)
+                        if self.pos > 0:
+                            self.pos -= 1
+        except (OSError, ValueError):
+            pass
+
+    def poll_new(self) -> tuple[str, int]:
+        """取上次之后的新输出和漏掉的字符数"""
+        with self.lock:
+            chunk = "".join(self.lines[self.pos:])
+            dropped = self.dropped
+            self.dropped = 0
+            self.pos = len(self.lines)
+        return chunk, dropped
+
+    def running(self) -> bool:
+        return self.proc.poll() is None
+
+    def kill(self) -> None:
+        _kill_proc(self.proc)
+
+
+_bg_tasks: dict[int, _BgShell] = {}
+_bg_lock = threading.Lock()
+_bg_seq = 0
+
+
+def _bg_prune() -> None:
+    """已结束的旧任务只留最近几个"""
+    done = sorted((t for t in _bg_tasks.values() if not t.running()), key=lambda t: t.started)
+    for task in done[:-_BG_KEEP_DONE] if len(done) > _BG_KEEP_DONE else []:
+        _bg_tasks.pop(task.id, None)
+
+
+def start_background(command: str) -> str:
+    """起后台 shell 返回任务 id"""
+    blocked = check_blocked(command)
+    if blocked is not None:
+        return f"[blocked: {blocked}. This is an irreversible high-risk operation and was prevented; if truly needed, have the user do it manually.]"
+    global _bg_seq
+    with _bg_lock:
+        _bg_seq += 1
+        task_id = _bg_seq
+        try:
+            _bg_tasks[task_id] = _BgShell(task_id, command)
+        except Exception as exc:
+            return f"[failed to start background shell: {exc}]"
+        _bg_prune()
+    return (f"[background shell #{task_id} started] It keeps running while you do other things; "
+            f"call check_shell(id={task_id}) anytime for new output, or check_shell(id={task_id}, kill=true) to stop it.")
+
+
+def check_background(task_id: int = 0, kill: bool = False) -> str:
+    """查后台 shell 增量输出 不给 id 列全部 kill 真则停掉"""
+    with _bg_lock:
+        if not task_id:
+            if not _bg_tasks:
+                return "(no background shells)"
+            lines = []
+            for t in sorted(_bg_tasks.values(), key=lambda t: t.id):
+                state = "running" if t.running() else f"exited {t.proc.returncode}"
+                lines.append(f"#{t.id} [{state}] {int(time.time() - t.started)}s  {t.command[:100]}")
+            return "\n".join(lines)
+        task = _bg_tasks.get(int(task_id))
+    if task is None:
+        return f"[no background shell #{task_id} — it may have been pruned; start a new one]"
+    if kill:
+        was_running = task.running()
+        task.kill()
+        chunk, dropped = task.poll_new()
+        note = f"[background shell #{task_id} killed]" if was_running else f"[background shell #{task_id} had already exited]"
+        return note + (f"\n--- final output ---\n{_bg_trim(chunk, dropped)}" if chunk.strip() or dropped else "")
+    chunk, dropped = task.poll_new()
+    rc = task.proc.poll()
+    state = "still running" if rc is None else f"exited with code {rc}"
+    head = f"[background shell #{task_id}: {state}; {int(time.time() - task.started)}s elapsed]"
+    if not chunk.strip() and not dropped:
+        return head + "\n(no new output since last check)"
+    return head + "\n" + _bg_trim(chunk, dropped)
+
+
+def _bg_trim(chunk: str, dropped: int) -> str:
+    """超长截两头 标注漏掉的量"""
+    if dropped:
+        chunk = f"…[{dropped} chars scrolled off the buffer]…\n" + chunk
+    if len(chunk) > _CAP_HEAD + _CAP_TAIL:
+        omitted = len(chunk) - _CAP_HEAD - _CAP_TAIL
+        chunk = chunk[:_CAP_HEAD] + f"\n…[输出过长，中间省略约 {omitted} 字符]…\n" + chunk[-_CAP_TAIL:]
+    return chunk.strip()
+
+
 def run_shell(command: str, shell: str = "powershell", session: _PowerShell | None = None) -> str:
     """对外入口 先过黑名单 cmd 单次进程 powershell 走常驻会话"""
     blocked = check_blocked(command)

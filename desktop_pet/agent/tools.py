@@ -8,10 +8,12 @@ import json
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from pathlib import Path
 
-from desktop_pet.docs import docs
+from desktop_pet.docs import docs, read_file_text
+from desktop_pet.eyes import capture
 from desktop_pet.eyes.capture import capture_screen, to_data_url
-from desktop_pet.executor import clipboard, devtools, fs, net, sysmem, vision, web
+from desktop_pet.executor import clipboard, devtools, fs, net, shell, sysmem, vision, web
 from desktop_pet.executor.pycode import PythonRunner, install_package
 from desktop_pet.executor.shell import run_shell
 from desktop_pet.hands import keyboard, mouse, windows
@@ -57,12 +59,23 @@ TOOLS = [
     _function(
         "run_shell",
         "Run a PowerShell/cmd command on this machine; returns exit code and output. First choice for files, processes, system settings, launching programs, installing software, etc. "
-        "Killed after 120s with no output or 600s total — run servers/watch-mode in the background (Start-Process / Start-Job) instead of blocking.",
+        "Killed after 120s with no output or 600s total — for servers/watch-mode/long builds set background=true: it returns an id immediately and keeps running; read its output later with check_shell.",
         {
             "command": {"type": "string", "description": "the command to run"},
             "shell": {"type": "string", "enum": ["powershell", "cmd"], "description": "default powershell"},
+            "background": {"type": "boolean", "description": "run detached in the background and return an id at once (powershell only); use for dev servers, watchers, long builds"},
         },
         ["command"],
+    ),
+    _function(
+        "check_shell",
+        "Check a background shell started by run_shell(background=true): returns output produced since your last check, plus whether it's still running. "
+        "Call with no id to list all background shells; kill=true stops one (with its child processes).",
+        {
+            "id": {"type": "integer", "description": "the background shell id; omit to list all"},
+            "kill": {"type": "boolean", "description": "stop it instead of just reading output"},
+        },
+        [],
     ),
     _function(
         "run_python",
@@ -76,7 +89,8 @@ TOOLS = [
     ),
     _function(
         "read_file",
-        "Read a text file's contents (truncated to ~20k chars by default; raise max_chars up to 100k when you need a big file in one go). If you see a truncation note, call again with offset to continue reading from where it stopped.",
+        "Read a file. Text comes back as text (truncated to ~20k chars by default; raise max_chars up to 100k, or continue with offset). "
+        "Images (png/jpg/gif/webp/bmp) come back as a picture you actually SEE — use this to look at any local image. PDFs come back as extracted text (scanned pages are OCR'd).",
         {
             "path": {"type": "string", "description": "file path"},
             "offset": {"type": "integer", "description": "character offset to start reading from (use the value given in a previous truncation note); default 0"},
@@ -586,7 +600,7 @@ _CONCURRENT_SAFE = frozenset(
     {"http_request", "read_file", "list_dir", "run_shell", "run_python", "run_skill",
      "web_search", "web_fetch", "search_code", "glob_files", "recall_docs", "list_docs",
      "system_memory", "read_process_memory", "recall_clipboard",
-     "review_diff", "run_tests",
+     "review_diff", "run_tests", "check_shell",
      "install_package"}
 )
 
@@ -718,6 +732,40 @@ def _stop_background_task(task_id) -> str:
     return f"(没有编号 #{tid} 的后台任务——可能已经做完了。)"
 
 
+_IMAGE_EXTS = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"})
+
+
+def _read_any_file(arguments: dict) -> ToolResult:
+    """按扩展名分流 图片回图 pdf抽文本 其余当文本"""
+    path = arguments["path"]
+    suffix = Path(path).suffix.lower()
+    if suffix in _IMAGE_EXTS:
+        target = Path(path).expanduser()
+        if not target.is_file():
+            return ToolResult(f"[not a file or doesn't exist: {path}]")
+        try:
+            from PIL import Image
+            with Image.open(target) as img:
+                img.load()
+                width, height = img.size
+                jpeg, sent_w, sent_h = capture._encode(img)
+        except Exception as exc:
+            return ToolResult(f"[image read failed: {exc}]")
+        return ToolResult(
+            f"[image {target.name} {width}x{height}{f' (sent at {sent_w}x{sent_h})' if (sent_w, sent_h) != (width, height) else ''}]",
+            to_data_url(jpeg),
+        )
+    if suffix == ".pdf":
+        target = Path(path).expanduser()
+        if not target.is_file():
+            return ToolResult(f"[not a file or doesn't exist: {path}]")
+        text = read_file_text(str(target))
+        if text is None or not text.strip():
+            return ToolResult(f"[couldn't extract text from this PDF: {path}]")
+        return ToolResult(fs.paginate(text, arguments.get("offset", 0), arguments.get("max_chars", 0)))
+    return ToolResult(fs.read_file(path, arguments.get("offset", 0), arguments.get("max_chars", 0)))
+
+
 def dispatch(
     name: str, arguments: dict, *, shell_session=None, py_session=None
 ) -> ToolResult:
@@ -742,9 +790,17 @@ def _dispatch_impl(
     """按工具名分发到执行器"""
     python = py_session or _python  # 没传就用进程级常驻会话
     if name == "run_shell":
+        if arguments.get("background"):
+            return ToolResult(shell.start_background(arguments["command"]))
         return ToolResult(
             run_shell(arguments["command"], arguments.get("shell", "powershell"), session=shell_session)
         )
+    if name == "check_shell":
+        try:
+            bg_id = int(arguments.get("id") or 0)
+        except (TypeError, ValueError):
+            bg_id = 0
+        return ToolResult(shell.check_background(bg_id, bool(arguments.get("kill", False))))
     if name == "run_python":
         try:
             t = max(10, min(int(arguments.get("timeout") or 60), 600))
@@ -752,7 +808,7 @@ def _dispatch_impl(
             t = 60
         return ToolResult(python.run(arguments["code"], timeout=t))
     if name == "read_file":
-        return ToolResult(fs.read_file(arguments["path"], arguments.get("offset", 0), arguments.get("max_chars", 0)))
+        return _read_any_file(arguments)
     if name == "write_file":
         return ToolResult(fs.write_file(arguments["path"], arguments["content"]))
     if name == "list_dir":

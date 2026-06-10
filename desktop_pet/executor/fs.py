@@ -37,15 +37,8 @@ def _read_with_encoding(target: Path) -> tuple[str, str]:
     return raw.decode("utf-8", errors="replace"), "utf-8"
 
 
-def read_file(path: str, offset: int = 0, max_chars: int = 0) -> str:
-    """读文件 超长分片 offset 续读 max_chars 可调"""
-    target = Path(path).expanduser()
-    if not target.is_file():
-        return f"[not a file or doesn't exist: {path}]"
-    try:
-        text, _ = _read_with_encoding(target)
-    except Exception as exc:
-        return f"[read failed: {exc}]"
+def paginate(text: str, offset: int = 0, max_chars: int = 0) -> str:
+    """超长文本分片 offset 续读 max_chars 可调"""
     try:
         off = max(0, int(offset))  # offset 转不了就当从头读
     except (TypeError, ValueError):
@@ -65,6 +58,18 @@ def read_file(path: str, offset: int = 0, max_chars: int = 0) -> str:
     header = f"[chars {off}–{end} of {total}]\n"
     footer = f"\n[truncated; continue with offset={end} (or raise max_chars, up to {_MAX_READ_CAP})]" if end < total else "\n[end of file]"
     return header + chunk + footer
+
+
+def read_file(path: str, offset: int = 0, max_chars: int = 0) -> str:
+    """读文件 超长走 paginate 分片"""
+    target = Path(path).expanduser()
+    if not target.is_file():
+        return f"[not a file or doesn't exist: {path}]"
+    try:
+        text, _ = _read_with_encoding(target)
+    except Exception as exc:
+        return f"[read failed: {exc}]"
+    return paginate(text, offset, max_chars)
 
 
 def write_file(path: str, content: str) -> str:
