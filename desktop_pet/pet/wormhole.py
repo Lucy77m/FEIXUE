@@ -1,7 +1,6 @@
 # author: bdth
 # email: 2074055628@qq.com
-# 桌宠虫洞穿越：原地裂开虫洞→旋转缩入→窗口在不可见时瞬移→屏幕另一处冒出。
-# 与 Entrance / Hideout 平行的第三种"窗口移动模式"，由 PetWindow 逐帧驱动。
+# 桌宠虫洞穿越 裂开虫洞旋转缩入 不可见时瞬移 屏幕另一处冒出
 
 from __future__ import annotations
 
@@ -11,7 +10,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPen
 
 _DURATION = 2.8
-_JUMP_P = 0.5  # 瞬移卡在正中——这会儿 blob 缩没了、虫洞两侧都没张开，挪窗口才不穿帮
+_JUMP_P = 0.5  # 瞬移卡在 blob 缩没的正中
 
 
 def _clamp01(p: float) -> float:
@@ -45,11 +44,11 @@ class Wormhole:
         self.duration = _DURATION
 
     def window_state(self, p: float) -> QPointF:
-        """前半在出发点、后半在目标点；跳变卡在 blob 不可见的 _JUMP_P。"""
+        """前半在出发点 后半在目标点"""
         return QPointF(self._from) if p < _JUMP_P else QPointF(self._to)
 
     def blob_transform(self, p: float):
-        """返回 (sx, sy, oy, rot)：旋转缩入 → 不可见 → 旋出并过冲落定。"""
+        """blob 形变 旋转缩入再旋出落定"""
         if p < 0.22:
             return 1.0, 1.0, 0.0, 0.0
         if p < _JUMP_P:
@@ -64,7 +63,7 @@ class Wormhole:
         return s, s, 0.0, spin
 
     def _portal_open(self, p: float) -> float:
-        """虫洞张开度：出发侧张开吞掉 blob 再合拢，瞬移后目标侧重开再吐出来。"""
+        """虫洞张开度"""
         if p < _JUMP_P:
             if p < 0.22:
                 return _ease_out(_seg(p, 0.0, 0.22))
@@ -78,10 +77,10 @@ class Wormhole:
         return 1.0 - _ease_in(_seg(p, 0.82, 1.0))
 
     def draw_props(self, painter: QPainter, w: int, h: int, p: float) -> None:
-        """画虫洞本体：外层光晕→旋转圆环→黑洞→吸入/喷出的粒子，由后往前叠。"""
+        """画虫洞本体 光晕圆环黑洞和粒子"""
         open_ = self._portal_open(p)
         if open_ <= 0.01:
-            return  # 没张开就别白画一圈透明的
+            return  # 没张开不画
         rad = min(w, h) * 0.42 * open_
         painter.save()
         painter.translate(w / 2, h * 0.5)
@@ -105,7 +104,7 @@ class Wormhole:
         painter.setBrush(QColor(12, 8, 28))
         painter.drawEllipse(QPointF(0.0, 0.0), rad, rad)
 
-        inward = p < _JUMP_P  # 前半吸入(粒子往中心收)，后半喷出(往外散)
+        inward = p < _JUMP_P  # 前半吸入 后半喷出
         for k in range(8):
             a = p * 9.0 + k * (math.tau / 8)
             phase = (p * 4.0 + k * 0.3) % 1.0

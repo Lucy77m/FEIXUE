@@ -1,6 +1,6 @@
 # author: bdth
 # email: 2074055628@qq.com
-# 桌宠的"小黑板"浮窗:把 Markdown 渲染成粉笔字黑板,带展开/落灰动画
+# 小黑板浮窗 markdown渲染成粉笔字黑板 带展开落灰动画
 
 from __future__ import annotations
 
@@ -54,7 +54,7 @@ _WOOD_DARK = QColor(99, 68, 39)
 _WOOD_EDGE = QColor(68, 46, 25)
 _BOARD_TOP = QColor(43, 74, 58)
 _BOARD_BOT = QColor(26, 49, 38)
-# 黑板停留时长：底 2.8s 起，按内容高度线性加，封顶 8s —— 内容越多看的时间越长，但别赖太久。
+# 黑板停留时长 按内容高度线性加 封顶8s
 _LINGER_BASE = 2800
 _LINGER_PER_PX = 7.0
 _LINGER_MAX = 8000
@@ -70,15 +70,15 @@ _DUST_PER_FRAME = 2
 _DUST_GRAVITY = 0.05
 _DUST_DECAY = 0.024
 
-# 表格分隔行：第二行那条 |---|---| 才是判定锚点，光看首行有 | 会把普通句子里的竖线误当表格。
+# 表格分隔行判定锚点
 _TABLE_SEP = re.compile(r"^\s*\|?\s*:?-{2,}.*\|")
-# 列表项首字符：连中文项目符号(•·‣)和"1、"这种全角顿号编号都认，不然中文列表整段当普通文本。
+# 列表项首字符 中文项目符号和全角编号也认
 _LIST = re.compile(r"^\s*(?:[-*+•·‣]\s+|\d+[.)]\s+|\d+、\s*)\S")
 _IMG = re.compile(r"^\s*!\[[^\]]*\]\([^)]+\)\s*$")
 
 
 def _fence(line: str) -> str | None:
-    """两种围栏不能互闭，原样返回 ``` 或 ~~~ 好让起止配对。"""
+    """识别代码围栏 返回围栏标记"""
     s = line.strip()
     if s.startswith("```"):
         return "```"
@@ -88,7 +88,7 @@ def _fence(line: str) -> str | None:
 
 
 def parse_segments(text: str) -> list[tuple[str, str]]:
-    """代码块/表格/图片/列表上黑板，其余进气泡。返回 (kind, 内容) 段序列。"""
+    """切分文本 代码块表格图片列表上黑板 其余进气泡"""
     lines = text.split("\n")
     segments: list[tuple[str, str]] = []
     buf: list[str] = []
@@ -129,7 +129,7 @@ def parse_segments(text: str) -> list[tuple[str, str]]:
         elif _LIST.match(line):
             block = [line]
             i += 1
-            # 缩进续行(两空格起)也并进同一列表块，否则多行列表项会被气泡和黑板拦腰切开。
+            # 缩进续行并进同一列表块
             while i < n and (_LIST.match(lines[i]) or (lines[i].startswith("  ") and lines[i].strip())):
                 block.append(lines[i])
                 i += 1
@@ -143,12 +143,12 @@ def parse_segments(text: str) -> list[tuple[str, str]]:
 
 
 def has_board(text: str) -> bool:
-    """有没有该上黑板的东西。没有就只走气泡，省得空黑板乱晃。"""
+    """有没有该上黑板的内容"""
     return any(kind == "board" for kind, _ in parse_segments(text))
 
 
 class BlackBoard(QWidget):
-    """粉笔字黑板浮窗。鼠标穿透、贴宠物摆，背景和粉笔字分两张 pixmap → 逐帧放大+擦显+落灰。"""
+    """粉笔字黑板浮窗"""
 
     def __init__(self) -> None:
         super().__init__()
@@ -170,7 +170,7 @@ class BlackBoard(QWidget):
         self._timer.timeout.connect(self._tick)
 
     def present(self, markdown: str, pet: QWidget, screen, animate: bool = True) -> None:
-        """渲染并弹出。animate=False 直接定格，切内容时用，免得每段都重播一遍弹出动画。"""
+        """渲染并弹出"""
         was_visible = self.isVisible()
         self._render(markdown)
         self.setFixedSize(self._backdrop.width(), self._backdrop.height())
@@ -178,7 +178,7 @@ class BlackBoard(QWidget):
         self._target = 1.0
         self._dust.clear()
         if animate:
-            # 已经在显示就接着当前 scale 续放，别从 0 重弹 —— 连发两条时不会突兀地缩回去再长出来。
+            # 已在显示就接着当前scale续放
             self._scale = self._scale if was_visible else 0.0
             self._reveal = 0.0
             self._reveal_dur = min(_REVEAL_MAX, max(_REVEAL_MIN, self._content_h / _REVEAL_PX_PER_S))
@@ -197,16 +197,16 @@ class BlackBoard(QWidget):
             self._timer.start(_FPS_MS)
 
     def suggested_linger_ms(self) -> int:
-        """自动收起前留多久，给外面调度用。跟内容高度挂钩，长文多留一会。"""
+        """自动收起前的停留时长"""
         return int(min(_LINGER_MAX, _LINGER_BASE + self._content_h * _LINGER_PER_PX))
 
     def _tick(self) -> None:
-        """每帧推进动画。放大→擦字→落灰三件事按这顺序耦合，别拆。"""
+        """每帧推进动画"""
         dt = _FPS_MS / 1000.0
         if self._target > 0.0:
             if self._scale < 1.0:
                 self._scale = min(1.0, self._scale + dt / _PRESENT_DUR)
-            # 等黑板长到差不多大(0.45)再擦字，太早写会跟着缩放一起变形、看着糊。
+            # 黑板长到一定大小再擦字
             if self._scale >= _REVEAL_START and self._reveal < 1.0:
                 self._reveal = min(1.0, self._reveal + dt / self._reveal_dur)
                 if self._reveal < 1.0:
@@ -215,7 +215,7 @@ class BlackBoard(QWidget):
             self._scale = max(0.0, self._scale - dt / _DISMISS_DUR)
         self._step_dust()
 
-        # 两个停表口：收起到看不见就 hide；或完全展开且灰落尽 —— 后者别漏判 dust，不然最后几粒灰会被冻住。
+        # 收没了hide 或全展开且灰落尽就停表
         if self._target == 0.0 and self._scale <= 0.001:
             self._timer.stop()
             self._dust.clear()
@@ -225,7 +225,7 @@ class BlackBoard(QWidget):
         self.update()
 
     def _shed_dust(self) -> None:
-        """在擦字推进的那条横线(front)上撒几粒粉笔灰。每粒是 [x, y, vy, life, r]，纯列表省得建对象。"""
+        """在擦字前沿撒粉笔灰"""
         front = self._ink_rect.top() + self._reveal * self._ink_rect.height()
         for _ in range(_DUST_PER_FRAME):
             x = self._ink_rect.left() + random.random() * self._ink_rect.width()
@@ -246,7 +246,7 @@ class BlackBoard(QWidget):
         place_beside_pet(self, pet, screen, prefer="left")
 
     def _render(self, markdown: str) -> None:
-        """markdown 排成两张 pixmap(木框背景 + 粉笔字)，顺手把尺寸/缩放/墨迹区都算好缓起来。"""
+        """markdown排成背景和粉笔字两张pixmap"""
         doc = QTextDocument()
         doc.setDefaultFont(self._font)
         doc.setDefaultStyleSheet(_DOC_CSS)
@@ -255,15 +255,14 @@ class BlackBoard(QWidget):
         doc.setDefaultTextOption(option)
         doc.setMarkdown(markdown)
         self._style_tables(doc)
-        # 两遍量宽：先用 _MAX_W 排一遍拿 idealWidth(短内容的真实宽度)，再按它收窄，省得短句也撑满整块。
+        # 先排一遍拿idealWidth再收窄
         doc.setTextWidth(_MAX_W)
         ideal = max(1.0, doc.idealWidth())
         doc.setTextWidth(ideal)
         size = doc.size()
         nat_w = max(1.0, size.width())
         nat_h = max(1.0, size.height())
-        # 只按宽度约束缩放，绝不为"塞进固定高度"而把整块连字一起缩小（否则内容一长字就看不清）。
-        # 内容更长就让黑板长高，封顶在屏幕可用高度的一定比例；再超出的由 _render_chalk 的 clip 裁掉。
+        # 只按宽度缩放 内容长就让黑板长高 再超出由clip裁掉
         self._doc_scale = min(1.0, _MAX_W / nat_w)
         cw = nat_w * self._doc_scale
         screen = QGuiApplication.primaryScreen()
@@ -284,7 +283,7 @@ class BlackBoard(QWidget):
         self._chalk = self._render_chalk(total_w, total_h, doc, cw, ch)
 
     def _render_backdrop(self, total_w, total_h, ox, oy, frame_w, frame_h, board, inner_w, inner_h) -> QPixmap:
-        """不动的那层(投影/木框/石板/擦痕)，只在 _render 画一次，逐帧不重画。"""
+        """画不动的背景层 投影木框石板擦痕"""
         pixmap = QPixmap(total_w, total_h)
         pixmap.fill(Qt.GlobalColor.transparent)
         painter = QPainter(pixmap)
@@ -292,7 +291,7 @@ class BlackBoard(QWidget):
         frame_rect = QRectF(ox, oy, frame_w, frame_h)
 
         painter.setPen(Qt.PenStyle.NoPen)
-        # 叠三层越来越淡的黑圆角当软投影 —— 比真高斯模糊便宜，肉眼也够。
+        # 叠三层渐淡圆角当软投影
         for dy, alpha in ((5, 46), (10, 28), (17, 14)):
             painter.setBrush(QColor(0, 0, 0, alpha))
             painter.drawRoundedRect(frame_rect.translated(0, dy), 14, 14)
@@ -349,13 +348,13 @@ class BlackBoard(QWidget):
         return pixmap
 
     def _render_chalk(self, total_w, total_h, doc: QTextDocument, cw, ch) -> QPixmap:
-        """粉笔字单独一层，跟背景分开。逐行擦显靠 paintEvent 给这张图设 clip，背景始终全显。"""
+        """画粉笔字层"""
         pixmap = QPixmap(total_w, total_h)
         pixmap.fill(Qt.GlobalColor.transparent)
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.translate(self._ink_rect.left(), self._ink_rect.top())
-        # 先 clip 到墨迹区再缩放画文档：超出可用高度的内容直接裁掉，不会糊到木框上。
+        # 先clip到墨迹区再缩放画文档
         painter.setClipRect(QRectF(0, 0, cw, ch))
         painter.scale(self._doc_scale, self._doc_scale)
         ctx = QAbstractTextDocumentLayout.PaintContext()
@@ -366,7 +365,7 @@ class BlackBoard(QWidget):
 
     @staticmethod
     def _style_tables(doc: QTextDocument) -> None:
-        """给表格补粉笔色细边框。setMarkdown 默认不画线，不补就糊成一团。"""
+        """给表格补粉笔色细边框"""
         for child in doc.rootFrame().childFrames():
             if isinstance(child, QTextTable):
                 fmt = child.format()
@@ -381,7 +380,7 @@ class BlackBoard(QWidget):
     def paintEvent(self, event: QPaintEvent) -> None:
         if self._backdrop is None or self._scale <= 0.001:
             return
-        # 进场用 ease_out_back 带点回弹(更俏皮)，收起用平方曲线干脆缩没 —— 弹出活泼、消失利落。
+        # 进场回弹 收起平方曲线缩没
         display = self._scale * self._scale if self._target == 0.0 else ease_out_back(self._scale)
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
@@ -392,7 +391,7 @@ class BlackBoard(QWidget):
 
         painter.drawPixmap(0, 0, self._backdrop)
 
-        # 粉笔字只露出 reveal 比例那条横线以上 —— 自上而下擦显的本体就这一刀 clip。
+        # 粉笔字只露出reveal比例以上
         painter.save()
         reveal_h = self._ink_rect.top() + self._reveal * self._ink_rect.height()
         painter.setClipRect(QRectF(0, 0, w, reveal_h))

@@ -20,24 +20,21 @@ dependencies = [
     "pymupdf>=1.27.2.3",
     "pywinauto>=0.6.9",
     "edge-tts>=7.2.8",
-    # GPU 加速运行时（DirectML，Windows 专属，~25MB）：检测器与 OCR 自动走显卡，无 GPU 时回退 CPU。
+    # gpu加速 无gpu自动回退cpu
     "onnxruntime-directml>=1.24",
 ]
 
 [dependency-groups]
 dev = [
     "pyinstaller>=6.6",
-    "pytest>=9.0.3",
 ]
 
 [tool.uv]
 package = false
-# rapidocr 传递依赖 CPU 版 onnxruntime，与 onnxruntime-directml 同名互斥；
-# 本项目仅 Windows，统一用 DirectML 版，故用不可满足的标记把 CPU 版顶掉（运行时 import onnxruntime 仍正常）。
+# 用directml版顶掉cpu版onnxruntime
 override-dependencies = ["onnxruntime ; sys_platform == 'never'"]
 
-# 国内镜像（阿里云）—— uv 项目级命令默认走它，加速下载。
-# 注：清华 tuna 当时 TLS 握手失败连不上，故改用阿里云；tuna 恢复后可换回。
+# 阿里云镜像加速
 [[tool.uv.index]]
 url = "https://mirrors.aliyun.com/pypi/simple/"
 default = true

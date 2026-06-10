@@ -1,6 +1,6 @@
 # author: bdth
 # email: 2074055628@qq.com
-# 执行 shell 命令的后端：维护常驻 PowerShell 会话并支持 cmd 单次执行
+# shell 命令后端 常驻 powershell 会话和 cmd 单次执行
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ _TIMEOUT = 600
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 _IDLE_LIMIT = 120
-# 输出截断：开头留 4500、结尾留 2500，中间太长就丢。错误信息一般在开头、最终结果在结尾，两头都保住。
+# 输出截断 两头保留中间丢
 _CAP_HEAD = 4_500
 _CAP_TAIL = 2_500
 
@@ -38,7 +38,7 @@ _NONINTERACTIVE_ENV = (
 
 
 class _PowerShell:
-    """常驻 PowerShell 会话——一个进程跑到底，cwd/环境变量在多次命令间保留。整条加锁串行。"""
+    """常驻 powershell 会话 cwd 和环境变量跨命令保留"""
 
     def __init__(self) -> None:
         self._proc: subprocess.Popen | None = None
@@ -46,21 +46,20 @@ class _PowerShell:
         self._lock = threading.Lock()
 
     def run(self, command: str, timeout: float = _TIMEOUT) -> str:
-        """一对哨兵把这条命令的输出从会话连续流里夹出来，等到 end 才回收。"""
+        """跑一条命令 随机哨兵夹出这条的输出"""
         with self._lock:
             self._ensure()
             output = self._out
-            # 一对随机哨兵把这条命令的输出夹出来——用户脚本恰好打印出相同串的概率忽略不计。
             start, end = f"<<S{uuid.uuid4().hex}>>", f"<<E{uuid.uuid4().hex}>>"
-            # base64 转一手：命令里的引号/换行/$ 不会在拼 framed 时被 PowerShell 二次解释。
+            # base64 转一手防 powershell 二次解释
             encoded = base64.b64encode(command.encode("utf-8")).decode("ascii")
             framed = (
                 f"Write-Output '{start}'; "
-                # 先清零：上一条命令的 $LASTEXITCODE 会粘住，纯 cmdlet（不设码）会误报上次的退出码。
+                # 先清零防上一条退出码粘住
                 f"$global:LASTEXITCODE=0; "
                 f"try {{ Invoke-Expression "
                 f"([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{encoded}'))) }} "
-                # 抛异常的命令本身不写 $LASTEXITCODE，手动置 1，否则 end 那行会带出 0 假装成功。
+                # 抛异常手动置 1
                 f"catch {{ Write-Output $_.Exception.Message; $global:LASTEXITCODE=1 }}; "
                 f"Write-Output \"{end}$LASTEXITCODE`t$($PWD.Path)\"\n"
             )
@@ -68,13 +67,13 @@ class _PowerShell:
                 self._proc.stdin.write(framed)
                 self._proc.stdin.flush()
             except (OSError, ValueError):
-                # 进程已经死了/管道关了——重置，让下次 run 重开，这次直接让上层重试。
+                # 进程死了就重置 让上层重试
                 self._restart()
                 return "[PowerShell session error; reset — please retry]"
             return self._collect(output, start, end, timeout)
 
     def _ensure(self) -> None:
-        """没活进程就拉一个新的：开 pump 线程、灌 UTF-8 与非交互环境。已在跑就直接返回。"""
+        """没活进程就拉一个新的"""
         if self._proc is not None and self._proc.poll() is None:
             return
         self._out = queue.Queue()
@@ -97,17 +96,17 @@ class _PowerShell:
             pass
 
     def _pump(self, proc: subprocess.Popen, output: queue.Queue) -> None:
-        """后台线程：把 stdout 一行行塞进队列——读管道会阻塞，不能在 _collect 主路径里直接读。"""
+        """后台线程读 stdout 进队列"""
         try:
             for line in proc.stdout:
                 output.put(line)
         except (OSError, ValueError):
             pass
         finally:
-            output.put(None)  # 哨兵 None：通知 _collect 进程已经收尾/挂了
+            output.put(None)  # 哨兵 None 通知 _collect 进程没了
 
     def _collect(self, output: queue.Queue, start: str, end: str, timeout: float) -> str:
-        """从队列攒输出直到 end 哨兵。双计时：总超时 + 静默超时（卡住/等输入的当挂了杀）。"""
+        """从队列攒输出到 end 哨兵 总超时加静默超时"""
         deadline = time.time() + timeout
         idle_deadline = time.time() + _IDLE_LIMIT
         seen_start = False
@@ -120,7 +119,7 @@ class _PowerShell:
             now = time.time()
             remaining = min(deadline, idle_deadline) - now
             if remaining <= 0:
-                # 区分两种死法：还没到总超时却先静默超时 = 卡住/等输入；否则就是真跑太久。
+                # 区分静默超时和总超时
                 stalled = now >= idle_deadline and now < deadline
                 self._restart()
                 if stalled:
@@ -142,18 +141,18 @@ class _PowerShell:
                 return "[PowerShell process exited unexpectedly; session reset]"
             idle_deadline = time.time() + _IDLE_LIMIT  # 有新行就续命静默计时
             if not seen_start:
-                # start 之前的都是上一条残留/环境初始化回显，丢掉。
+                # start 之前的残留回显丢掉
                 if line.strip() == start:
                     seen_start = True
                 continue
             if line.strip().startswith(end):
-                # end 那行尾巴塞了 "退出码\t当前路径"，顺手带回来省一次往返。
+                # end 行尾带退出码和当前路径
                 rest = line.strip()[len(end):]
                 code_part, _, cwd = rest.partition("\t")
                 code = code_part.strip() or "0"
                 head_text = "".join(head)
                 tail_text = "".join(tail)
-                # 二次兜底：流式攒的时候按行长度估了个量，这里按真实字符数再卡一刀，免得边界溢出。
+                # 按真实字符数再卡一刀
                 if len(head_text) > _CAP_HEAD:
                     dropped += len(head_text) - _CAP_HEAD
                     head_text = head_text[:_CAP_HEAD]
@@ -168,14 +167,14 @@ class _PowerShell:
                 if cwd.strip():
                     result += f"\n[cwd: {cwd.strip()}]"
                 return result
-            # 流式分流：先把 head 填满，之后全进 tail 滑窗——tail 超长就从头逐行挤掉，只留最近的。
+            # 先填满 head 之后全进 tail 滑窗
             if head_len < _CAP_HEAD:
                 head.append(line)
                 head_len += len(line)
             else:
                 tail.append(line)
                 tail_len += len(line)
-                while len(tail) > 1 and tail_len > _CAP_TAIL:  # 至少留 1 行，别把唯一一行也挤没了
+                while len(tail) > 1 and tail_len > _CAP_TAIL:  # 至少留 1 行
                     evicted = tail.popleft()
                     tail_len -= len(evicted)
                     dropped += len(evicted)
@@ -192,11 +191,11 @@ class _PowerShell:
 
 
 def _kill_proc(proc: subprocess.Popen) -> None:
-    """连子孙进程一起杀——光 proc.kill() 杀不掉 PowerShell 拉起的 node/npm 等娃，会变僵尸占着端口。"""
+    """连子进程树一起杀"""
     pid = proc.pid
     if pid is not None:
         try:
-            # /T 杀整棵进程树，/F 强制。先 taskkill 再补一刀 proc.kill()，双保险。
+            # 先 taskkill 杀进程树再补一刀 kill 双保险
             subprocess.run(
                 ["taskkill", "/F", "/T", "/PID", str(pid)],
                 capture_output=True, timeout=10, creationflags=_NO_WINDOW,
@@ -213,13 +212,13 @@ def _kill_proc(proc: subprocess.Popen) -> None:
                 pipe.close()
         except Exception:
             pass
-    # 异步回收：杀完不在原地等，丢后台线程 wait，免得阻塞调用方（重启/关闭路径都要快）。
+    # 后台线程异步收尸
     threading.Thread(target=_reap, args=(proc,), daemon=True).start()
 
 
 def _reap(proc: subprocess.Popen) -> None:
     try:
-        proc.wait(timeout=10)  # 收尸防僵尸；超时就算了，反正已经 taskkill 过
+        proc.wait(timeout=10)  # 收尸防僵尸
     except Exception:
         pass
 
@@ -232,12 +231,12 @@ def new_session() -> _PowerShell:
 
 
 def run_shell(command: str, shell: str = "powershell", session: _PowerShell | None = None) -> str:
-    """对外入口：先过安全黑名单，cmd 走单次进程，powershell 走常驻会话（默认全局共享那个）。"""
+    """对外入口 先过黑名单 cmd 单次进程 powershell 走常驻会话"""
     blocked = check_blocked(command)
     if blocked is not None:
         return f"[blocked: {blocked}. This is an irreversible high-risk operation and was prevented; if truly needed, have the user do it manually.]"
     if shell == "cmd":
-        # cmd 没有常驻会话，一次一进程；编码用系统本地代码页（cmd 默认不吐 UTF-8），别套上面那套 UTF-8。
+        # cmd 一次一进程 编码用系统本地代码页
         proc = subprocess.Popen(
             ["cmd", "/c", command],
             stdout=subprocess.PIPE,
@@ -254,7 +253,7 @@ def run_shell(command: str, shell: str = "powershell", session: _PowerShell | No
             return f"[ran past {_TIMEOUT:.0f}s without finishing; killed it]"
         return f"[exit {proc.returncode}]\n{output or ''}".strip()
     stripped = command.rstrip()
-    # 拦 bash 习惯的尾随 `&`（后台执行）——PowerShell 这里会直接报错，提前给人话提示。&& 是连接符，放行。
+    # 拦 bash 习惯的尾随 & 放行 &&
     if stripped.endswith("&") and not stripped.endswith("&&"):
         return ("[a trailing `&` to background a command is bash syntax that this PowerShell "
                 "rejects — drop the `&`, or background it with Start-Job { ... } / Start-Process.]")

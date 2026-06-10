@@ -1,7 +1,6 @@
 # author: bdth
 # email: 2074055628@qq.com
-# 系统托盘图标与右键菜单（对话 / 看看屏幕 / 新话题 / 显示·收起 / 控制面板 / 退出）。
-# 同一个菜单也被宠物右键复用（app 通过 context_menu() 取用），保证两处快捷功能一致。
+# 系统托盘图标与右键菜单 同一份菜单也给宠物右键复用
 
 from __future__ import annotations
 
@@ -35,7 +34,7 @@ class Tray(QSystemTrayIcon):
         self._act_peek = self._add(menu, "tray_peek", on_peek)
         self._act_new_topic = self._add(menu, "tray_new_topic", on_new_topic)
         self._act_toggle = self._add(menu, "tray_hide", on_toggle_show)
-        # 上面几项一个都没建时别画分隔线，否则菜单顶上多一道空线。
+        # 全没建就不画分隔线
         if any((self._act_talk, self._act_peek, self._act_new_topic, self._act_toggle)):
             menu.addSeparator()
         self._act_open = self._add(menu, "tray_open_panel", on_open_panel)
@@ -47,12 +46,12 @@ class Tray(QSystemTrayIcon):
         self.activated.connect(self._on_activated)
 
     def context_menu(self) -> QMenu:
-        """给宠物右键复用的同一份菜单 —— 取之前先刷一下显示/收起的文案。"""
+        """给宠物右键复用的菜单 取前先刷文案"""
         self._sync_toggle_label()
         return self._menu
 
     def _sync_toggle_label(self) -> None:
-        # 现查 is_shown() 不缓存：窗口也可能从面板/快捷键那边收起，缓存会和真实态错位。
+        # 现查 is_shown 不缓存
         if self._act_toggle is None:
             return
         shown = True if self._is_shown is None else bool(self._is_shown())
@@ -66,7 +65,7 @@ class Tray(QSystemTrayIcon):
             self._on_open_panel()
 
     def notify(self, title: str, body: str, msecs: int = 8000) -> None:
-        """托盘气泡通知；某些环境(精简版 Win/某些桌面)不支持就静默吞掉。"""
+        """托盘气泡通知 不支持就静默"""
         try:
             if QSystemTrayIcon.supportsMessages():
                 self.showMessage(title, body, mochi_icon(), msecs)
@@ -87,7 +86,7 @@ class Tray(QSystemTrayIcon):
         self._sync_toggle_label()
 
     def _add(self, menu: QMenu, key: str, slot: Callable[[], None] | None) -> QAction | None:
-        # slot 没给就不建这一项，返回 None —— 上层据此判断要不要加分隔线、retranslate 时也跳过。
+        # slot 没给就不建返回 None
         if slot is None:
             return None
         action = QAction(i18n.t(key), menu)

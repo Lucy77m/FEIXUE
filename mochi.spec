@@ -1,11 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-# Mochi · PyInstaller 打包配置
-#   构建： uv run pyinstaller mochi.spec --noconfirm    （或 .\build.ps1）
-#   产物： dist\Mochi\Mochi.exe   —— 整个 dist\Mochi\ 目录一起分发
-#   形态： onedir（目录版，启动快；OCR 模型较大，不宜单文件）+ 无控制台窗口
-#
-# 这是一个合理的起点，不保证一次成功——重依赖应用首次打包常要按运行时报错补
-# datas / hiddenimports（详见 docs/打包说明.md）。
+# pyinstaller打包配置 构建走build.ps1
 
 import os
 
@@ -19,30 +13,27 @@ datas = []
 binaries = []
 hiddenimports = []
 
-# RapidOCR：识别/检测模型 + 配置（不收集 → 运行时 OCR 找不到模型而崩，这是最常见的坑）
+# rapidocr模型和配置
 datas += collect_data_files("rapidocr_onnxruntime")
 hiddenimports += collect_submodules("rapidocr_onnxruntime")
-# onnxruntime 的原生 DLL
+# onnxruntime原生dll
 binaries += collect_dynamic_libs("onnxruntime")
-# uiautomation 的加速 DLL 在 uiautomation/bin/ 子目录（看屏幕点控件的 C++ 加速；漏了会退回更慢的 comtypes）
-# —— glob 必须带 bin/，写成 "*.dll" 只匹配包根、收不到子目录
+# uiautomation加速dll在bin子目录
 binaries += collect_dynamic_libs("uiautomation")
 datas += collect_data_files("uiautomation", includes=["bin/*.dll"])
-# trafilatura 自带配置文件
+# trafilatura配置文件
 datas += collect_data_files("trafilatura")
-# justext（trafilatura 抓正文时用它去模板化）：自带各语言 stoplists 数据文件，
-# 漏了打包后 web_fetch 抓正文会崩（FileNotFound: .../justext/stoplists）
+# justext的stoplists数据
 datas += collect_data_files("justext")
 hiddenimports += collect_submodules("justext")
-# edge-tts（在线神经语音 TTS）：收子模块 + certifi 证书（SSL 握手要用，漏了打包后联网合成必失败）
+# edge-tts子模块和certifi证书
 hiddenimports += collect_submodules("edge_tts")
 datas += collect_data_files("certifi")
 
-# 易被漏掉的隐藏依赖：pywin32 时区、uiautomation 依赖的 comtypes
+# 易漏的隐藏依赖
 hiddenimports += ["win32timezone", "comtypes", "comtypes.client", "comtypes.stream"]
 
-# UI 元素视觉检测模型（YOLO→ONNX，自绘窗口靠它才"看得见"可点区域）。模型不进版本库，
-# 放在 desktop_pet/eyes/models/ 下就会被打进包；没有就跳过（检测器自动静默关闭，不影响其余功能）。
+# ui检测模型 放eyes/models下就打进包 没有就跳过
 _ui_model = os.path.join("desktop_pet", "eyes", "models", "ui_detect.onnx")
 if os.path.exists(_ui_model):
     datas += [(_ui_model, os.path.join("desktop_pet", "eyes", "models"))]
@@ -72,13 +63,13 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,
-    console=False,  # GUI：不弹控制台黑框
+    console=False,  # 不弹控制台
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon="mochi.ico",  # MoChi 自己的脸(build.ps1 用 icon.save_ico 生成/刷新)
+    icon="mochi.ico",  # 图标由build.ps1生成
 )
 
 coll = COLLECT(

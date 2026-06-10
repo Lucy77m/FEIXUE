@@ -1,6 +1,6 @@
 # author: bdth
 # email: 2074055628@qq.com
-# 工程纪律工具：看未提交的 git diff、跑项目测试。
+# 工程纪律工具 看 git diff 跑项目测试
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ _TEST_TIMEOUT = 300
 
 
 def _repo_cwd(path: str) -> str:
-    """把 path 归一成给 git 跑的工作目录——传文件就取它所在目录，空/相对都兜回 "."。"""
+    """归一 path 成 git 工作目录"""
     p = (path or ".").strip() or "."
     if os.path.isdir(p):
         return p
@@ -34,7 +34,7 @@ def _run(cmd: list[str], cwd: str, timeout: int) -> subprocess.CompletedProcess:
 
 
 def _kill_tree(pid: int) -> None:
-    # /T 连子进程一起杀——pytest 常 fork 出一堆子进程，光杀父的会留下孤儿继续占资源。
+    # 连子进程一起杀
     try:
         subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)],
                        capture_output=True, timeout=10, creationflags=_NO_WINDOW)
@@ -43,7 +43,7 @@ def _kill_tree(pid: int) -> None:
 
 
 def review_diff(path: str = ".", staged: bool = False) -> str:
-    """看工作区未提交的 git diff（staged=True 看已暂存的）。"""
+    """看未提交的 git diff"""
     cwd = _repo_cwd(path)
     p = (path or ".").strip() or "."
     try:
@@ -70,7 +70,7 @@ def review_diff(path: str = ".", staged: bool = False) -> str:
     if len(out) > _DIFF_CAP:
         out = out[:_DIFF_CAP] + f"\n…[diff 太长，截断 {len(out) - _DIFF_CAP} 字符；给 path 限定某文件再看]"
     if not staged:
-        # git diff 天生看不见未跟踪的新文件——单独补一行提示，不然新加的文件会被以为没动过。
+        # 补一行未跟踪新文件提示
         try:
             st = _run(["git", "status", "--porcelain"], cwd, 10).stdout
             untracked = [ln[3:] for ln in st.splitlines() if ln.startswith("?? ")]
@@ -83,19 +83,19 @@ def review_diff(path: str = ".", staged: bool = False) -> str:
 
 
 def run_tests(command: str = "", path: str = ".") -> str:
-    """跑项目测试，不给 command 就按 pyproject/pytest.ini/package.json 自动探测。"""
+    """跑项目测试 不给 command 就自动探测"""
     cwd = _repo_cwd(path)
     cmd = (command or "").strip()
     if not cmd:
         if any(os.path.exists(os.path.join(cwd, f)) for f in ("pyproject.toml", "pytest.ini", "setup.cfg", "tox.ini")):
-            # 优先走仓库自己的 .venv——全局 python 多半没装 pytest，或装的是另一套依赖。
+            # 优先用仓库自己的 venv
             venv_py = os.path.join(cwd, ".venv", "Scripts", "python.exe")
             cmd = f'"{venv_py}" -m pytest -q' if os.path.exists(venv_py) else "python -m pytest -q"
         elif os.path.exists(os.path.join(cwd, "package.json")):
             cmd = "npm test"
         else:
             return "[没探测到测试配置(pyproject/pytest.ini/package.json)——用 command 参数给我测试命令]"
-    # command 是模型自由填的——shell=True 直执行，先过黑名单拦掉 rm -rf / 改文件这类伪装成测试的命令。
+    # 先过黑名单拦高危命令
     blocked = check_blocked(cmd)
     if blocked is not None:
         return f"[blocked: {blocked}. 这不是测试命令——高危操作已拦截。]"

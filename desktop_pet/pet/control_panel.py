@@ -1,6 +1,6 @@
 # author: bdth
 # email: 2074055628@qq.com
-# 设置面板对话框：左侧竖向导航(主页/连接/聊天/权限/关于) + 右侧内容区，浅色平滑主题，无边框可拖拽
+# 设置面板对话框 左侧导航右侧内容区 无边框可拖拽
 
 from __future__ import annotations
 
@@ -140,7 +140,7 @@ _SEG_OFF = (
 
 
 class _Segmented(QWidget):
-    """一排互斥按钮的分段选择器。"""
+    """一排互斥按钮的分段选择器"""
 
     def __init__(self, items: list[tuple[str, str]], on_change: "Callable[[str], None] | None" = None) -> None:
         super().__init__()
@@ -202,7 +202,7 @@ class ControlPanel(QDialog):
                  on_preview_voice: Callable[[str, int], None] | None = None,
                  on_new_topic: Callable[[], None] | None = None,
                  intro: "tuple | None" = None) -> None:
-        """所有交互都靠外面注入的回调/provider，面板自己不碰宠物状态。某个 provider 给 None 就把对应页(主页/羁绊)整页隐掉。"""
+        """设置面板 交互全靠注入的回调和provider"""
         super().__init__()
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
@@ -276,7 +276,7 @@ class ControlPanel(QDialog):
             self._tabs.append(btn)
             self._stack.addWidget(builder())
             if key in ("tab_home", "tab_bond", "tab_about", "tab_docs"):
-                self._footerless.add(index)  # 这几页没有可保存的表单，切到时把底部"取消/保存"那条藏掉
+                self._footerless.add(index)  # 没表单的页藏掉底部按钮条
         side.addStretch(1)
         _lang_short = {"中文": "中", "English": "EN", "日本語": "日"}
         side.addWidget(QLabel(self._t("lbl_ui_lang"), objectName="help"))
@@ -336,7 +336,7 @@ class ControlPanel(QDialog):
         self._intro_overlay: QLabel | None = None
         self._intro_started = False
         if intro is not None:
-            # 从聊天气泡变出来时，把上一帧的截图盖在最上面占位，showEvent 里再淡出 —— 避免面板第一帧"啪"地撑开
+            # 上一帧截图盖最上面占位 showEvent里再淡出
             pixmap, geom = intro
             self.setGeometry(geom)
             self._intro_overlay = QLabel(self)
@@ -349,7 +349,7 @@ class ControlPanel(QDialog):
             self._intro_overlay.raise_()
 
     def showEvent(self, event) -> None:
-        # 真正显示出来才启动淡出，且只跑一次 —— showEvent 可能被重复触发(最小化恢复等)
+        # 真正显示出来才启动淡出 只跑一次
         super().showEvent(event)
         if self._intro_overlay is None or self._intro_started:
             return
@@ -373,7 +373,7 @@ class ControlPanel(QDialog):
 
     @staticmethod
     def _fmt_tok(n: int) -> str:
-        """token 数压成 1.2M / 3.4k 这种短样，连接页用量行才放得下。"""
+        """token数压成短样"""
         if n >= 1_000_000:
             return f"{n / 1_000_000:.1f}M"
         if n >= 1_000:
@@ -382,7 +382,7 @@ class ControlPanel(QDialog):
 
     def _refresh_usage(self) -> None:
         try:
-            from desktop_pet.usage import meter  # 延迟 import：usage 在面板之外才落盘，没用到就别拉起来
+            from desktop_pet.usage import meter  # 延迟import
             _session, today = meter.snapshot()
             self._usage_label.setText(self._t("usage_fmt").format(
                 i=self._fmt_tok(today["input"]), o=self._fmt_tok(today["output"]),
@@ -392,7 +392,7 @@ class ControlPanel(QDialog):
             self._usage_label.setText("")
 
     def _build_fields(self, settings: Settings) -> None:
-        """所有输入控件先一次性建好(还没摆进页面) —— 各 _build_*_page 只负责往布局里塞，保存时直接从这些控件读。"""
+        """一次性建好所有输入控件"""
         self._api_key = QLineEdit(settings.api_key)
         self._api_key.setEchoMode(QLineEdit.EchoMode.Password)
         self._base_url = QLineEdit(settings.base_url)
@@ -466,7 +466,7 @@ class ControlPanel(QDialog):
         self._hk_status_labels: dict = {}
 
     def _scroll_page(self, hint_text: str) -> tuple[QWidget, QVBoxLayout]:
-        """造一页"提示行 + 可滚动内容区"的壳，返回 (页面, 往里塞东西的那个布局)。"""
+        """造提示行加滚动内容区的页面壳"""
         page = QWidget()
         col = QVBoxLayout(page)
         col.setContentsMargins(2, 0, 2, 0)
@@ -481,7 +481,7 @@ class ControlPanel(QDialog):
         scroll.setWidget(body)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setFixedHeight(452)  # 写死高度卡住卡片内沿，跟 800×600 的卡 + 顶栏/底栏留白对齐，别让内容把窗口顶大
+        scroll.setFixedHeight(452)  # 写死高度卡住卡片内沿
         scroll.viewport().setStyleSheet("background: transparent;")
         col.addWidget(scroll)
         return page, fields
@@ -510,7 +510,7 @@ class ControlPanel(QDialog):
         v.addWidget(checkbox)
         tip = QLabel(self._t(help_key), objectName="help")
         tip.setWordWrap(True)
-        tip.setContentsMargins(27, 0, 0, 0)  # 左缩 27px，让说明文字跟勾选框后面的文字对齐(避开 indicator+spacing)
+        tip.setContentsMargins(27, 0, 0, 0)  # 左缩27px让说明跟勾选文字对齐
         v.addWidget(tip)
         return box
 
@@ -565,7 +565,7 @@ class ControlPanel(QDialog):
         return page
 
     def _refresh_status(self) -> None:
-        """每 1.5s 拉一次宠物现状刷到主页。provider 抛了就静默跳过这一拍 —— 别让定时器把异常顶到事件循环。"""
+        """定时拉宠物现状刷到主页"""
         if not self._status_provider:
             return
         try:
@@ -699,7 +699,7 @@ class ControlPanel(QDialog):
             self._docs_box.addWidget(row)
 
     def _del_doc(self, source: str, btn: QPushButton) -> None:
-        """删知识库要点两下：第一下把按钮变成"确认"态(armed)，第二下才真删 —— 防手滑。"""
+        """删知识库点两下 第一下armed第二下真删"""
         if not btn.property("armed"):
             btn.setProperty("armed", "true")
             btn.setText(self._t("docs_del_arm"))
@@ -729,7 +729,7 @@ class ControlPanel(QDialog):
             threading.Thread(target=work, daemon=True, name="panel-ingest").start()
         except RuntimeError:
             return
-        QTimer.singleShot(3500, self._refresh_docs)  # 切块入库慢，先放后台跑，3.5s 后再回来刷列表(估个够用的延时，不做精确回调)
+        QTimer.singleShot(3500, self._refresh_docs)  # 后台入库 延时后再刷列表
 
     def _build_connect_page(self) -> QWidget:
         page, body = self._scroll_page(self._t("hint_connect"))
@@ -831,7 +831,7 @@ class ControlPanel(QDialog):
         return page
 
     def _build_gui_model_block(self) -> QWidget:
-        """视觉元素检测器(GUI 增强)的下载/状态卡。已装好就置灰按钮直接显示在跑哪个 provider。"""
+        """视觉元素检测器的下载状态卡"""
         card = QFrame(objectName="statusCard")
         v = QVBoxLayout(card)
         v.setContentsMargins(16, 12, 16, 12)
@@ -848,7 +848,7 @@ class ControlPanel(QDialog):
         self._gui_status.setWordWrap(True)
         v.addWidget(self._gui_status)
         self._gui_downloading = False
-        self._gui_cancel = threading.Event()  # 下载线程跑在后台，取消靠这个 Event 通知它别再写进度/早点收尾
+        self._gui_cancel = threading.Event()  # 取消靠这个event通知下载线程
         self._gui_model_done.connect(self._render_gui_model)
         self._gui_progress.connect(self._on_gui_progress)
         if detect.available():
@@ -857,13 +857,13 @@ class ControlPanel(QDialog):
         return card
 
     def _on_gui_progress(self, p: int) -> None:
-        # 已点取消就别再覆盖"取消中"的提示，否则进度回调还会把百分比刷回去
+        # 已点取消就不再刷进度
         if self._gui_cancel.is_set():
             return
         self._gui_status.setText(self._t("gui_model_downloading") + f" {p}%")
 
     def _gui_on_text(self) -> str:
-        """已装好时那行状态文案，尾巴拼上实际跑的 provider(DirectML/CUDA/CPU)。"""
+        """已装好的状态文案 拼上实际provider"""
         labels = {
             "DmlExecutionProvider": "GPU · DirectML",
             "CUDAExecutionProvider": "GPU · CUDA",
@@ -945,7 +945,7 @@ class ControlPanel(QDialog):
         return scroll
 
     def _on_gui_model(self) -> None:
-        """同一个按钮三态：已装好(置灰) / 下载中(按一下变取消) / 没装(按一下开下) —— 看当前状态决定这次点击干啥。"""
+        """按钮三态 已装好置灰 下载中变取消 没装开下"""
         if detect.available():
             self._gui_status.setText(self._t("gui_model_on"))
             self._gui_btn.setEnabled(False)
@@ -1019,7 +1019,7 @@ class ControlPanel(QDialog):
         self._new_topic_btn.setEnabled(False)
 
     def _on_reset_clicked(self) -> None:
-        """重置羁绊也是按两下确认(同 _del_doc 的 armed 套路) —— 这步抹掉记忆，回不来，得拦一下。"""
+        """重置羁绊按两下确认"""
         if not self._reset_armed:
             self._reset_armed = True
             self._reset_btn.setText(self._t("reset_arm"))
@@ -1034,7 +1034,7 @@ class ControlPanel(QDialog):
         self._reset_armed = False
 
     def _switch(self, index: int) -> None:
-        """切页：换栈 + 高亮导航 + 按页拉对应的实时数据(主页/羁绊/文档/快捷键/用量都是进页才刷)。"""
+        """切页 换栈高亮导航并刷对应页数据"""
         prev = self._stack.currentIndex()
         self._stack.setCurrentIndex(index)
         for i, btn in enumerate(self._tabs):
@@ -1042,7 +1042,7 @@ class ControlPanel(QDialog):
             btn.style().unpolish(btn)
             btn.style().polish(btn)
         self._footer.setVisible(index not in self._footerless)
-        key = self._page_keys[index] if 0 <= index < len(self._page_keys) else ""  # 页顺序随有没有主页/羁绊浮动，认 key 别认 index
+        key = self._page_keys[index] if 0 <= index < len(self._page_keys) else ""  # 页顺序会浮动 认key别认index
         if key == "tab_home":
             self._refresh_status()
         elif key == "tab_bond":
@@ -1068,7 +1068,7 @@ class ControlPanel(QDialog):
         anim.start()
 
     def _on_save(self) -> None:
-        """把所有控件的值收回 settings 落盘，再回调 on_apply 让运行中的宠物热更。存盘失败就闪个红，不关窗。"""
+        """控件值收回settings落盘 再回调on_apply热更"""
         s = self._settings
         s.api_key = self._api_key.text().strip()
         s.base_url = self._base_url.text().strip()
@@ -1077,7 +1077,7 @@ class ControlPanel(QDialog):
         s.embed_model = self._embed_model.text().strip()
         s.proxy = self._proxy.text().strip()
         try:
-            # 上下文窗口给个 8k 下限：填太小会一开口就丢历史；空着或填了非数字都退回 24k 默认
+            # 上下文8k下限 非法值退回24k默认
             s.history_tokens = max(8_000, int(self._history_tokens.text().strip() or "24000"))
         except ValueError:
             s.history_tokens = 24_000
@@ -1090,7 +1090,7 @@ class ControlPanel(QDialog):
         s.proactive_level = self._proactive_level.currentData() or "正常"
         s.tts_enabled = self._tts.isChecked()
         if self._tts_voice.findData(self._tts_voice_orig) < 0:
-            s.tts_voice = self._tts_voice_orig  # 原来选的音色这次列表里没有(edge 没装/掉线)，别覆盖掉用户设置，原样留着
+            s.tts_voice = self._tts_voice_orig  # 原音色不在列表就原样留着
         else:
             s.tts_voice = self._tts_voice.currentData() or ""
         s.tts_rate = int(self._tts_rate.value())
@@ -1101,7 +1101,7 @@ class ControlPanel(QDialog):
         s.clip_sampler = self._clip_sampler.isChecked()
         s.clip_alchemy = self._clip_alchemy.isChecked()
         s.remote_inbox = self._remote.isChecked()
-        # QKeySequenceEdit 可能录进多段(逗号分隔)，只取第一段当全局热键；录空了就保留原值别清掉
+        # 多段只取第一段当热键 录空保留原值
         s.hotkey_summon = self._hk_summon.keySequence().toString().split(",")[0].strip() or s.hotkey_summon
         s.hotkey_ask = self._hk_ask.keySequence().toString().split(",")[0].strip() or s.hotkey_ask
         s.hotkey_quick = self._hk_quick.keySequence().toString().split(",")[0].strip() or s.hotkey_quick
@@ -1131,7 +1131,7 @@ class ControlPanel(QDialog):
         self._save_btn.setEnabled(True)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
-        # 无边框窗口没系统标题栏，自己接管拖动：按下时记下光标到窗口左上角的偏移
+        # 自己接管拖动 按下记偏移
         if event.button() == Qt.MouseButton.LeftButton:
             self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
             event.accept()

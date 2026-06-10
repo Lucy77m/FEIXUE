@@ -1,6 +1,6 @@
 # author: bdth
 # email: 2074055628@qq.com
-# 把 agent 工具调用名映射成可读的进度文案，并渲染任务计划清单
+# 工具调用名映射进度文案 渲染计划清单
 
 from __future__ import annotations
 
@@ -8,8 +8,7 @@ from desktop_pet import i18n
 
 PLAN_ICON = {"todo": "○", "doing": "→", "done": "●"}
 
-# 工具名 → (i18n 文案键, 取细节的 lambda)；lambda 为 None 表示这步没细节、只显标签。
-# [:24]/[:30]/[:40] 截短：进度条一行塞不下整条 url/pattern/正文，不截会撑爆。
+# 工具名对应i18n键和取细节lambda None表示无细节
 _STEPS: dict[str, tuple[str, "object"]] = {
     "run_shell": ("s_run_shell", None),
     "run_python": ("s_run_python", None),
@@ -71,20 +70,20 @@ _STEPS: dict[str, tuple[str, "object"]] = {
 
 
 def describe_step(name: str, args: dict) -> str:
-    """工具调用 → 一行进度文案。这是给 UI 看的，绝不能抛——出岔子就退回原始 name。"""
+    """工具调用转一行进度文案 出错退回name"""
     try:
-        # args 偶尔不是 dict（半截的流式 JSON），兜成 {} 免得 lambda 取键炸了
+        # args非dict兜成空dict
         return _describe_step(name, args if isinstance(args, dict) else {})
     except Exception:
         return name
 
 
 def _describe_step(name: str, args: dict) -> str:
-    # plan / mcp__ 是动态名，进不了 _STEPS 表，得在查表前先单独认出来。
+    # plan和mcp__是动态名 查表前单独认
     if name == "plan":
         return f"{i18n.t('s_plan')} · {len(args.get('steps', []))} {i18n.t('step_unit')}"
     if name.startswith("mcp__"):
-        # 名字长这样：mcp__<server>__<tool>
+        # 名字格式 mcp__server__tool
         parts = name.split("__")
         return f"{i18n.t('s_mcp')} · {parts[1] if len(parts) > 1 else ''}/{parts[-1]}"
     entry = _STEPS.get(name)
@@ -99,7 +98,7 @@ def _describe_step(name: str, args: dict) -> str:
 
 
 def render_plan(steps: list[dict]) -> str:
-    """计划清单 → markdown。"""
-    # 行尾留俩空格是 markdown 的硬换行——不留的话整张清单会被并成一段。
+    """计划清单转markdown"""
+    # 行尾俩空格是markdown硬换行
     rows = [f"{PLAN_ICON.get(step['status'], '○')} {step['text']}  " for step in steps]
     return f"**{i18n.t('plan_title')}**\n\n" + "\n".join(rows)

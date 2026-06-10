@@ -1,6 +1,6 @@
 # author: bdth
 # email: 2074055628@qq.com
-# 桌宠绘制用的调色板：定义墨色、肤色、描边及做梦时的彩色序列
+# 桌宠绘制用的调色板 墨色肤色描边和做梦彩色序列
 
 from __future__ import annotations
 

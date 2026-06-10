@@ -1,6 +1,6 @@
 # author: bdth
 # email: 2074055628@qq.com
-# 程序入口:在创建任何窗口前设置高 DPI 感知,然后启动桌宠应用
+# 程序入口 先设置dpi感知再启动桌宠
 
 from __future__ import annotations
 

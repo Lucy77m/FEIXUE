@@ -1,6 +1,6 @@
 # author: bdth
 # email: 2074055628@qq.com
-# 文档知识库：抽取文本/PDF(含扫描页OCR)、切块向量化入库，供语义召回
+# 文档知识库 抽取文本pdf切块向量化入库 供语义召回
 
 from __future__ import annotations
 
@@ -29,12 +29,12 @@ _PDF_TEXT_MIN = 16
 
 
 def _read_text(file: Path) -> str | None:
-    """读纯文本：utf-8(带 BOM)→gbk 依次试，都不行就强解 utf-8 忽略坏字节兜底。"""
+    """读纯文本 多编码依次试 都不行强解兜底"""
     try:
         raw = file.read_bytes()
     except OSError:
         return None
-    for encoding in ("utf-8-sig", "gbk"):  # 中文文档不少是 gbk，放第二顺位
+    for encoding in ("utf-8-sig", "gbk"):
         try:
             return raw.decode(encoding)
         except UnicodeDecodeError:
@@ -43,7 +43,7 @@ def _read_text(file: Path) -> str | None:
 
 
 def _read_pdf(file: Path) -> str | None:
-    """提取 PDF 文字（有文本层的页直接读，扫描页走 OCR）。"""
+    """提取pdf文字 扫描页走ocr"""
     try:
         import pymupdf
     except ImportError:
@@ -69,7 +69,7 @@ def _read_pdf(file: Path) -> str | None:
 
 
 def _ocr_pdf_page(page) -> str:
-    """扫描页没文本层，渲成 200dpi 位图走 OCR。"""
+    """扫描页渲成位图走ocr"""
     try:
         import numpy as np
 
@@ -84,20 +84,20 @@ def _ocr_pdf_page(page) -> str:
         boxes = vision.ocr_boxes(bgr, 0, 0)
     except Exception:
         return ""
-    # 按行(y 量化到 12px 一档)再按 x 排，把散落的框还原成正常阅读顺序
+    # 按行再按x排 还原阅读顺序
     boxes.sort(key=lambda b: (round(b["center_abs"][1] / 12), b["center_abs"][0]))
     return " ".join(b["text"] for b in boxes)
 
 
 def _chunk_text(text: str) -> list[str]:
-    """按段落攒块，尽量不切断语义；超长段落才硬切并带 _OVERLAP 重叠防边界丢上下文。"""
+    """按段落攒块 超长段落硬切带重叠"""
     text = text.strip()
     if not text:
         return []
     chunks: list[str] = []
     buffer = ""
     for para in (p.strip() for p in text.split("\n\n") if p.strip()):
-        if len(para) > _CHUNK:  # 单段就超长 —— 先把攒着的 buffer 收掉，再按步长硬切
+        if len(para) > _CHUNK:  # 超长段先收buffer再硬切
             if buffer:
                 chunks.append(buffer)
                 buffer = ""
@@ -127,7 +127,7 @@ class DocStore:
             self._conn.commit()
 
     def ingest(self, path: str) -> str:
-        """收一个文件或整个目录入库；目录递归收文本/PDF，跳过 _IGNORE_DIRS（.git/node_modules 等）。"""
+        """文件或目录入库 目录递归收并跳过忽略目录"""
         target = Path(path).expanduser()
         if not target.exists():
             return f"[path doesn't exist: {path}]"
@@ -140,11 +140,11 @@ class DocStore:
             return f"[no readable text files under {path}]"
         total_chunks, done_files, skipped = 0, 0, 0
         for file in files:
-            if total_chunks >= _MAX_CHUNKS:  # 全局封顶，别让一个大目录把库撑爆
+            if total_chunks >= _MAX_CHUNKS:  # 全局封顶
                 skipped += 1
                 continue
             added = self._ingest_file(file, _MAX_CHUNKS - total_chunks)
-            if added < 0:  # -1 = 读不出/太大/没切出块，记 skip 不算失败
+            if added < 0:  # 读不出时记skip
                 skipped += 1
             else:
                 total_chunks += added
@@ -153,20 +153,20 @@ class DocStore:
         return f"Ingested {done_files} file(s), {total_chunks} chunks into the knowledge base{tail}."
 
     def _ingest_file(self, file: Path, budget: int) -> int:
-        """单文件入库，返回写入的 chunk 数；读不出/超 _MAX_FILE/无内容返回 -1。"""
+        """单文件入库返回chunk数 读不出返回负数"""
         text = _read_pdf(file) if file.suffix.lower() == ".pdf" else _read_text(file)
         if text is None or len(text) > _MAX_FILE:
             return -1
-        chunks = _chunk_text(text)[:budget]  # budget = 剩余全局配额，超了截断
+        chunks = _chunk_text(text)[:budget]  # 超出剩余配额截断
         if not chunks:
             return -1
         source = str(file)
         with self._lock:
-            self._conn.execute("DELETE FROM chunks WHERE source = ?", (source,))  # 先删旧的，重复 ingest 同一文件不留残块
+            self._conn.execute("DELETE FROM chunks WHERE source = ?", (source,))  # 先删旧块
             for start in range(0, len(chunks), _EMBED_BATCH):
                 batch = chunks[start : start + _EMBED_BATCH]
                 vectors = embed_texts(batch)
-                if not vectors or len(vectors) != len(batch):  # 向量化挂了也照样存内容，留给 recall 的关键词兜底
+                if not vectors or len(vectors) != len(batch):  # 向量化挂了也照样存内容
                     vectors = [None] * len(batch)
                 for offset, (content, vector) in enumerate(zip(batch, vectors)):
                     self._conn.execute(
@@ -177,7 +177,7 @@ class DocStore:
         return len(chunks)
 
     def recall(self, query: str, k: int = _RECALL_K) -> str:
-        """语义召回：query 向量化 → 全库余弦取 top-k；向量这路没结果再退回关键词子串匹配。"""
+        """语义召回 向量没结果退回子串匹配"""
         query = (query or "").strip()
         if not query:
             return "(no search query given)"
@@ -191,14 +191,14 @@ class DocStore:
             idxs = rank_by_cosine(query_vec, [blob for _, _, blob in rows], k)
             if idxs:
                 return "\n\n".join(f"【{Path(rows[i][0]).name}】\n{rows[i][1]}" for i in idxs)
-        needle = query.lower()  # 兜底：embedding 不可用或排不出名次时，纯子串匹配
+        needle = query.lower()  # 子串匹配兜底
         hits = [(s, c) for s, c, _ in rows if needle in c.lower()]
         if not hits:
             return "(nothing relevant found in the knowledge base)"
         return "\n\n".join(f"【{Path(s).name}】\n{c}" for s, c in hits[:k])
 
     def forget(self, source: str | None = None) -> str:
-        """删文档：给了 source 按子串 LIKE 模糊删，不给则清空整个库。"""
+        """删文档 给source模糊删 不给清空整库"""
         with self._lock:
             if source:
                 cur = self._conn.execute("DELETE FROM chunks WHERE source LIKE ?", (f"%{source}%",))
@@ -209,7 +209,7 @@ class DocStore:
             return "Cleared the knowledge base."
 
     def count(self) -> int:
-        """文档篇数 —— 按 source 去重，不是 chunk 数。"""
+        """按source去重的文档篇数"""
         with self._lock:
             return int(self._conn.execute("SELECT COUNT(DISTINCT source) FROM chunks").fetchone()[0])
 
@@ -223,7 +223,7 @@ class DocStore:
         return "\n".join(f"- {Path(source).name} ({n} chunks)" for source, n in rows)
 
     def sources(self) -> list[tuple[str, str, int]]:
-        """给控制面板列文档用 —— 完整路径留着精确删，文件名只为展示。"""
+        """控制面板列文档用"""
         with self._lock:
             rows = self._conn.execute(
                 "SELECT source, COUNT(*) FROM chunks GROUP BY source ORDER BY source"
@@ -231,7 +231,7 @@ class DocStore:
         return [(str(s), Path(s).name, int(n)) for s, n in rows]
 
     def forget_exact(self, source: str) -> int:
-        """配合 sources() 的整路径精确删 —— 不走 forget 的模糊 LIKE，免得误删同名。"""
+        """整路径精确删"""
         with self._lock:
             cur = self._conn.execute("DELETE FROM chunks WHERE source = ?", (source,))
             self._conn.commit()
@@ -239,7 +239,7 @@ class DocStore:
 
 
 def read_file_text(path: str) -> str | None:
-    """取一个文件的纯文本，PDF 走抽取/OCR；非文件或读不出给 None。"""
+    """取文件纯文本 pdf走抽取ocr 读不出给None"""
     p = Path(path).expanduser()
     if not p.is_file():
         return None

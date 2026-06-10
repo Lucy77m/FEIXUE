@@ -1,6 +1,6 @@
 # author: bdth
 # email: 2074055628@qq.com
-# 多语言文案表与翻译查询：集中存放中/英/日界面字符串，提供 set_language 与 t() 取词
+# 多语言文案表 提供切语言和取词
 
 from __future__ import annotations
 

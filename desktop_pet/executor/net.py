@@ -1,28 +1,28 @@
 # author: bdth
 # email: 2074055628@qq.com
-# 网络执行器：发起 HTTP 请求并返回截断后的响应文本
+# 网络执行器 发 http 请求返回截断后的响应文本
 
 from __future__ import annotations
 
 import httpx
 
 _TIMEOUT = 30
-_MAX_BODY = 20000  # 回给模型的字符上限——再多也塞不进上下文，纯浪费 token
-_MAX_DOWNLOAD = 200_000  # 边读边截的字节闸：哪怕没声明 content-length，也不会被大响应拖死
-# content-type 命中任一子串就当文本读；二进制(图片/视频/zip)走不到这里，交给 run_python 落盘
+_MAX_BODY = 20000  # 回给模型的字符上限
+_MAX_DOWNLOAD = 200_000  # 边读边截的字节上限
+# content type 命中任一子串就当文本读
 _TEXTY = ("text/", "json", "xml", "javascript", "html", "csv", "yaml", "x-www-form-urlencoded")
 
 
 def http_request(url: str, method: str = "GET", body: str | None = None, headers: dict | None = None) -> str:
-    """发一次 HTTP 请求，只把文本响应截断后回给模型；二进制不读、流式读避免大响应吃满内存。"""
-    # headers 可能是模型瞎传的(非 dict / 非字符串值)，统统 str 化兜底，传不进去就当没有
+    """发一次 http 请求 文本响应截断返回"""
+    # headers 全 str 化兜底
     hdrs = {str(k): str(v) for k, v in headers.items()} if isinstance(headers, dict) else None
     try:
         with httpx.stream(
             method.upper(), url, content=body, headers=hdrs, timeout=_TIMEOUT, follow_redirects=True
         ) as response:
             ctype = (response.headers.get("content-type") or "").lower()
-            # 没声明 content-type 时(ctype 为空)放行当文本——总比把可能有用的正文直接拦掉强
+            # 没声明 content type 就放行当文本
             if ctype and not any(t in ctype for t in _TEXTY):
                 clen = response.headers.get("content-length") or "?"
                 return (
@@ -35,9 +35,8 @@ def http_request(url: str, method: str = "GET", body: str | None = None, headers
             for chunk in response.iter_bytes():
                 raw += chunk
                 if len(raw) >= _MAX_DOWNLOAD:
-                    truncated_dl = True  # 提前刹住，下面好提示模型「正文其实更长」
+                    truncated_dl = True
                     break
-            # 服务器没给 encoding 就赌 utf-8；坏字节用 replace 顶住，宁可出几个 � 也别让整个请求抛异常
             text = raw.decode(response.encoding or "utf-8", errors="replace")
     except Exception as exc:
         return f"[request failed: {exc}]"

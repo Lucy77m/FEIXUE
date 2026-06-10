@@ -1,6 +1,6 @@
 # author: bdth
 # email: 2074055628@qq.com
-# Agent 主循环：驱动 LLM 多步工具调用、子代理/后台任务、计划与反思
+# agent主循环 驱动多步工具调用 子代理后台任务 计划反思
 
 from __future__ import annotations
 
@@ -111,8 +111,7 @@ def _text_tokens(text: str) -> int:
 
 
 def _estimate_tokens(message: dict) -> int:
-    """毛估一条消息的 token，只为裁历史算预算——不接真 tokenizer（多依赖、还得对上各家分词）。
-    宁可估多点早裁，别撑爆上下文。"""
+    """毛估一条消息token数"""
     total = _TOKENS_PER_MESSAGE
     content = message.get("content")
     if isinstance(content, str):
@@ -130,7 +129,7 @@ def _estimate_tokens(message: dict) -> int:
 
 
 def _cap_tool_result(text: str) -> str:
-    """工具输出太长就掐成头尾两段——头多尾少（5:3），开头一般是命令/状态、结尾常是报错或结论，中间最不重要。"""
+    """工具输出过长掐成头尾两段"""
     if len(text) <= _MAX_TOOL_RESULT_CHARS:
         return text
     head = _MAX_TOOL_RESULT_CHARS * 5 // 8
@@ -143,7 +142,7 @@ _THINK_BLOCK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
 
 
 def _strip_think_leak(text: str) -> str:
-    """清掉 <think>…</think> 思维链泄漏——有的模型/网关不吃 enable_thinking，会把思考直接吐进正文。"""
+    """清掉think标签泄漏"""
     if not text or "think>" not in text:
         return text
     text = _THINK_BLOCK_RE.sub("", text)
@@ -160,12 +159,12 @@ _PLAN_STATUS_ALIAS = {
 
 
 def _norm_plan_status(status) -> str:
-    """把模型给的各种状态写法归一到 todo/doing/done，避免 'completed' 这种同义词被当未开始而"重置"清单。"""
+    """状态写法归一到todo doing done"""
     return _PLAN_STATUS_ALIAS.get(str(status or "").strip().lower(), "todo")
 
 
 def _parse_json(text: str) -> dict | None:
-    """从一段可能裹着废话/代码围栏的文本里抠出最外层 {…} 当 dict——只认对象，失败给 None。"""
+    """从文本抠最外层json对象 失败给None"""
     start, end = text.find("{"), text.rfind("}")
     if start == -1 or end <= start:
         return None
@@ -177,12 +176,12 @@ def _parse_json(text: str) -> dict | None:
 
 
 def _parse_json_value(text: str) -> dict | list | None:
-    """比 _parse_json 宽：对象和数组都收，子代理按 result_schema 返回时用——schema 可能要的是 [...] 而非 {...}。"""
+    """从文本抠json 对象和数组都收"""
     best: tuple[int, dict | list] | None = None
     for opener, closer in (("{", "}"), ("[", "]")):
         end = text.rfind(closer)
         start = text.find(opener)
-        for _ in range(4):  # 最多往后挪 4 个开括号试探，防止开头一个孤立的 { 让整段解析失败
+        for _ in range(4):  # 最多往后挪4个开括号试探
             if start == -1 or end <= start:
                 break
             try:
@@ -197,7 +196,7 @@ def _parse_json_value(text: str) -> dict | list | None:
 
 
 def _render_transcript(messages: list[dict]) -> str:
-    """把被裁掉的消息压成纯文本喂给压缩模型——图片只留占位、每条截到 500 字，整体过长就掐头尾。"""
+    """被裁消息压成纯文本喂压缩模型"""
     lines: list[str] = []
     for m in messages:
         role = m.get("role", "")
@@ -255,13 +254,13 @@ class Agent:
         self._hit_step_limit = False
         self._last_active = 0.0
         self._turn_user_idx = -1
-        self._strip_extra_body = False  # 这两个 strip 标记：某些网关不认 extra_body/stream_options，首次 400 后记下来别再发
+        self._strip_extra_body = False  # 网关不认非标参数 400后记下不再发
         self._strip_stream_options = False
         if depth == 0:
-            self._try_restore_session()  # 只主代理恢复上次会话；子代理是一次性的，没历史可接
+            self._try_restore_session()  # 只主代理恢复上次会话
 
     def _build_tools(self) -> list[dict]:
-        """按深度+面板开关裁工具单：子代理不能再开子代理/后台/看屏；web/control/shell 三类各自受权限位控制。"""
+        """按深度和权限开关裁工具单"""
         excluded: set[str] = set()
         if self._depth >= _MAX_SUBAGENT_DEPTH:
             excluded |= {_SPAWN_TOOL, _BACKGROUND_TOOL, _WORKFLOW_TOOL, _WATCH_TOOL}
@@ -279,7 +278,7 @@ class Agent:
         return offered + mcp_hub.tool_schemas()
 
     def forget_all(self) -> None:
-        """彻底失忆：长期记忆/日记/人格/知识库连同当前会话一起清空——和 new_topic 不同，这个不可逆。"""
+        """清空全部记忆和当前会话"""
         for wipe in (store.wipe, journal.clear, persona.clear, docs.forget):
             try:
                 wipe()
@@ -293,7 +292,7 @@ class Agent:
         self._turn_user_idx = -1
 
     def new_topic(self) -> None:
-        """翻篇：只清当前对话窗口（含压缩摘要/落盘会话），长期记忆/情绪/人格全部保留。"""
+        """只清当前对话 长期记忆保留"""
         self._compressed = ""
         self._known_files.clear()
         self._clear_session_file()
@@ -333,8 +332,7 @@ class Agent:
         return self._cancel.is_set()
 
     def _seal_pending_tool_calls(self, note: str) -> None:
-        """给每个还没拿到结果的 tool_call 补一条占位结果——悬空的 tool_call 会让下一次请求格式非法。
-        中断/出错/重启时都用它把历史补回合法状态，又不丢掉"刚才在干嘛"。"""
+        """给没结果的tool_call补占位结果"""
         have = {m.get("tool_call_id") for m in self._messages if m.get("role") == "tool"}
         pending = []
         for m in self._messages:
@@ -369,8 +367,7 @@ class Agent:
         self._python.close()
 
     def _system_message(self) -> dict:
-        """系统提示——刻意只放"基本不变"的东西（人格/技能/日记/压缩摘要），把会变的状态挪到 _turn_context。
-        这样 system 段长期稳定，前缀缓存能逐字节命中，省 token。"""
+        """拼系统提示 只放基本不变的内容"""
         if self._depth > 0:
             return {"role": "system", "content": SUBAGENT_PROMPT}
         parts = [SYSTEM_PROMPT]
@@ -394,7 +391,7 @@ class Agent:
         return {"role": "system", "content": "\n\n".join(parts)}
 
     def _turn_context(self, query: str | None = None) -> str:
-        """每轮现算的状态注记（情绪/时间/相关记忆），塞进当轮 user 消息——所以历史里的旧注记都过期，以最新这条为准。"""
+        """每轮现算的状态注记"""
         parts = [emotion.tone_hint(), prompts.time_hint()]
         memory_context = store.as_context(query)
         if memory_context:
@@ -402,13 +399,13 @@ class Agent:
         return "[当前状态注记——以这条最新的为准，历史消息里的同类注记已过期]\n" + "\n\n".join(parts)
 
     def _prepare(self) -> None:
-        """每次请求前刷新：裁历史、重建 system(可能并入了新摘要)、重算工具单(权限/深度可能变了)。"""
+        """请求前裁历史 重建system 重算工具单"""
         self._trim_history()
         self._messages[0] = self._system_message()
         self._tools = self._build_tools()
 
     def _history_budget(self) -> int:
-        """历史 token 预算取用户设置，没填/非法/非正就退回默认；再低也兜个 8000，太小连最近几轮都装不下。"""
+        """取历史token预算 非法退回默认"""
         try:
             value = int(self._settings.history_tokens)
         except (TypeError, ValueError, AttributeError):
@@ -418,7 +415,7 @@ class Agent:
         return max(8_000, value)
 
     def _trim_history(self) -> None:
-        """从尾往头累计 token，超预算就把前面的裁掉——裁掉的不是直接扔，交给 _compress_history 压成摘要存进 system。"""
+        """从尾往头累计token 超预算裁掉前面压成摘要"""
         n = len(self._messages)
         if n <= 2:
             return
@@ -430,7 +427,7 @@ class Agent:
             if used > budget and i < n - 1:
                 break
             start = i
-        # 别让保留段以 tool 消息打头——开头悬着个没有对应 assistant tool_call 的 tool，请求会被判非法
+        # 保留段不能以tool消息打头
         while start < n and self._messages[start].get("role") == "tool":
             start += 1
         if start > 1:
@@ -439,8 +436,7 @@ class Agent:
             self._compress_history(dropped)
 
     def _compress_history(self, dropped: list[dict]) -> None:
-        """把裁掉的对话叫模型缩成一份备忘，和已有摘要滚动合并——用便宜的 subagent_model，没配就退回主模型。
-        摘要失败也不能丢得无声无息：补一句"细节已不可考"，至少让它知道前面发生过事。"""
+        """裁掉的对话压成备忘滚动合并"""
         transcript = _render_transcript(dropped)
         if not transcript:
             return
@@ -481,7 +477,7 @@ class Agent:
         on_media: Callable[[str, str, str], None] | None = None,
         on_perform: Callable[[str], bool] | None = None,
     ) -> str:
-        """对外入口：跑一轮对话/任务，回最终文本。外面这层只负责无论怎么退出都把会话落盘（崩了也别丢上下文）。"""
+        """对外入口 跑一轮对话回最终文本"""
         try:
             return self._run_impl(
                 user_message, attachments, on_step=on_step, on_think=on_think,
@@ -501,7 +497,7 @@ class Agent:
         on_media: Callable[[str, str, str], None] | None = None,
         on_perform: Callable[[str], bool] | None = None,
     ) -> str:
-        """核心多步循环：补 system/记忆 → 喂用户消息 → 反复(模型出工具调用→执行→回灌结果)直到它给纯文本回复或撞步数顶。"""
+        """核心多步循环 执行工具调用直到纯文本回复或撞步数顶"""
         def step(message: str) -> None:
             if on_step is not None:
                 on_step(message)
@@ -526,7 +522,7 @@ class Agent:
         if self._owns_cancel:
             self._cancel.clear()
         now = time.monotonic()
-        # 隔了 25 分钟以上再开口，多半是新话题：自动翻篇，省得把半小时前的上下文硬塞进来带偏
+        # 隔25分钟以上自动翻篇
         if (self._depth == 0 and self._last_active
                 and now - self._last_active > _FRESH_AFTER and len(self._messages) > 1):
             self._compressed = ""
@@ -534,7 +530,7 @@ class Agent:
             self._messages = [self._system_message()]
         self._last_active = now
         self._prepare()
-        history_mark = len(self._messages)  # 记下落笔点：本轮中途出错就回滚到这，不留半截脏历史
+        history_mark = len(self._messages)  # 出错回滚点
         n_att = len(attachments) if isinstance(attachments, list) else 0
         audit.user(user_message + (f"  [附件×{n_att}]" if n_att else ""))
         self._messages.append({
@@ -561,7 +557,7 @@ class Agent:
             if not message.tool_calls:
                 reply = message.content or ""
                 if not reply.strip():
-                    # 既没工具又没正文——有的模型偶尔抽风返回空，催一两次再放弃，别让用户对着空白
+                    # 空回复催一两次再放弃
                     empties += 1
                     if empties <= _MAX_EMPTY_RETRIES and steps < hard_cap:
                         self._messages.append({"role": "user", "content": prompts.EMPTY_REPLY_NUDGE})
@@ -571,7 +567,7 @@ class Agent:
                     self._turn_substantive = False
                     audit.reply("[empty reply]")
                     return prompts.EMPTY_REPLY_FALLBACK
-                # 这轮够不够"实质"决定事后要不要 reflect：动过工具，或者一问一答总长过线，才值得反思沉淀
+                # 判断这轮是否实质 决定要不要reflect
                 self._turn_substantive = (
                     self._turn_used_tools or (len(user_message) + len(reply)) >= _REFLECT_MIN_CHARS
                 )
@@ -587,7 +583,7 @@ class Agent:
 
             images: list[str] = []
             parsed = [(c, _parse_json(c.function.arguments or "{}")) for c in message.tool_calls]
-            truncated = message.finish_reason == "length"  # 参数 JSON 解析失败时用它区分：是被 max_tokens 截了，还是模型本来就吐了坏 JSON
+            truncated = message.finish_reason == "length"  # 区分被截断还是坏json
             if any(c.function.name not in _COSMETIC_TOOLS for c, _ in parsed):
                 self._turn_used_tools = True
             results: dict[str, tools.ToolResult] = {}
@@ -601,7 +597,7 @@ class Agent:
                     f"[tool {call.function.name} 的参数不是合法 JSON，这一步没有执行——用合法 JSON 重新调用一次。]"
                 )
 
-            # 一轮里要起好几个子代理就并发跑——彼此独立，串行等会很慢。单个的走下面普通分支即可
+            # 多个子代理并发跑 单个走下面普通分支
             spawns = [(c, a) for c, a in parsed if c.function.name == _SPAWN_TOOL and c.id not in results]
             if len(spawns) > 1:
                 for c, a in spawns:
@@ -638,7 +634,7 @@ class Agent:
                 elif call.function.name == _WATCH_TOOL:
                     results[call.id] = tools.ToolResult(self._set_screen_watch(arguments))
                 else:
-                    # 普通工具走 dispatch 前先过两道闸：高危命令要确认、edit 前必须先 read 过且文件没被人改动
+                    # dispatch前过高危确认和edit护栏两道闸
                     denial = (self._guard_risky(call.function.name, arguments)
                               or self._guard_edit(call.function.name, arguments))
                     if denial is not None:
@@ -664,7 +660,7 @@ class Agent:
                 self._seal_cancelled()
                 return _RUN_CANCELLED
             steps += 1
-            # 每隔 checkpoint 步插一句"停下来想想是不是跑偏了"，防止它埋头钻进死胡同一直耗步数
+            # 每隔checkpoint步插一句自检
             if steps < hard_cap and steps % checkpoint == 0:
                 self._messages.append({"role": "user", "content": prompts.step_checkpoint_nudge(steps)})
         self._hit_step_limit = True
@@ -673,7 +669,7 @@ class Agent:
             self._seal_cancelled()
             return _RUN_CANCELLED
         step(i18n.thinking_label())
-        # 撞到步数顶：最后再求一次纯文本收尾，不给工具（offer_tools=False）——再给它又会继续调，收不了场
+        # 撞步数顶 不给工具求一次纯文本收尾
         self._messages.append({"role": "user", "content": prompts.STEP_LIMIT_NUDGE})
         try:
             message = self._complete(think, offer_tools=False)
@@ -688,13 +684,13 @@ class Agent:
         return reply
 
     def _budget(self) -> tuple[int, int]:
-        """(检查点间隔, 安全顶)。子代理/后台用固定小预算防递归放大；主代理按面板的"放手程度"。"""
+        """返回检查点间隔和步数上限"""
         if self._depth > 0:
             return _SUBAGENT_BUDGET
         return AUTONOMY_BUDGETS.get(self._settings.autonomy, AUTONOMY_BUDGETS["正常"])
 
     def _client(self) -> OpenAI:
-        """懒建并缓存 OpenAI 客户端；key/base_url/proxy 任一变了就重建，顺手关掉旧的别漏连接。"""
+        """懒建缓存openai客户端 配置变了重建"""
         creds = (self._settings.api_key, self._settings.base_url, self._settings.proxy)
         with self._client_lock:
             if self._oa_client is None or self._oa_creds != creds:
@@ -717,7 +713,7 @@ class Agent:
             return self._oa_client
 
     def _model_name(self) -> str:
-        """子代理优先用单独配的小模型（省钱省时），没配才退回主模型；主代理永远用主模型。"""
+        """子代理优先用小模型 没配退回主模型"""
         if self._depth > 0:
             sub = (getattr(self._settings, "subagent_model", "") or "").strip()
             if sub:
@@ -725,8 +721,7 @@ class Agent:
         return self._settings.model
 
     def _complete(self, on_think: Callable[[str], None], offer_tools: bool = True) -> StreamMessage:
-        """发一次流式补全并回灌用量。带 extra_body(enable_thinking)/stream_options 这些非标参数——
-        碰到不认它们的网关会 400，于是逐个剥掉重试并记标记，下次直接不带。"""
+        """发一次流式补全 非标参数400就剥掉重试"""
         params: dict = {
             "model": self._model_name(),
             "messages": self._messages,
@@ -744,7 +739,7 @@ class Agent:
         try:
             stream = self._client().chat.completions.create(**params)
         except BadRequestError:
-            # 先怀疑 extra_body（最容易被拒），剥了还 400 再剥 stream_options；都不是就如实抛出
+            # 先剥extra_body再剥stream_options 都不行就抛
             if "extra_body" in params:
                 params.pop("extra_body")
                 try:
@@ -769,13 +764,13 @@ class Agent:
         return message
 
     def _meter_response(self, resp) -> None:
-        """记一次非流式调用的用量（摘要/反思/旁路那些）。整段 try 兜底——计费失败绝不能拖垮正经请求。"""
+        """记非流式调用用量"""
         try:
             u = resp.usage
             if u is None:
                 return
             cached = 0
-            details = getattr(u, "prompt_tokens_details", None)  # 命中缓存的 token 藏在这，单独算便宜价
+            details = getattr(u, "prompt_tokens_details", None)  # 缓存命中token在这
             if details is not None:
                 cached = int(getattr(details, "cached_tokens", 0) or 0)
             usage_meter.add(int(u.prompt_tokens or 0), int(u.completion_tokens or 0), cached)
@@ -783,13 +778,13 @@ class Agent:
             pass
 
     def _wants_thinking_param(self) -> bool:
-        # 官方 openai.com 不认 enable_thinking，直接别发；之前被网关 400 剥过(strip 标记)的也别再发
+        # 官方openai和剥过标记的不发enable_thinking
         if self._strip_extra_body:
             return False
         return "api.openai.com" not in (self._settings.base_url or "").lower()
 
     def _update_plan(self, steps: list, emit_plan: Callable[[str], None]) -> str:
-        """收下模型给的整张计划清单（每次都是全量覆盖，不是增量），洗一遍状态后渲染到面板。回一句进度给模型。"""
+        """收计划清单全量覆盖 洗状态渲染到面板"""
         cleaned: list[dict] = []
         for raw in steps or []:
             if isinstance(raw, dict) and str(raw.get("text", "")).strip():
@@ -803,7 +798,7 @@ class Agent:
         return f"Plan updated: {done}/{len(cleaned)} done."
 
     def _show_media(self, tool_name: str, arguments: dict, emit_media: Callable[[str, str, str], None]) -> str:
-        """在桌宠旁弹图/GIF。source 可以是本地路径或 URL；显示前先用 PIL verify 一遍，免得把坏文件塞给 UI 崩掉。"""
+        """桌宠旁弹图或gif"""
         source = str(arguments.get("source", "")).strip()
         caption = str(arguments.get("caption", "")).strip()
         kind = "gif" if tool_name == _GIF_TOOL else "image"
@@ -822,7 +817,7 @@ class Agent:
         return f"{'Looped that GIF' if kind == 'gif' else 'Showed that image'} beside the user."
 
     def _perform(self, name: str) -> str:
-        """让桌宠当场做个动作/演段小剧场。名字不在册就把可选项列回去让它重挑，别默默吞掉。"""
+        """桌宠做动作 名字不在册列回可选项"""
         name = (name or "").strip()
         if not _is_performable(name):
             return f"(I don't have a \"{name}\" move. Options — {_perform_names()})"
@@ -833,8 +828,7 @@ class Agent:
         return f"OK, doing the \"{name}\" move now."
 
     def _confirm(self, action: str) -> str:
-        """让模型主动求用户点确认。点了「执行」就置 _risk_approval，给紧随其后的高危调用放一次行。
-        没有确认 UI（后台/子代理）一律按"未批准"处理——宁可不做，别擅自动手。"""
+        """弹确认面板等用户点 批准置_risk_approval"""
         action = (action or "").strip()
         if not action:
             return "(No action described — nothing to confirm.)"
@@ -847,7 +841,7 @@ class Agent:
         return "User tapped 不执行 — rejected; do NOT do it, just acknowledge briefly."
 
     def _guard_risky(self, name: str, arguments: dict) -> str | None:
-        """执行 shell/python/测试前扫一遍危险命令；命中就弹确认。返回拒绝文案=拦下，None=放行。"""
+        """危险命令扫描 返回拒绝文案或None放行"""
         if name == "run_shell":
             text = str(arguments.get("command") or "")
         elif name == "run_python":
@@ -860,7 +854,7 @@ class Agent:
         if risk is None:
             return None
         if self._risk_approval:
-            self._risk_approval = False  # 刚通过 confirm 拿到的放行只用一次，用完立刻清，别让后续命令蹭这张通行证
+            self._risk_approval = False  # 放行只用一次 用完清掉
             return None
         if self._on_confirm is None:
             return (f"[安全拦截：这一步包含高危操作（{risk}），而当前环境（后台/子代理）没有确认按钮，"
@@ -871,15 +865,14 @@ class Agent:
 
     @staticmethod
     def _file_key(path: str) -> str:
-        """把路径归一成 _known_files 的键——normcase 抹掉 Windows 大小写差异，别让同一文件存成两条。"""
+        """路径归一成_known_files的键"""
         try:
             return os.path.normcase(str(Path(path).expanduser().resolve()))
         except (OSError, ValueError):
-            return os.path.normcase(str(Path(path).expanduser()))  # resolve 失败（盘符没了/路径非法）也别崩，退一步用没解析的
+            return os.path.normcase(str(Path(path).expanduser()))  # resolve失败退一步用没解析的
 
     def _guard_edit(self, name: str, arguments: dict) -> str | None:
-        """edit_file 前的护栏：没 read 过就先 read；读过但 mtime 变了（run_python/外部程序动过）也打回去重读。
-        不然 old 是凭记忆写的，对不上真实现状，edit 要么打偏要么悄悄改错地方。"""
+        """edit前护栏 没读过或mtime变了打回重读"""
         if name != "edit_file":
             return None
         path = str(arguments.get("path") or "")
@@ -901,7 +894,7 @@ class Agent:
         return None
 
     def _note_file(self, name: str, arguments: dict) -> None:
-        """读/写/改成功后记下该文件此刻的 mtime，作为 _guard_edit 下次比对的基准。"""
+        """记下文件mtime给_guard_edit比对"""
         if name not in ("read_file", "write_file", "edit_file"):
             return
         path = str(arguments.get("path") or "")
@@ -915,7 +908,7 @@ class Agent:
 
 
     def _save_session(self) -> None:
-        """把当前会话落盘，下次启动接上。原子写避免写一半崩了留个坏文件；system 消息不存(每次重建)。"""
+        """会话落盘 system消息不存"""
         try:
             data = {
                 "saved_at": time.time(),
@@ -928,7 +921,7 @@ class Agent:
 
     @staticmethod
     def _strip_images_for_save(messages: list[dict]) -> list[dict]:
-        """落盘前把图片消息压成纯文本占位——base64 截图又大又没法跨重启复用，存了纯属浪费磁盘。"""
+        """落盘前图片消息压成纯文本占位"""
         out: list[dict] = []
         for m in messages:
             m2 = dict(m)
@@ -948,8 +941,7 @@ class Agent:
             pass
 
     def _try_restore_session(self) -> None:
-        """启动时尝试接上上次会话——超过 25 分钟的就当过期不接（同 _FRESH_AFTER 的"隔太久算新话题"口径）。
-        全程对脏数据宽容：解析失败/格式不对/空了，直接放弃当无会话可恢复。"""
+        """启动时恢复上次会话 过期或脏数据放弃"""
         try:
             data = json.loads(_SESSION_PATH.read_text(encoding="utf-8"))
         except Exception:
@@ -966,7 +958,7 @@ class Agent:
                    if isinstance(m, dict) and m.get("role") in ("user", "assistant", "tool")]
         if not cleaned:
             return
-        # 开头不能是 tool（前面对应的 assistant 没存进来就成孤儿，请求会非法）——削到第一条非 tool 为止
+        # 削到第一条非tool为止
         while cleaned and cleaned[0].get("role") == "tool":
             cleaned.pop(0)
         if not cleaned:
@@ -988,8 +980,7 @@ class Agent:
         return None
 
     def _run_subagent(self, task: str, step: Callable[[str], None] | None, result_schema: str | None = None) -> str:
-        """派一个深一层的临时代理干一件子事，跑完即弃（共用同一个 cancel，主代理一停它也停）。
-        给了 result_schema 就要求只回 JSON，并在 _validate_schema_result 里校验+重试一次。"""
+        """派临时子代理干一件子事 跑完即弃"""
         if self._depth >= _MAX_SUBAGENT_DEPTH:
             return "(Sub-agents can't spawn their own sub-agents — do it yourself or report back.)"
         task = (task or "").strip()
@@ -1015,7 +1006,7 @@ class Agent:
         return result
 
     def _validate_schema_result(self, worker: "Agent", result: str, schema: str) -> str:
-        """校验子代理结果是不是合法 JSON，不是就让它(带同一上下文)重试一次；还不行就把原话原样交回，别硬吞。"""
+        """校验子代理结果json 不合法重试一次"""
         parsed = _parse_json_value(result)
         if parsed is not None:
             return json.dumps(parsed, ensure_ascii=False)
@@ -1030,8 +1021,7 @@ class Agent:
         return f"[子代理重试后仍没能给出合法 JSON——以下是它的原话]\n{result}"
 
     def _run_workflow(self, mode: str, tasks: list, result_schema: str | None, step: Callable[[str], None] | None) -> str:
-        """一组子任务两种跑法：pipeline 串着跑、把上一段输出喂下一段；fanout 并发各跑各的再汇总。
-        tasks 容错——模型有时把数组塞成 JSON 字符串甚至单个字符串，这里都掰成 list。"""
+        """跑一组子任务 pipeline串行fanout并发"""
         if self._depth >= _MAX_SUBAGENT_DEPTH:
             return "(Can't run a workflow from inside a sub-agent.)"
         if isinstance(tasks, str):
@@ -1057,7 +1047,7 @@ class Agent:
                 if self._cancel.is_set():
                     return f"(Workflow stopped at stage {i}.)\n\n{prev}"
                 stage = t if i == 1 else f"{t}\n\n[Previous stage's output to build on]:\n{prev}"
-                prev = self._run_subagent(stage, step, result_schema if i == len(clean) else None)  # schema 只压在最后一段，中间环节不强求 JSON
+                prev = self._run_subagent(stage, step, result_schema if i == len(clean) else None)  # schema只压在最后一段
             return prev
         out = [""] * len(clean)
         with ThreadPoolExecutor(max_workers=min(_MAX_PARALLEL_SUBAGENTS, len(clean))) as pool:
@@ -1078,8 +1068,7 @@ class Agent:
         on_media: Callable[[str, str, str], None] | None = None,
         on_perform: Callable[[str], bool] | None = None,
     ) -> str:
-        """定时任务到点了，用主代理身份跑一遍。跑完把对话历史还原成跑之前的样子——
-        定时活儿是"插播"，不该把用户正聊的上下文搅乱、也不该污染后面的反思。"""
+        """跑定时任务 跑完还原对话历史"""
         snapshot = list(self._messages)
         try:
             return self.run(
@@ -1092,8 +1081,7 @@ class Agent:
                 self._save_session()
 
     def _start_background_task(self, task: str) -> str:
-        """丢一个任务到后台线程跑，干完用 notify 回贴。最多同时 _MAX_BG_TASKS 个，超了就排队(信号量挡着)。
-        立刻返回一句话给用户，不阻塞当前对话。"""
+        """任务丢后台线程跑 干完notify回贴"""
         if self._depth >= _MAX_SUBAGENT_DEPTH:
             return "(Can't start a background task from here.)"
         task = (task or "").strip()
@@ -1103,8 +1091,7 @@ class Agent:
             return "(Background tasks aren't available in this environment.)"
         notify, settings, depth = self._notify, self._settings, self._depth
 
-        # 先抢着把计数+1（决定这条要不要提示"已排队"），真正的并发上限靠线程里的信号量卡——
-        # 计数只为给用户一句准话，别和信号量混为一谈
+        # 计数加1判断要不要提示已排队 并发上限靠信号量
         global _BG_ACTIVE
         with _BG_ACTIVE_LOCK:
             queued = _BG_ACTIVE >= _MAX_BG_TASKS
@@ -1143,9 +1130,9 @@ class Agent:
         return f"OK, working on \"{task[:30]}\" in the background — I'll tell you when it's done."
 
     def deliver_reminder(self, what: str) -> str:
-        """到点提醒，用它当下的口吻说出来而不是干巴巴念字条。模型搭不上话就直接退回原文，提醒不能漏。"""
+        """到点提醒 失败退回原文"""
         self._prepare()
-        # 在历史副本上加一句就发，不写回 self._messages——主动说话是旁路，不该挤进正经对话流
+        # 在历史副本上发 不写回_messages
         messages = copy.deepcopy(self._messages) + [
             {"role": "user", "content": self._turn_context() + "\n\n" + prompts.reminder_nudge(what)}
         ]
@@ -1164,7 +1151,7 @@ class Agent:
         return content
 
     def speak_spontaneously(self, mode: str, context: str = "") -> str:
-        """没人开口时它自己冒一句（闲聊/关心/吐槽，看 mode）。同样走历史副本、不落库；憋不出就返回空串，宁可不说。"""
+        """自己主动冒一句 憋不出返回空串"""
         self._prepare()
         nudge = prompts.spontaneous_nudge(mode)
         if context.strip():
@@ -1204,7 +1191,7 @@ class Agent:
         return _strip_think_leak(content)
 
     def transform_clipboard(self, kind: str, text: str) -> str:
-        """剪贴板炼金：按 kind（翻译/润色/解释…）改写选中文本。无状态单发，超 4000 字截断够用了。"""
+        """按kind改写剪贴板文本"""
         text = (text or "").strip()
         if not text:
             return ""
@@ -1232,7 +1219,7 @@ class Agent:
             worker.close()
 
     def peek_screen(self, trigger: str = "") -> str:
-        """偷瞄一眼屏幕主动搭话（卡住雷达触发时带上窗口名重点看报错）。没什么可说就回 NONE，过滤成空串别硬聊。"""
+        """偷瞄屏幕主动搭话 没事回空串"""
         from desktop_pet.eyes import capture
         from desktop_pet.settings import CAPTURE_WINDOW
         try:
@@ -1257,13 +1244,13 @@ class Agent:
             text = _strip_think_leak((resp.choices[0].message.content or "").strip())
         except Exception:
             return ""
-        if not text or text.strip().upper().lstrip("[").startswith("NONE"):  # 容忍模型把 NONE 裹进 [neutral] 这类情绪标签里
+        if not text or text.strip().upper().lstrip("[").startswith("NONE"):  # 容忍NONE裹在情绪标签里
             return ""
         audit.reply(text, proactive=True)
         return text
 
     def _set_screen_watch(self, arguments: dict) -> str:
-        """开/关定时盯屏：给 focus 就开（默认 ~5 分钟一瞄），interval<=0 或不给 focus 就关。"""
+        """开关定时盯屏"""
         from desktop_pet.watcher import watcher
         focus = str(arguments.get("focus") or "").strip()
         interval = arguments.get("interval_minutes")
@@ -1282,7 +1269,7 @@ class Agent:
                 f"\"{foc}\". I'll start within a minute. Say 'stop watching' anytime to turn it off.)")
 
     def analyze_screen(self, focus: str) -> str:
-        """定时盯屏的单次执行：截屏+按 focus 问模型。截不到图回 WATCH_FAIL，没情况回空串（别每次都打扰）。"""
+        """定时盯屏单次执行 截屏问模型"""
         from desktop_pet.eyes import capture
         from desktop_pet.settings import CAPTURE_WINDOW
         from desktop_pet.watcher import WATCH_FAIL
@@ -1305,14 +1292,14 @@ class Agent:
             text = _strip_think_leak((resp.choices[0].message.content or "").strip())
         except Exception:
             return WATCH_FAIL
-        stripped = re.sub(r"^\s*\[\w+\]\s*", "", text).strip()  # 剥掉开头的 [emotion] 标签再判 NONE，否则永远判不出"没情况"
+        stripped = re.sub(r"^\s*\[\w+\]\s*", "", text).strip()  # 剥掉情绪标签再判NONE
         if not stripped or stripped.upper() == "NONE":
             return ""
         audit.reply(text, proactive=True)
         return text
 
     def reflect(self) -> None:
-        """一轮聊完后台默默复盘一次，沉淀记忆/人格。非阻塞，且信号量限只跑一个——抢不到就这轮不反思，不排队。"""
+        """一轮聊完后台复盘沉淀记忆"""
         if len(self._messages) <= 2:
             return
         if not self._turn_substantive:
@@ -1328,8 +1315,7 @@ class Agent:
             _REFLECT_SEMAPHORE.release()
 
     def _reflect(self, snapshot: list[dict]) -> None:
-        """后台线程体：让模型把这轮提炼成 JSON（经验/偏好/环境/日记/自我画像/该忘的），各取所需写进对应存储。
-        每类都逐项做了类型校验——模型给的 JSON 字段可能缺、可能类型不对，挨个挡一下别让脏数据进库。"""
+        """反思线程体 提炼json写进各存储"""
         try:
             reflect_msg = prompts.REFLECT_PROMPT + "\n\n[Your current self-portrait — evolve THIS gently, don't toss it]:\n" + (persona.get() or "(none yet — this is the first one you're forming)")
             conversation = snapshot + [{"role": "user", "content": reflect_msg}]
@@ -1370,7 +1356,7 @@ class Agent:
             _REFLECT_SEMAPHORE.release()
 
     def _append_images(self, images: list[str]) -> None:
-        """把新截图作为一条 user 消息塞进历史——塞之前先清掉旧图：多张高清截图叠着既费 token 又容易拿过期画面误判。"""
+        """新截图塞进历史 先清旧图"""
         self._drop_old_images()
         content: list[dict] = [{"type": "text", "text": "(screenshot below)"}]
         for url in images:
@@ -1378,7 +1364,7 @@ class Agent:
         self._messages.append({"role": "user", "content": content})
 
     def _drop_old_images(self) -> None:
-        """把历史里旧的图片消息退化成纯文本占位——但当轮用户自己发的那张图(turn_user_idx)留着，那是任务原料不能动。"""
+        """旧图片消息退化成占位 当轮用户图留着"""
         for idx, message in enumerate(self._messages):
             if idx == self._turn_user_idx:
                 continue
@@ -1392,7 +1378,7 @@ class Agent:
                 message["content"] = joined or "[older image omitted]"
 
     def _compose_user_content(self, text: str, attachments: object, context: str = ""):
-        """拼这条 user 消息：没附件就一段纯文本；有图就返回 OpenAI 的多模态 list；文件先读出文本拼进正文。"""
+        """拼user消息 有图走多模态list"""
         prefix = (context + "\n\n") if context else ""
         if not isinstance(attachments, list) or not attachments:
             return (prefix + text) if text else prefix.rstrip()
@@ -1416,8 +1402,7 @@ class Agent:
         return content
 
     def _ingest_and_read(self, files: list) -> str:
-        """附件文件双轨：一边后台异步全文入知识库（recall_docs 以后能召回），一边当场读前 6000 字直接喂进对话。
-        读不出文本的（二进制/不支持的格式）只留个说明，靠知识库那条路兜着。"""
+        """附件文件入知识库同时读前6000字喂对话"""
         if not files:
             return ""
         blocks: list[str] = []
@@ -1447,7 +1432,7 @@ class Agent:
 
     @staticmethod
     def _as_dict(message) -> dict:
-        """把流式拼回来的 assistant 消息转成能回灌历史的 dict——tool_calls 得照 OpenAI 的结构原样带上，下一轮才接得住工具结果。"""
+        """assistant消息转成历史dict"""
         data: dict = {"role": "assistant", "content": message.content or ""}
         if message.tool_calls:
             data["tool_calls"] = [

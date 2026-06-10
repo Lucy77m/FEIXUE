@@ -1,6 +1,6 @@
 # author: bdth
 # email: 2074055628@qq.com
-# 定义 Agent 可调用的全部工具(JSON schema)并把工具调用分发到各执行器
+# 定义agent全部工具 分发工具调用到执行器
 
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ class ToolResult:
 
 
 def _function(name: str, description: str, properties: dict, required: list[str]) -> dict:
-    """包一层 OpenAI function-calling 的工具 schema —— TOOLS 里全靠它，省得每条手写嵌套。"""
+    """包装工具schema"""
     return {
         "type": "function",
         "function": {
@@ -47,7 +47,7 @@ def _function(name: str, description: str, properties: dict, required: list[str]
     }
 
 
-# 鼠标系工具共用的 x/y 参数
+# 鼠标工具共用xy参数
 _XY = {
     "x": {"type": "integer", "description": "screen X, pixels"},
     "y": {"type": "integer", "description": "screen Y, pixels"},
@@ -576,8 +576,7 @@ TOOLS = [
 ]
 
 
-# 这些工具不碰共享的 UI/输入状态(纯读、跑子进程、走网络)，可以绕过 _DISPATCH_LOCK 真正并行 ——
-# 不在名单里的(鼠标/键盘/窗口/截屏那些)会互相抢全局光标和前台焦点，必须串行。
+# 不碰共享ui输入状态的工具 绕过锁并行跑
 _CONCURRENT_SAFE = frozenset(
     {"http_request", "read_file", "list_dir", "run_shell", "run_python", "run_skill",
      "web_search", "web_fetch", "search_code", "glob_files", "recall_docs", "list_docs",
@@ -586,7 +585,7 @@ _CONCURRENT_SAFE = frozenset(
      "install_package"}
 )
 
-# 从 TOOLS 里抽出每个工具的必填参数，dispatch 进来先比一遍 —— 比让执行器抛 KeyError 更早、报错也更准。
+# 从TOOLS抽必填参数 dispatch先比一遍
 _REQUIRED_ARGS: dict[str, tuple[str, ...]] = {
     t["function"]["name"]: tuple(t["function"]["parameters"].get("required") or ())
     for t in TOOLS
@@ -594,7 +593,7 @@ _REQUIRED_ARGS: dict[str, tuple[str, ...]] = {
 
 
 def _resolve_reminder_time(fire_at: str | None, in_minutes: float | None) -> datetime | None:
-    """把模型给的时间解析成绝对 datetime —— in_minutes 优先，否则按几种格式试 fire_at；都不认返回 None。"""
+    """时间解析成绝对datetime 不认返回None"""
     now = datetime.now()
     if in_minutes is not None:
         try:
@@ -603,28 +602,28 @@ def _resolve_reminder_time(fire_at: str | None, in_minutes: float | None) -> dat
             return None
     if not fire_at:
         return None
-    text = fire_at.strip().replace("T", " ")  # 容忍 ISO 的 "2026-01-01T08:00" 写法
+    text = fire_at.strip().replace("T", " ")  # 容忍iso写法
     # 带日期的当成绝对时刻
     for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y/%m/%d %H:%M"):
         try:
             return datetime.strptime(text, fmt)
         except ValueError:
             pass
-    # 只给了 HH:MM —— 落到今天这个点；已经过了就顺到明天，不然 "提醒我 8 点" 会立刻触发。
+    # 只给时分就落到今天 过了顺到明天
     for fmt in ("%H:%M:%S", "%H:%M"):
         try:
             clock = datetime.strptime(text, fmt).time()
         except ValueError:
             continue
         fire = now.replace(hour=clock.hour, minute=clock.minute, second=clock.second, microsecond=0)
-        if fire < now.replace(second=0, microsecond=0):  # 比到分钟，避免把"就这一分钟"误判成已过
+        if fire < now.replace(second=0, microsecond=0):  # 比到分钟
             fire += timedelta(days=1)
         return fire
     return None
 
 
 def _parse_repeat(s: str | None) -> str:
-    """把模型给的 repeat 归一成存储格式：daily / weekly / interval:N。"""
+    """repeat归一成存储格式"""
     s = (s or "").strip().lower()
     if not s:
         return ""
@@ -717,26 +716,26 @@ def _stop_background_task(task_id) -> str:
 def dispatch(
     name: str, arguments: dict, *, shell_session=None, py_session=None
 ) -> ToolResult:
-    """工具调用总入口 —— 并发安全的放行直跑，其余串行上锁，异常全兜成文字回给模型。"""
-    # 必填参数缺了就直接退回，让模型补 —— 别等执行器里炸 KeyError，报错说不清缺哪个。
+    """工具调用总入口 异常兜成文字"""
+    # 必填参数缺了直接退回
     missing = [k for k in _REQUIRED_ARGS.get(name, ()) if k not in (arguments or {})]
     if missing:
         return ToolResult(f"[tool {name} is missing required argument(s): {', '.join(missing)}; fill in and retry]")
     try:
         if name in _CONCURRENT_SAFE:
             return _dispatch_impl(name, arguments, shell_session=shell_session, py_session=py_session)
-        with _DISPATCH_LOCK:  # 会动光标/焦点的工具串行，免得并发互相打架
+        with _DISPATCH_LOCK:  # 动光标焦点的工具串行
             return _dispatch_impl(name, arguments, shell_session=shell_session, py_session=py_session)
     except Exception as exc:
-        # 工具炸了不往上抛 —— 包成一行文字回给模型，让它自己看错误重试，别把整轮对话带崩。
+        # 工具炸了包成文字回给模型
         return ToolResult(f"[tool {name} failed: {type(exc).__name__}: {exc}]")
 
 
 def _dispatch_impl(
     name: str, arguments: dict, *, shell_session=None, py_session=None
 ) -> ToolResult:
-    """按工具名分发到各执行器 —— 一长串 if，新增工具就在这加一条；mcp__ 前缀的统一转交 mcp_hub。"""
-    python = py_session or _python  # 后台任务会传自己独立的 py 会话进来，没传就用进程级那个常驻的
+    """按工具名分发到执行器"""
+    python = py_session or _python  # 没传就用进程级常驻会话
     if name == "run_shell":
         return ToolResult(
             run_shell(arguments["command"], arguments.get("shell", "powershell"), session=shell_session)
@@ -771,7 +770,7 @@ def _dispatch_impl(
         return ToolResult(web.web_fetch(arguments["url"]))
     if name == "install_package":
         result = install_package(arguments["name"])
-        python.refresh_native_dlls()  # 新装的包可能带 .pyd/DLL，刷一下让常驻解释器当场 import 得到，不用重启会话
+        python.refresh_native_dlls()  # 刷dll让新装的包当场import得到
         return ToolResult(result)
     if name == "system_memory":
         return ToolResult(sysmem.system_memory(arguments.get("top", 12)))
@@ -786,7 +785,7 @@ def _dispatch_impl(
         if raw_region:
             try:
                 vals = tuple(int(v) for v in raw_region.split(","))
-                if len(vals) != 4:  # 必须正好 left,top,width,height 四个，多了少了都拒
+                if len(vals) != 4:  # 必须正好四个值
                     raise ValueError
                 region = vals
             except ValueError:
@@ -797,8 +796,7 @@ def _dispatch_impl(
             return ToolResult(f"[{exc}]")
         if cap.region:
             l, t, w, h = cap.region
-            # 给模型一句换算公式，好把放大图里量的点折回全屏坐标去点：
-            # 原生分辨率没被缩放(图尺寸==区域尺寸)就只是平移，直接加左上角偏移；被缩放了才要按比例还原。
+            # 给模型坐标换算公式
             mapping = (
                 f"ADD ({l}, {t}) to coordinates you measure in this zoomed image"
                 if (cap.width, cap.height) == (w, h)
@@ -914,20 +912,20 @@ def _dispatch_impl(
         if code is None:
             return ToolResult(f"No skill named \"{arguments['name']}\"; use list_skills to see what's available.")
         raw_args = arguments.get("args")
-        if isinstance(raw_args, str):  # 模型有时把 args 当字符串塞 JSON 进来，解一层
+        if isinstance(raw_args, str):  # args是字符串就解一层json
             try:
                 raw_args = json.loads(raw_args)
             except (ValueError, TypeError):
                 raw_args = {}
         if not isinstance(raw_args, dict):
             raw_args = {}
-        # 把入参用 repr 拼成 args = {...} 当头注入 —— 技能代码约定从全局 args 读参数。repr 保证字面量安全、不被当代码执行。
+        # 入参用repr注入成全局args
         script = f"args = {raw_args!r}\n\n{code}"
         return ToolResult(python.run(script))
     if name == "edit_skill":
         return ToolResult(skills.edit(arguments["name"], arguments["code"]))
     if name == "list_skills":
         return ToolResult(skills.listing())
-    if name.startswith("mcp__"):  # 外挂 MCP 工具不在上面那串里，按前缀整体甩给 mcp_hub
+    if name.startswith("mcp__"):  # mcp前缀甩给mcp_hub
         return ToolResult(mcp_hub.call(name, arguments))
     return ToolResult(f"[unknown tool: {name}]")

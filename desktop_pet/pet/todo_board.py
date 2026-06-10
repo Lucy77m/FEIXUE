@@ -1,6 +1,6 @@
 # author: bdth
 # email: 2074055628@qq.com
-# 任务清单浮窗：常驻显示当前 plan 的待办清单（卡片 + 进度条 + 逐项状态）。
+# 任务清单浮窗 常驻显示当前 plan 的待办 卡片进度条和逐项状态
 
 from __future__ import annotations
 
@@ -99,7 +99,7 @@ class TodoBoard(QWidget):
         outer.addWidget(self._card)
 
     def set_markdown(self, markdown: str, pet: QWidget | None = None, screen=None) -> None:
-        """用 progress.render_plan 的输出更新清单；空/无步骤则隐藏。"""
+        """按 markdown 更新清单 空则隐藏"""
         parsed = self._parse(markdown)
         if parsed is None:
             self.hide()
@@ -108,8 +108,8 @@ class TodoBoard(QWidget):
         done = sum(1 for status, _ in items if status == "done")
         total = sum(1 for status, _ in items if status in ("done", "doing", "todo"))
 
-        # plain 行不计进度——只有 done/doing/todo 三态进分母，否则纯说明文字会把百分比拉歪。
-        self._title.setText(title.upper() if title.isascii() else title)  # 纯英文标题转大写当 LOGO；中文保留原样（upper 对中文无效还难看）
+        # plain 行不计进度
+        self._title.setText(title.upper() if title.isascii() else title)  # 纯英文标题转大写 中文原样
         self._count.setText(f"{done}/{total}" if total else "")
         self._count.setVisible(bool(total))
         self._bar.setVisible(bool(total))
@@ -127,7 +127,7 @@ class TodoBoard(QWidget):
             place_beside_pet(self, pet, screen, prefer="right")
 
     def follow(self, pet: QWidget, screen) -> None:
-        """宠物移动时跟着贴过去——拖 Mochi 时浮窗同步走。"""
+        """宠物移动时跟着贴过去"""
         if self.isVisible():
             place_beside_pet(self, pet, screen, prefer="right")
 
@@ -135,15 +135,15 @@ class TodoBoard(QWidget):
         self.hide()
 
     def _clear_steps(self) -> None:
-        """清掉旧步骤行 —— 每次刷新整列重建，不做 diff。"""
+        """清掉旧步骤行"""
         while self._steps.count():
             item = self._steps.takeAt(0)
             w = item.widget()
             if w is not None:
-                w.deleteLater()  # 不能直接 del，交给 Qt 事件循环回收，否则正在绘制时炸
+                w.deleteLater()  # 交给 qt 事件循环回收
 
     def _make_row(self, status: str, text: str) -> QFrame:
-        """一行待办，按四态(done/doing/todo/plain)换点和文字样式。"""
+        """一行待办 按四态换点和文字样式"""
         row = QFrame(objectName="rowDoing" if status == "doing" else "rowPlain")
         lay = QHBoxLayout(row)
         lay.setContentsMargins(8, 4, 8, 4)
@@ -180,15 +180,15 @@ class TodoBoard(QWidget):
 
     @staticmethod
     def _parse(markdown: str) -> "tuple[str, list[tuple[str, str]]] | None":
-        """首行当标题，其余行按行首图标(●→○)分状态；无图标的归 plain。"""
+        """首行当标题 其余按行首图标分状态"""
         lines = [ln for ln in (markdown or "").split("\n") if ln.strip()]
         if not lines:
             return None
-        title = lines[0].replace("*", "").strip() or "计划"  # 去掉 **加粗** 标记；全空时兜底"计划"
+        title = lines[0].replace("*", "").strip() or "计划"  # 去掉加粗标记 全空时兜底计划
         items: list[tuple[str, str]] = []
         for ln in lines[1:]:
             s = ln.strip()
-            status = _ICON_STATUS.get(s[0])  # 只认首字符的图标，认不出就当普通文字行
+            status = _ICON_STATUS.get(s[0])  # 只认首字符图标 认不出当普通行
             if status is not None:
                 items.append((status, s[1:].strip()))
             else:

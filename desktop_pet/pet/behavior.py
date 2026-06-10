@@ -1,6 +1,6 @@
 # author: bdth
 # email: 2074055628@qq.com
-# 桌宠行为选择器：按情绪(效价/唤醒)、亲密度、稀有度和近期去重，加权随机挑选行为动作
+# 桌宠行为选择器 按情绪亲密度稀有度和近期去重加权随机挑行为
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ _RARITY_WEIGHT = (1.0, 0.45, 0.15)
 
 
 class BehaviorSelector:
-    """情绪驱动的行为加权随机器：VA 亲和度 × 稀有度 × 近期去重 × 亲密度门控 → 挑一个动作。"""
+    """情绪驱动的行为加权随机器"""
 
     def __init__(self) -> None:
         self._valence = 0.0
@@ -36,7 +36,7 @@ class BehaviorSelector:
         candidates: tuple[str, ...] | None = None,
         mood: tuple[float, float] | None = None,
     ) -> str | None:
-        """挑一个行为名，没候选/全被过滤掉返回 None。candidates 显式传则不查注册表，mood 临时覆盖当前情绪。"""
+        """挑一个行为名 没候选返回None"""
         names = candidates if candidates is not None else registry.names(category)
         valence, arousal = mood if mood is not None else (self._valence, self._arousal)
         scored = [
@@ -51,18 +51,18 @@ class BehaviorSelector:
         return name
 
     def _score(self, spec: registry.BehaviorSpec, name: str, valence: float, arousal: float) -> float:
-        """单个行为的权重：四个乘子相乘，任一项小就被压下去。"""
+        """算单个行为的权重 四个乘子相乘"""
         dv = valence - spec.valence
         da = arousal - spec.arousal
-        affinity = math.exp(-(dv * dv + da * da) / (2 * _VA_SIGMA * _VA_SIGMA))  # VA 平面上离当前情绪越远衰减越快(高斯)
-        rarity = _RARITY_WEIGHT[min(spec.rarity, len(_RARITY_WEIGHT) - 1)]  # rarity 是档位下标，超出表长就钳到最稀有那档兜底
-        recency = _RECENCY_PENALTY if name in self._recent else 1.0  # 最近 _RECENT_N 次出过的狠狠降权，避免连着重复
-        intimacy = 1.0 - spec.intimacy * _INTIMACY_DAMP * (1.0 - self._rapport)  # 亲密向行为靠 rapport 解锁，rapport 低时几乎不出
+        affinity = math.exp(-(dv * dv + da * da) / (2 * _VA_SIGMA * _VA_SIGMA))  # 离当前情绪越远高斯衰减
+        rarity = _RARITY_WEIGHT[min(spec.rarity, len(_RARITY_WEIGHT) - 1)]  # rarity档位下标 超出钳到最后一档
+        recency = _RECENCY_PENALTY if name in self._recent else 1.0  # 最近出过的降权
+        intimacy = 1.0 - spec.intimacy * _INTIMACY_DAMP * (1.0 - self._rapport)  # 亲密行为靠rapport解锁
         return spec.weight * rarity * affinity * recency * intimacy
 
     @staticmethod
     def _weighted_pick(scored: list[tuple[str, float]]) -> str:
-        """按分数轮盘赌选名。全是 0(被去重/亲密度压没了)就退化成均匀随机。"""
+        """按分数轮盘赌选名 全0退化成均匀随机"""
         total = sum(score for _, score in scored)
         if total <= 0.0:
             return random.choice([name for name, _ in scored])
@@ -72,7 +72,7 @@ class BehaviorSelector:
             upto += score
             if r <= upto:
                 return name
-        return scored[-1][0]  # 浮点累加误差导致没命中时，落到最后一个兜底
+        return scored[-1][0]  # 浮点误差没命中落最后一个兜底
 
 
 selector = BehaviorSelector()

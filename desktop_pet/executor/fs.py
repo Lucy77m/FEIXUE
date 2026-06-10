@@ -1,6 +1,6 @@
 # author: bdth
 # email: 2074055628@qq.com
-# 文件系统执行器:提供读写、列目录、编辑、正则搜索和 glob 等文件操作工具
+# 文件系统执行器 读写 列目录 编辑 正则搜索 glob
 
 from __future__ import annotations
 
@@ -25,8 +25,7 @@ _TEXT_EXT = frozenset(
 
 
 def _read_with_encoding(target: Path) -> tuple[str, str]:
-    """读文本并猜编码 → (text, encoding)。utf-8-sig 优先(顺手吃掉 BOM)，再退 gbk —— 国内机器一堆
-    记事本/老工具存的 gbk 源码；都不成才 utf-8 + replace 硬解，保证 edit 回写时编码不串。"""
+    """读文本并猜编码"""
     raw = target.read_bytes()
     for encoding in ("utf-8-sig", "gbk"):
         try:
@@ -37,7 +36,7 @@ def _read_with_encoding(target: Path) -> tuple[str, str]:
 
 
 def read_file(path: str, offset: int = 0) -> str:
-    """读文件，超 _MAX_READ 就分片：offset 从字符位续读，footer 带下一段 offset 让模型自己翻页。"""
+    """读文件 超长分片 offset 续读"""
     target = Path(path).expanduser()
     if not target.is_file():
         return f"[not a file or doesn't exist: {path}]"
@@ -46,7 +45,7 @@ def read_file(path: str, offset: int = 0) -> str:
     except Exception as exc:
         return f"[read failed: {exc}]"
     try:
-        off = max(0, int(offset))  # 模型常把 offset 传成字符串/null，转不了就当从头读
+        off = max(0, int(offset))  # offset 转不了就当从头读
     except (TypeError, ValueError):
         off = 0
     total = len(text)
@@ -97,12 +96,12 @@ def list_dir(path: str = ".") -> str:
 
 
 def _norm_eol(s: str) -> str:
-    """匹配只在 \\n 空间里做 —— CRLF/CR 先抹平，省得 old_string 因换行风格不同对不上。"""
+    """抹平 CRLF CR 统一成 LF"""
     return s.replace("\r\n", "\n").replace("\r", "\n")
 
 
 def _fit_indent(new_lines: list[str], old_first: str, file_first: str) -> list[str]:
-    """按行容错命中(忽略了行首缩进)时，把 new 的缩进对齐到文件里实际的缩进。"""
+    """把 new 缩进对齐到文件实际缩进"""
     oind = old_first[: len(old_first) - len(old_first.lstrip())]
     find = file_first[: len(file_first) - len(file_first.lstrip())]
     if oind == find:
@@ -121,8 +120,7 @@ def _fit_indent(new_lines: list[str], old_first: str, file_first: str) -> list[s
 
 
 def _fuzzy_replace(text: str, old: str, new: str, replace_all: bool):
-    """精确匹配失败后的兜底：按行比对，忽略行尾空白；再不中就连行首缩进也忽略，
-    并把 new 重新缩进到文件实际缩进。返回 (updated, n) / None(没命中) / 'AMBIGUOUS'。"""
+    """按行容错替换 精确匹配失败后的兜底"""
     flines = text.split("\n")
     olines = old.split("\n")
     nlines = new.split("\n") if new else []
@@ -151,8 +149,7 @@ def _fuzzy_replace(text: str, old: str, new: str, replace_all: bool):
 
 
 def edit_file(path: str, old: str, new: str, replace_all: bool = False) -> str:
-    """改文件：先精确替换；多处命中又没给 replace_all 就报歧义不动手。精确不中再走 _fuzzy_replace
-    按行容错。回写时保留原编码和原换行风格。"""
+    """改文件 先精确替换不中再按行容错"""
     target = Path(path).expanduser()
     if not target.is_file():
         return f"[not a file or doesn't exist: {path}]"
@@ -162,7 +159,7 @@ def edit_file(path: str, old: str, new: str, replace_all: bool = False) -> str:
         raw, encoding = _read_with_encoding(target)
     except Exception as exc:
         return f"[read failed: {exc}]"
-    nl = "\r\n" if "\r\n" in raw else "\n"  # 记住原换行：匹配统一在 \n 里做，回写再换回去，别把整文件刷成 LF 炸出满屏 diff
+    nl = "\r\n" if "\r\n" in raw else "\n"  # 记住原换行 回写时还原
     text, old_n, new_n = _norm_eol(raw), _norm_eol(old), _norm_eol(new)
 
     count = text.count(old_n)
@@ -188,8 +185,7 @@ def edit_file(path: str, old: str, new: str, replace_all: bool = False) -> str:
 
 
 def _iter_files(base: Path):
-    """走目录树，原地剪掉 _IGNORE_DIRS —— dirs[:] 切片就地改 os.walk 才会真的不下钻，
-    比 rglob('*') 全捞完再按 parts 过滤省掉整个 node_modules/.git 的遍历。"""
+    """走目录树 剪掉 _IGNORE_DIRS 不下钻"""
     for root, dirs, files in os.walk(base):
         dirs[:] = [d for d in dirs if d not in _IGNORE_DIRS]
         for name in files:
@@ -197,7 +193,7 @@ def _iter_files(base: Path):
 
 
 def search_code(pattern: str, path: str = ".", max_results: int = _MAX_HITS) -> str:
-    """正则逐行搜 —— 只碰 _TEXT_EXT 白名单(跳过二进制/图片)，命中满 max_results 就截断返回。"""
+    """正则逐行搜文本文件"""
     try:
         regex = re.compile(pattern)
     except re.error as exc:
@@ -230,7 +226,7 @@ def glob_files(pattern: str, path: str = ".", max_results: int = _MAX_ENTRIES) -
     try:
         for file in _iter_files(base):
             rel = file.relative_to(base).as_posix()
-            # 两头都试：纯文件名(*.py)和相对路径(sub/*.py)都能中；rel 统一 posix 斜杠，免得 Windows 反斜杠匹配不上
+            # 纯文件名和相对路径都试
             if not (fnmatch(file.name, pattern) or fnmatch(rel, pattern)):
                 continue
             matches.append(str(file))

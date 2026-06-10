@@ -1,6 +1,6 @@
 # author: bdth
 # email: 2074055628@qq.com
-# 语音朗读(TTS)：可切换 Edge TTS / 系统 SAPI 两种后端。
+# 语音朗读 edge tts 和系统 sapi 两种后端
 
 from __future__ import annotations
 
@@ -56,12 +56,12 @@ _EMOJI = re.compile(
 
 
 def _clean(text: str) -> str:
-    """念之前洗一遍——Markdown 符号、emoji、链接 URL 念出来全是噪音，链接只留显示文字。"""
+    """念之前洗掉 markdown emoji 和链接"""
     text = _LINK.sub(r"\1", text or "")
     text = _TAG.sub("", text)
     text = _MD.sub("", text)
     text = _EMOJI.sub("", text)
-    return " ".join(text.split())[:600]  # 截 600 字 —— 单句念太长既慢又占内存，超出的直接砍
+    return " ".join(text.split())[:600]
 
 
 def is_enabled() -> bool:
@@ -94,7 +94,7 @@ _edge_ok: "bool | None" = None
 
 
 def edge_available() -> bool:
-    """探一次 import 就缓存——没装 edge-tts 时别每句念都重试。"""
+    """探一次 edge tts 装没装并缓存"""
     global _edge_ok
     if _edge_ok is None:
         try:
@@ -116,11 +116,10 @@ def _ensure() -> None:
 
 
 def _select_voice(sp) -> None:
-    """SAPI 兜底分支用：按描述里的关键词挑一个中文嗓，挑不到就用系统默认。"""
+    """给 sapi 挑一个中文嗓"""
     try:
         for v in sp.GetVoices():
             desc = v.GetDescription() or ""
-            # 关键词覆盖中英文描述 + 几个常见中文 SAPI 嗓名(系统语言不同描述串也不同)
             if any(k in desc for k in ("Chinese", "中文", "Huihui", "Yaoyao", "Kangkang", "Xiaoxiao")):
                 sp.Voice = v
                 return
@@ -129,8 +128,7 @@ def _select_voice(sp) -> None:
 
 
 def _synth_edge(text: str, voice_id: str, rate: int) -> tuple[str, list[tuple[float, int]]] | None:
-    """Edge TTS 合成：用 stream() 同时收音频与逐词时间戳。
-    返回 (mp3 路径, [(词结束的播放毫秒, 该处对应到 text 的累计字符数), ...]) 或 None。"""
+    """edge tts 合成 收音频和逐词时间戳"""
     import asyncio
     import edge_tts
 
@@ -146,7 +144,7 @@ def _synth_edge(text: str, voice_id: str, rate: int) -> tuple[str, list[tuple[fl
             if kind == "audio" and chunk.get("data"):
                 audio.extend(chunk["data"])
             elif kind == "WordBoundary":
-                # offset 是 100ns 为单位的 tick，/10000 才是毫秒
+                # offset 单位 100ns 转毫秒
                 words.append((chunk.get("offset", 0) / 10000.0, chunk.get("text", "")))
 
     async def _go() -> None:
@@ -162,7 +160,7 @@ def _synth_edge(text: str, voice_id: str, rate: int) -> tuple[str, list[tuple[fl
     with open(path, "wb") as fh:
         fh.write(bytes(audio))
 
-    # WordBoundary 的"词"对不上原文字符(中文一个边界常盖好几个字)，所以按词长占比把进度摊回 text 的字符数
+    # 按词长占比把进度摊回 text 字符数
     total_wlen = sum(len(w) for _, w in words) or 1
     n = len(text)
     cum = 0
@@ -174,7 +172,7 @@ def _synth_edge(text: str, voice_id: str, rate: int) -> tuple[str, list[tuple[fl
 
 
 def _chars_at(pos_ms: float, marks: list[tuple[float, int]], length_ms: int, n: int) -> int:
-    """按真实播放位置 pos_ms 算出应显示到第几个字符。有逐词锚点就分段线性插值，没有就整体线性。"""
+    """按播放位置算该显示到第几个字符"""
     if not marks:
         if length_ms <= 0:
             return n
@@ -190,11 +188,11 @@ def _chars_at(pos_ms: float, marks: list[tuple[float, int]], length_ms: int, n: 
 
 
 def _play_synced(text: str, path: str, marks, on_start, on_progress) -> None:
-    """MCI 播放合成好的音频；按真实播放位置驱动 on_progress(已念字符数)，实现音画逐词跟随。"""
+    """mci 播放音频并按位置驱动 on_progress"""
     import time as _t
 
     _mci_close()
-    # 先用 mpegvideo 设备开 mp3(能读 position/length 做跟随)，开不了再退回让 MCI 自己猜设备
+    # 先用 mpegvideo 开 开不了退回默认设备
     if _mci(f'open "{path}" type mpegvideo alias mochitts') != 0:
         if _mci(f'open "{path}" alias mochitts') != 0:
             raise RuntimeError("MCI open failed")
@@ -263,7 +261,7 @@ _SVSF_PURGE = 3
 
 
 def _sapi_speak(sp, text: str) -> None:
-    """异步念 + 轮询，让 flush() 能中途打断(_stop)。"""
+    """异步念加轮询 支持中途打断"""
     try:
         sp.Speak(text, _SVSF_ASYNC)
     except Exception:
@@ -284,14 +282,14 @@ def _sapi_speak(sp, text: str) -> None:
 
 
 def _worker() -> None:
-    """TTS 唯一工作线程：串行消费队列逐句念。SAPI 的 COM 必须在本线程里初始化，所以懒到这里建。"""
+    """tts 工作线程 串行消费队列逐句念"""
     sp = None
     sapi_ready = False
 
     def sapi():
         nonlocal sp, sapi_ready
         if not sapi_ready:
-            sapi_ready = True  # 不管建没建成都置位，失败了也别每句重试 Dispatch
+            sapi_ready = True  # 失败也置位 不每句重试
             try:
                 import pythoncom
                 import win32com.client
@@ -322,7 +320,7 @@ def _worker() -> None:
         started = False
         if text and not _stop.is_set():
             played = False
-            # 优先 Edge(有逐词跟随)；选了系统嗓(voice 空)或 Edge 合成失败时，回落到 SAPI
+            # 优先 edge 失败回落 sapi
             if voice and edge_available():
                 try:
                     synth = _synth_edge(text, voice, rate)
@@ -374,7 +372,7 @@ def speak(text: str) -> None:
 
 
 def speak_one(text: str, on_start=None, on_progress=None, on_done=None) -> None:
-    """念一句，带逐词跟随回调。三个 cb 都在 TTS 线程触发，要碰 UI 自己 marshal 回去。"""
+    """念一句 带逐词跟随回调"""
     cleaned = _clean(text) if _enabled else ""
     if not _enabled or not cleaned:
         for cb in (on_start, on_done):
@@ -388,7 +386,7 @@ def speak_one(text: str, on_start=None, on_progress=None, on_done=None) -> None:
 
 
 def preview(text: str, voice: str, rate, on_done=None) -> None:
-    """试听：用指定音色/语速念一句，无视开关、也不改动当前设置。"""
+    """用指定音色语速试听一句"""
     try:
         rate = max(-50, min(50, int(rate)))
     except (TypeError, ValueError):
@@ -402,7 +400,7 @@ def preview(text: str, voice: str, rate, on_done=None) -> None:
 
 
 def flush() -> None:
-    """置打断信号(停掉正在念的那句) + 清空待播队列，并补调被丢弃项的 on_done。"""
+    """打断当前句并清空队列"""
     _stop.set()
     drained = []
     try:
@@ -420,7 +418,7 @@ def flush() -> None:
 
 
 def shutdown() -> None:
-    """退出前调：停掉正在念的、清队列、让 worker 在自己的线程里 CoUninitialize 后退出。"""
+    """退出前停掉朗读并收掉 worker"""
     _shutdown.set()
     _stop.set()
     try:

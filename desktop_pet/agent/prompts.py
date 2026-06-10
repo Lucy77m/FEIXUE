@@ -1,6 +1,6 @@
 # author: bdth
 # email: 2074055628@qq.com
-# 集中存放 Agent 的系统提示词与各类动态提示词构造函数(语言/时间/心情/提醒等)
+# 存放系统提示词和动态提示词构造函数
 
 from datetime import datetime
 

@@ -1,6 +1,6 @@
 # author: bdth
 # email: 2074055628@qq.com
-# 桌宠聊天显示组件：打字机气泡、思考气泡、思绪粒子与输入框
+# 聊天显示组件 打字机气泡 思考气泡 思绪粒子 输入框
 
 from __future__ import annotations
 
@@ -271,7 +271,7 @@ class SpeechText(QWidget):
         self._paced = paced
         self._queue = [c for c in (_clean(s) for s in chunks) if c]
         if not self._queue:
-            # 去标点后整段空了(纯标点/纯符号那句),退回保留标点版,别让气泡哑掉。
+            # 去标点后空了退回保留标点版
             self._queue = [c for c in (_clean_keep_punct(s) for s in chunks) if c]
         if not self._queue:
             self.hide()
@@ -302,7 +302,7 @@ class SpeechText(QWidget):
         self.talking.emit(False)
 
     def advance(self) -> None:
-        """翻到下一句(或末句则停留后收起)。"""
+        """翻到下一句"""
         if not self._paced:
             return
         if self._awaiting_advance:
@@ -341,7 +341,7 @@ class SpeechText(QWidget):
             self.update()
 
     def begin_chunk(self) -> None:
-        """音频开始出声：启动本地打字机兜底（SAPI / 无逐词进度时）。若随后来了 set_progress，会被接管。"""
+        """音频开始出声时启动本地打字机兜底"""
         if not self._paced or not self._awaiting_start:
             return
         self._awaiting_start = False
@@ -349,7 +349,7 @@ class SpeechText(QWidget):
             self._type_timer.start(_TYPE_MS)
 
     def set_progress(self, shown: int) -> None:
-        """按音频真实播放进度把文字显示到第 shown 个字符（逐词同步，接管本地打字机）。"""
+        """按音频播放进度显示文字"""
         if not self._paced:
             return
         self._awaiting_start = False
@@ -364,7 +364,7 @@ class SpeechText(QWidget):
             self._on_display_complete()
 
     def _on_display_complete(self) -> None:
-        """一句显示完成（打字机跑完 或 音频进度到末尾）后的推进。"""
+        """一句显示完成后的推进"""
         self._type_timer.stop()
         if self._awaiting_advance:
             return
@@ -506,12 +506,12 @@ class ThoughtBubble(QWidget):
         self._timer.timeout.connect(self._tick)
 
     def pop(self, text: str, pet: QWidget) -> None:
-        """一次性提示,向上飘并淡出。"""
+        """一次性提示 向上飘并淡出"""
         self._steady = False
         self._begin(text, pet, fresh=True)
 
     def show_step(self, text: str, pet: QWidget) -> None:
-        """进度标签:贴在头部就地换文字,停止更新后才淡出。"""
+        """进度标签 贴头部就地换文字 停更后淡出"""
         fresh = not (self.isVisible() and self._timer.isActive() and self._steady)
         self._steady = True
         self._steady_left = _BUBBLE_STEP_HOLD
@@ -738,7 +738,7 @@ def _encode_b64(img: QImage, fmt: str, quality: int) -> str:
 
 
 def _image_to_data_url(image: QImage) -> str:
-    """超 1568 边长先缩(省 token)，PNG 编码过 2MB 就退 JPEG 逐档降质。"""
+    """图片转data url 超边长先缩 png过大退jpeg降质"""
     img = image
     if img.width() > _IMG_MAX_SIDE or img.height() > _IMG_MAX_SIDE:
         img = img.scaled(
@@ -765,7 +765,7 @@ def _elide(name: str) -> str:
 
 
 class _Editor(QTextEdit):
-    """多行文本域：Enter 发送 / Shift+Enter 换行 / Esc 关闭；自适应高度；粘贴&拖入图片或文件。"""
+    """多行文本域 自适应高度 支持粘贴拖入图片文件"""
 
     submit = Signal()
     escape = Signal()
@@ -786,7 +786,7 @@ class _Editor(QTextEdit):
         self.setTabChangesFocus(True)
         self.setAcceptDrops(True)
         self.setFixedHeight(self._MIN_H)
-        # contentsChanged 改高度会再触发 contentsChanged —— 隔一拍(singleShot 0)走,断掉这个递归且合并连打的多次改动。
+        # 隔一拍再调高度 断开contentsChanged递归
         self._resize_timer = QTimer(self)
         self._resize_timer.setSingleShot(True)
         self._resize_timer.timeout.connect(self._apply_height)
@@ -863,7 +863,7 @@ class _Editor(QTextEdit):
 
 
 class _Chip(QFrame):
-    """附件芯片：图片缩略图或文件图标 + 名称 + 删除叉。"""
+    """附件芯片"""
 
     removed = Signal(object)
 
@@ -893,7 +893,7 @@ class _Chip(QFrame):
 
 
 class InputBox(QWidget):
-    """点击桌宠弹出的强力输入框：多行自适应 + 粘贴/拖拽图片(多模态) + 附带文件(进知识库)。"""
+    """点击桌宠弹出的输入框"""
 
     submitted = Signal(str, object)
 
@@ -1028,7 +1028,7 @@ class InputBox(QWidget):
                 image = QImage(str(p))
                 if not image.isNull():
                     data_url = _image_to_data_url(image)
-                    if self._has_image(data_url):  # 同一张图粘一次又拖一次,按 data_url 去重(同内容编码必相同)
+                    if self._has_image(data_url):  # 按data_url去重
                         continue
                     self._attachments.append({
                         "kind": "image", "data_url": data_url,
@@ -1095,7 +1095,7 @@ class InputBox(QWidget):
         text = self._editor.toPlainText().strip()
         if not text and not self._attachments:
             return
-        # thumb 是 QPixmap,只给芯片显示用;往下游(序列化/发模型)传之前必须剔掉。
+        # thumb只给芯片显示 往下游传之前剔掉
         payload = [
             {k: v for k, v in item.items() if k != "thumb"}
             for item in self._attachments
@@ -1106,7 +1106,7 @@ class InputBox(QWidget):
         self.submitted.emit(text, payload)
 
     def _sync_geometry(self) -> None:
-        # 隔一拍再量:芯片增删/编辑器变高这一刻 layout 还没跑完,当场 adjustSize 会拿到旧尺寸。
+        # 隔一拍等layout跑完再量尺寸
         QTimer.singleShot(0, self._apply_geometry)
 
     def _apply_geometry(self) -> None:

@@ -1,10 +1,7 @@
-﻿# Mochi 一键打包（Windows）。
-#   产物 1：dist\Mochi\Mochi.exe        —— 目录版(整个 dist\Mochi\ 一起拷)
-#   产物 2：dist\MochiSetup.exe         —— 安装程序(单文件，双击安装；需先装 Inno Setup)
-# 用法： .\build.ps1
+﻿# mochi一键打包 产出目录版和安装程序
 $ErrorActionPreference = "Stop"
 
-# 版本号单一真源：desktop_pet\__init__.py 的 __version__。发版只改它一处，打包自动同步到安装器。
+# 版本号从__init__.py读
 $ver = (Select-String -Path "desktop_pet\__init__.py" -Pattern '__version__\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
 if (-not $ver) { Write-Host "✗ 读不到 __version__（desktop_pet\__init__.py）" -ForegroundColor Red; exit 1 }
 Write-Host "打包版本：v$ver" -ForegroundColor Cyan
@@ -19,7 +16,7 @@ if (Test-Path dist) { Remove-Item dist -Recurse -Force }
 Write-Host "[3/6] 生成应用图标 mochi.ico（Mochi 自己的脸）..." -ForegroundColor Cyan
 $env:QT_QPA_PLATFORM = "offscreen"
 uv run python -c "from PySide6.QtWidgets import QApplication; QApplication([]); from desktop_pet.pet.icon import save_ico; save_ico('mochi.ico')"
-Remove-Item Env:QT_QPA_PLATFORM -ErrorAction SilentlyContinue  # 别把 offscreen 泄漏给同会话后续命令（否则之后在同窗口跑 main.py 会无窗口）
+Remove-Item Env:QT_QPA_PLATFORM -ErrorAction SilentlyContinue  # 别把offscreen泄漏给后续命令
 
 Write-Host "[4/6] 打包中（PyInstaller，首次较慢）..." -ForegroundColor Cyan
 uv run pyinstaller mochi.spec --noconfirm
@@ -32,11 +29,11 @@ if ($built) {
     $zip = Join-Path $env:TEMP "mochi-py-embed.zip"
     curl.exe -L --ssl-no-revoke -o $zip "https://www.python.org/ftp/python/$pyVer/python-$pyVer-embed-amd64.zip"
     Expand-Archive $zip -DestinationPath $rt -Force
-    # embeddable 默认禁用 site-packages，pip 装的库才 import 得到——打开它
+    # 打开site-packages
     $pth = Get-ChildItem "$rt\python*._pth" | Select-Object -First 1
     (Get-Content $pth.FullName) -replace '#\s*import site', 'import site' | Set-Content $pth.FullName
     Add-Content $pth.FullName "Lib\site-packages"
-    # 引导 pip
+    # 引导pip
     $getpip = Join-Path $env:TEMP "get-pip.py"
     curl.exe -L --ssl-no-revoke -o $getpip "https://bootstrap.pypa.io/get-pip.py"
     & "$rt\python.exe" $getpip --no-warn-script-location 2>&1 | Out-Null
@@ -46,7 +43,7 @@ if ($built) {
 
 $setupMade = $false
 if ($built -and (Test-Path "dist\Mochi\Mochi.exe")) {
-    # 找 Inno Setup 的命令行编译器 ISCC.exe
+    # 找ISCC.exe
     $iscc = $null
     foreach ($p in @("$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe", "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\Inno Setup 6\ISCC.exe")) {
         if (Test-Path $p) { $iscc = $p; break }

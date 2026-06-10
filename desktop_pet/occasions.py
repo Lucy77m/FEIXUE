@@ -1,6 +1,6 @@
 # author: bdth
 # email: 2074055628@qq.com
-# 时刻/节日感知:公历节日命中时返回一句给模型的应景"由头"。
+# 节日感知 公历节日命中返回应景由头
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ _FESTIVALS = {
 
 
 def today_key(now: datetime) -> str | None:
-    """只认公历固定日,农历(春节/中秋)会浮动不在这管。key 稳定,好让上层按 key 缓存/去重。"""
+    """公历节日命中返回稳定key"""
     md = now.strftime("%m-%d")
     if md in _FESTIVALS:
         return "festival:" + md
@@ -27,7 +27,7 @@ def today_key(now: datetime) -> str | None:
 
 
 def describe(key: str) -> str:
-    """喂给模型当聊天由头,认不出的 key 返回空串,调用方拿空就当今天没事。"""
+    """key转应景描述 认不出回空串"""
     if key.startswith("festival:"):
         return "今天是" + _FESTIVALS.get(key.split(":", 1)[1], "一个特别的日子")
     return ""

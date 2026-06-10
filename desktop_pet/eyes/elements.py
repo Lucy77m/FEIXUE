@@ -1,6 +1,6 @@
 # author: bdth
 # email: 2074055628@qq.com
-# 把屏幕上可操作元素编号、标注并提供按编号点击/输入的能力
+# 屏幕可操作元素编号标注 按编号点击输入
 
 from __future__ import annotations
 
@@ -15,21 +15,20 @@ _LAST: list[dict] = []
 _COLORS = {"uia": (80, 230, 140), "ocr": (90, 190, 255), "icon": (255, 180, 70)}
 _LABEL_INK = (16, 16, 22)
 
-# 屏幕没变就复用上次编号结果：小灰度缩略图当指纹，省掉 UIA/OCR/检测整套重算。TTL 2s 兜底，怕指纹漏判。
+# 缩略图当指纹 屏幕没变复用上次编号结果
 _CACHE_TTL_S = 2.0
 _cache_fp: bytes = b""
 _cache_ts: float = 0.0
 _cache_result: "tuple[bytes, str] | None" = None
 
-# 点完截图比对，判断"到底有没有生效"。settle 给窗口 0.35s 重绘的时间；
-# 差异像素超 _VERIFY_FRAC(0.8%)且单像素灰度差超 _VERIFY_DELTA 才算"变了"，滤掉光标闪烁/时钟跳秒这种噪点。
+# 点完截图比对验证生效的阈值
 _VERIFY_SETTLE_S = 0.35
 _VERIFY_DELTA = 16
 _VERIFY_FRAC = 0.008
 
 
 def _verify_snapshot():
-    """抓活动窗当前帧 → 320×180 灰度 numpy，给点击前后比对当基准；抓不到返回 None(不报错，降级成不验证)。"""
+    """抓当前帧灰度小图当比对基准"""
     import numpy as np
 
     try:
@@ -41,13 +40,13 @@ def _verify_snapshot():
 
 
 def _verify_changed(before):
-    """对比 before 快照看屏幕动没动；没基准或尺寸对不上没法判，返回 None。"""
+    """对比快照看屏幕动没动"""
     if before is None:
         return None
     import numpy as np
 
     after = _verify_snapshot()
-    if after is None or after.shape != before.shape:  # 尺寸变了说明窗口本身动过，没法逐像素比，弃判
+    if after is None or after.shape != before.shape:  # 尺寸对不上弃判
         return None
     return bool((np.abs(after - before) > _VERIFY_DELTA).mean() > _VERIFY_FRAC)
 
@@ -59,12 +58,12 @@ def _inside(point: tuple[int, int], rect: tuple[int, int, int, int]) -> bool:
 
 
 def _fingerprint(img: Image.Image) -> bytes:
-    """缩略灰度的原始字节当缓存指纹——逐字节匹配，分辨率固定才比得了。"""
+    """算缓存指纹"""
     return img.convert("L").resize((320, 180), Image.Resampling.BILINEAR).tobytes()
 
 
 def _label_for_icon(icon_rect: tuple[int, int, int, int], ocr_els: list[dict]) -> str:
-    """给检测出的图标找它的文字标签：横向对齐(±70%宽)、且在图标内或正下方的 OCR 文本，挑最近的。找不到返回空。"""
+    """给图标找文字标签"""
     il, it, ir, ib = icon_rect
     iw, ih = ir - il, ib - it
     if iw <= 0 or ih <= 0:
@@ -74,20 +73,20 @@ def _label_for_icon(icon_rect: tuple[int, int, int, int], ocr_els: list[dict]) -
     for o in ocr_els:
         ol, ot, orr, ob = o["rect_abs"]
         ocx = (ol + orr) / 2.0
-        if abs(ocx - icx) > iw * 0.7:  # 横向偏太多，不是这个图标的标签
+        if abs(ocx - icx) > iw * 0.7:  # 横向偏太多跳过
             continue
         inside = ot >= it - 2 and ob <= ib + 2
-        below = 0 <= ot - ib <= max(26, ih * 0.7)  # 图标正下方一行内——典型托盘/桌面图标的文字摆法
+        below = 0 <= ot - ib <= max(26, ih * 0.7)  # 图标正下方一行内
         if not (inside or below):
             continue
-        score = abs(ocx - icx) + max(0, ot - ib)  # 越居中、越贴近图标得分越低
+        score = abs(ocx - icx) + max(0, ot - ib)  # 越居中越贴近得分越低
         if score < best_score:
             best, best_score = o["text"], score
     return best[:46]
 
 
 def _font(size: int) -> ImageFont.ImageFont:
-    """优先粗体(Segoe→Arial)，编号看得清；系统没装就退默认位图字体(不认 size，会偏小)。"""
+    """找标注用的字体"""
     for name in ("segoeuib.ttf", "arialbd.ttf", "arial.ttf"):
         try:
             return ImageFont.truetype(name, size)
@@ -97,10 +96,10 @@ def _font(size: int) -> ImageFont.ImageFont:
 
 
 def _annotate(img: Image.Image, elements: list[dict], ox: int, oy: int) -> Image.Image:
-    """把每个元素框出来并标编号 → 给模型看的标注图。颜色按来源(uia/ocr/icon)区分。ox/oy 是裁剪偏移，绝对坐标减回去才落在画布上。"""
+    """画框标编号生成标注图"""
     canvas = img.convert("RGB").copy()
     draw = ImageDraw.Draw(canvas, "RGBA")
-    size = max(15, canvas.height // 55)  # 字号随分辨率走，4K 屏上别小到看不见
+    size = max(15, canvas.height // 55)  # 字号随分辨率走
     font = _font(size)
     for el in elements:
         l, t, r, b = el["rect_abs"]
@@ -117,8 +116,7 @@ def _annotate(img: Image.Image, elements: list[dict], ox: int, oy: int) -> Image
 
 
 def screen_elements(region: str = "") -> tuple[bytes, str]:
-    """扫活动窗的可操作元素 → (标注图 jpeg, 编号清单文本)。三路汇总：UIA 控件 + OCR 文本 + 视觉图标，按序去重编号。
-    region(left,top,width,height，图像像素)只扫局部，编号会变所以 region 也进缓存指纹。"""
+    """扫可操作元素返回标注图和编号清单"""
     import numpy as np
 
     from desktop_pet.executor import vision
@@ -134,7 +132,7 @@ def screen_elements(region: str = "") -> tuple[bytes, str]:
             return b"", "[region must be left,top,width,height (image pixels)]"
         if w <= 0 or h <= 0 or left < 0 or top < 0:
             return b"", "[region 非法：left/top 不能为负、width/height 必须为正]"
-        # region 是模型在"缩放后的图"上量的；除以 _scale 换回原始截图像素再裁，不然高 DPI 屏会错位
+        # region除回scale换到原图像素
         s = _scale(ow, oh) or 1.0
         nl, nt = int(left / s), int(top / s)
         nr, nb = min(img.width, int((left + w) / s)), min(img.height, int((top + h) / s))
@@ -144,21 +142,21 @@ def screen_elements(region: str = "") -> tuple[bytes, str]:
         ox, oy = ox + nl, oy + nt
         region_abs = (ox, oy, ox + (nr - nl), oy + (nb - nt))
 
-    # region 拼进指纹：同一画面但扫的范围不同，编号不一样，不能复用
+    # region拼进指纹
     fp = region.encode("utf-8") + _fingerprint(img)
     global _cache_fp, _cache_ts, _cache_result
     if fp == _cache_fp and _cache_result is not None and time.monotonic() - _cache_ts < _CACHE_TTL_S:
         return _cache_result
     from desktop_pet.hands import ghost
 
-    top_hwnd = ghost.foreground_hwnd()  # OCR/图标元素没有自己的 hwnd，统一挂到前台窗口上，给 ghost 点击用
+    top_hwnd = ghost.foreground_hwnd()  # ocr和图标元素统一挂前台hwnd
     uia_els, uia_truncated = uia.interactive_elements()
     if region_abs is not None:
-        uia_els = [e for e in uia_els if _inside(e["center_abs"], region_abs)]  # UIA 是整窗扫的，手动裁到 region 内
-    bgr = np.array(img)[:, :, ::-1].copy()  # PIL 是 RGB，OCR/检测吃 OpenCV 的 BGR，反通道
+        uia_els = [e for e in uia_els if _inside(e["center_abs"], region_abs)]  # uia手动裁到region内
+    bgr = np.array(img)[:, :, ::-1].copy()  # rgb转bgr
     ocr_els = vision.ocr_boxes(bgr, ox, oy)
 
-    # 三路优先级 UIA > OCR > 图标：UIA 最准先占坑，后两路落在已占框里的视为重复，跳过
+    # uia先占坑 后两路落在已占框里的跳过
     elements: list[dict] = []
     idx = 1
     taken = [e["rect_abs"] for e in uia_els]
@@ -180,8 +178,7 @@ def screen_elements(region: str = "") -> tuple[bytes, str]:
             "ctrl": None, "invokable": False, "hwnd": top_hwnd,
         })
         idx += 1
-    # 第三路：视觉元素检测器(可选 GUI 增强)。UIA 在自绘/游戏窗口失效时，它补出"可点区域"。
-    # 模型没启用时 detect.detect 返回 []，这里就是空操作。与 UIA/OCR 去重(已覆盖的不重复标)。
+    # 第三路视觉检测补自绘窗口的可点区域
     for (l, t, r, b) in detect.detect(img):
         center_abs = ((l + r) // 2 + ox, (t + b) // 2 + oy)
         if any(_inside(center_abs, rect) for rect in taken):
@@ -208,7 +205,7 @@ def screen_elements(region: str = "") -> tuple[bytes, str]:
         _cache_fp, _cache_ts, _cache_result = fp, time.monotonic(), (jpeg, msg + ")")
         return _cache_result
     _tags = {"uia": "·ctrl", "ocr": "·text", "icon": "·icon"}
-    # 统计重名：多个"确定/删除"按钮长一样，光看名字点不对，下面标 ⚠ 逼模型按位置/上下文区分
+    # 统计重名好标出来
     name_counts = Counter(el["name"].strip() for el in elements if el["name"].strip())
     lines = ["Numbered actionable elements on screen (call act_element with the number):"]
     for el in elements:
@@ -232,9 +229,7 @@ def screen_elements(region: str = "") -> tuple[bytes, str]:
 
 
 def act_element(index: int, action: str = "click", text: str = "", mode: str = "auto") -> str:
-    """对 screen_elements 编过号的元素执行操作(click/double/right/type)。
-    mode：auto 先试无光标(UIA invoke / ghost 后台点)，real 直接动真鼠标，ghost 只走后台、失败不降级。
-    点完截图比对自动验证有没有生效，没生效会提示重试或换 real。"""
+    """按编号对元素执行操作"""
     from desktop_pet.hands import ghost, keyboard, mouse
 
     el = next((e for e in _LAST if e["idx"] == index), None)
@@ -248,10 +243,10 @@ def act_element(index: int, action: str = "click", text: str = "", mode: str = "
            "元素编号可能已过期，重新 screen_elements 取最新编号再来)")
 
     if action == "type":
-        # 优先走 UIA set_value：直接改控件值，不抢焦点不动光标；real 模式跳过它强制真实键入
+        # 优先uia set_value直接改控件值
         if mode != "real" and el["ctrl"] is not None and uia.set_value(el["ctrl"], text):
             return f'typed into [{index}] 「{name}」 via accessibility (replaced old value, no cursor)'
-        if mode == "ghost":  # ghost 只认 UIA value pattern，没有就不降级到真键盘，直接报错
+        if mode == "ghost":  # ghost不降级到真键盘
             return (f"[couldn't type into [{index}] 「{name}」 in ghost mode — it has no accessibility "
                     "value pattern; only standard input boxes support background typing. "
                     "Retry with mode=real (will move the user's mouse/focus)]")
@@ -263,19 +258,19 @@ def act_element(index: int, action: str = "click", text: str = "", mode: str = "
 
     kind = "double" if action == "double" else ("right" if action == "right" else "click")
 
-    before = _verify_snapshot()  # 动手前先存基准帧，下面比对用
+    before = _verify_snapshot()  # 先存基准帧
     outcome = ""
-    cursorless = False  # 走的是无光标路径(UIA/ghost)——没生效时提示重试 real 才有意义
+    cursorless = False  # 是否走了无光标路径
 
     if mode != "real":
-        # 无光标点击：UIA invoke(最干净) → ghost 后台投递消息(不动用户鼠标) → 都不行才落到下面真实点击
+        # 无光标点击 先uia invoke再ghost
         if action in ("click", "invoke") and el["ctrl"] is not None and uia.invoke(el["ctrl"]):
             outcome = f'invoked [{index}] {el["kind"]} 「{name}」 via accessibility (no cursor moved)'
             cursorless = True
         elif ghost.bg_click(el.get("hwnd", 0), ax, ay, kind):
             outcome = f'posted a ghost {kind} to [{index}] 「{name}」 @({ax}, {ay}) — the user\'s mouse was NOT moved'
             cursorless = True
-        elif mode == "ghost":  # 显式 ghost 模式不许降级到真鼠标，直接告诉调用方失败原因
+        elif mode == "ghost":  # ghost模式不降级到真鼠标
             return (f"[ghost {kind} on [{index}] 「{name}」 failed (window gone/minimized/elevated, "
                     "or the point is outside its client area). Restore the window or retry with mode=real]")
 
@@ -286,7 +281,7 @@ def act_element(index: int, action: str = "click", text: str = "", mode: str = "
 
     if before is None:
         return outcome + " (couldn't auto-verify — re-run screen_elements to confirm it actually worked)."
-    time.sleep(_VERIFY_SETTLE_S)  # 等窗口重绘完再截，太快截会误判"没变"
+    time.sleep(_VERIFY_SETTLE_S)  # 等窗口重绘完再截
     changed = _verify_changed(before)
     if changed is True:
         return outcome + " ✓ verified: the screen changed — it took effect."

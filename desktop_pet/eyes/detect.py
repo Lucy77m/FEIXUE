@@ -1,8 +1,6 @@
 # author: bdth
 # email: 2074055628@qq.com
-# 基于 ONNX 模型检测截图中的 UI 元素，返回边界框列表。
-# 高分屏走"全图一遍 + 分块细看"两级推理：模型输入只有 640，全屏直接缩进去小图标就没了，
-# 切块后块内目标占比大才检得出来——这是自绘窗口/游戏画面上找小按钮的关键。
+# onnx模型检测截图里的ui元素
 
 from __future__ import annotations
 
@@ -20,7 +18,7 @@ def _data_model() -> Path:
 
 
 def _model_path():
-    """先找随包发布的模型(源码/打包都在 eyes/models/)，再找数据目录下用户自备/下载的。"""
+    """找模型路径"""
     for p in (Path(__file__).resolve().parent / "models" / "ui_detect.onnx", _data_model()):
         if p.exists():
             return p
@@ -28,9 +26,7 @@ def _model_path():
 
 
 def download(proxy: str = "", on_progress=None, should_cancel=None) -> str:
-    """可选增强：下载 UI 元素检测模型到数据目录(可写)，下完检测器自动启用。
-    返回 'ok' / 'cancelled' / '[失败:…]'。含网络，调用方放后台线程。
-    on_progress(done,total) 报进度，should_cancel() 真则中途停下删半成品。"""
+    """下载ui检测模型"""
     from desktop_pet.settings import build_http_client
 
     target = _data_model()
@@ -63,7 +59,7 @@ def download(proxy: str = "", on_progress=None, should_cancel=None) -> str:
         tmp.unlink(missing_ok=True)
         return f"[失败: {str(exc)[:120]}]"
     global _session, _disabled
-    _session, _disabled = None, False   # 重置缓存，让 _load 用新模型
+    _session, _disabled = None, False   # 重置缓存
     return "ok"
 
 
@@ -100,9 +96,9 @@ def _load():
         try:
             import onnxruntime as ort
 
-            # DirectML(显卡)跑检测；CPU 仅作 DML 起不来时(RDP/虚拟显示等)的兜底，onnxruntime 按序自动选。
+            # dml优先 cpu兜底
             sess = ort.InferenceSession(str(path), providers=["DmlExecutionProvider", "CPUExecutionProvider"])
-            _active_provider = (sess.get_providers() or [""])[0]   # 实际命中的那个 —— detect 里据此调切块数
+            _active_provider = (sess.get_providers() or [""])[0]   # 实际命中的provider
             inp = sess.get_inputs()[0]
             _input_name = inp.name
             shape = inp.shape
@@ -111,7 +107,7 @@ def _load():
             _session = sess
             return _session
         except Exception:
-            _disabled = True   # 起不来就彻底关掉，别每帧重试拖垮主流程(下载新模型时会重置)
+            _disabled = True   # 起不来直接禁用
             return None
 
 
@@ -121,14 +117,13 @@ _MAX_TILES = 8
 
 
 def _tiles(w: int, h: int, max_tiles: int = _MAX_TILES) -> list[tuple[int, int, int, int]]:
-    """把全屏切成带重叠的块(l,t,w,h)，单块够大就不切返回空。
-    重叠 96px 兜住骑在切缝上的按钮，块数封顶免得 4K 屏推理炸时间。"""
+    """把全屏切成带重叠的块"""
     import math
 
     nx, ny = math.ceil(w / _TILE_LONG), math.ceil(h / _TILE_LONG)
     if nx * ny <= 1:
         return []
-    # 超额就从长边方向砍一刀，尽量保持块接近方形 —— 别让某一维被切得过碎。
+    # 超过上限从长边减
     while nx * ny > max_tiles:
         if nx >= ny:
             nx -= 1
@@ -149,8 +144,7 @@ def _tiles(w: int, h: int, max_tiles: int = _MAX_TILES) -> list[tuple[int, int, 
 
 
 def _infer(sess, pil_img, off_x: int, off_y: int) -> tuple[list[tuple[float, float, float, float]], list[float]]:
-    """对一张图(整屏或一个块)跑一遍模型 → (boxes 绝对坐标, scores)。
-    letterbox 缩到 640 灰边填充，出框再按 off_x/off_y 平移回全屏坐标，留给上层统一 NMS。"""
+    """单图跑一遍模型返回boxes和scores"""
     import numpy as np
     from PIL import Image
 
@@ -166,7 +160,7 @@ def _infer(sess, pil_img, off_x: int, off_y: int) -> tuple[list[tuple[float, flo
     out = sess.run(None, {_input_name: blob})[0]
     pred = np.squeeze(out, 0)
     if pred.shape[0] < pred.shape[1]:
-        pred = pred.T   # 不同导出 YOLO 输出可能是 (通道,框) 转置过的 —— 统一成每行一个框
+        pred = pred.T   # 统一成每行一个框
     if pred.shape[1] < 5:
         return [], []
     scores = pred[:, 4:].max(axis=1)
@@ -183,7 +177,7 @@ def _infer(sess, pil_img, off_x: int, off_y: int) -> tuple[list[tuple[float, flo
 
 
 def detect(pil_image) -> list[tuple[int, int, int, int]]:
-    """检测截图里的可点元素 → [(l,t,r,b), …]。模型没就绪/出错都返回空列表，不抛。"""
+    """检测可点元素返回框列表"""
     sess = _load()
     if sess is None:
         return []
@@ -191,8 +185,8 @@ def detect(pil_image) -> list[tuple[int, int, int, int]]:
         import numpy as np
 
         w, h = pil_image.width, pil_image.height
-        boxes, scores = _infer(sess, pil_image, 0, 0)   # 先全图一遍，抓大件
-        # 再切块细看小图标；CPU 兜底时块数砍到 4，不然一次检测拖到几秒没法用
+        boxes, scores = _infer(sess, pil_image, 0, 0)   # 先全图一遍
+        # 再切块细看小图标 cpu时减块数
         max_tiles = _MAX_TILES if "Dml" in _active_provider else 4
         for tl, tt, tw, th in _tiles(w, h, max_tiles):
             tile_boxes, tile_scores = _infer(sess, pil_image.crop((tl, tt, tl + tw, tt + th)), tl, tt)
@@ -200,13 +194,13 @@ def detect(pil_image) -> list[tuple[int, int, int, int]]:
             scores += tile_scores
         if not boxes:
             return []
-        # 全图框和各块框堆一起，统一 NMS 去掉重叠/切缝处的重复检测
+        # 统一nms去重
         arr = np.array([[l, t, r - l, b - t] for l, t, r, b in boxes])
         idxs = _nms(arr, np.array(scores), _IOU)[:_MAX_DET]
         out_boxes: list[tuple[int, int, int, int]] = []
         for i in idxs:
             l, t, r, b = boxes[i]
-            if r - l >= 6 and b - t >= 6:   # <6px 的当噪声丢掉，点不准也没意义
+            if r - l >= 6 and b - t >= 6:   # 太小的当噪声丢掉
                 out_boxes.append((int(l), int(t), int(r), int(b)))
         return out_boxes
     except Exception:

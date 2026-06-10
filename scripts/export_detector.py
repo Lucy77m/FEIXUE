@@ -1,16 +1,4 @@
-# 把 OmniParser v2 的 icon_detect(单类 YOLOv8 "可交互元素"检测器)导出成 ui_detect.onnx，
-# 用来替换 releases 里旧的检测模型。这是构建期一次性脚本，不随包分发，也不进 pyproject 依赖。
-#
-# 跑法（国内需挂代理走本地梯子；torch+ultralytics 走 uv 临时环境，不污染项目依赖）：
-#   $env:HTTPS_PROXY="http://127.0.0.1:7890"; $env:HF_HUB_DISABLE_XET="1"
-#   uv run --with ultralytics --with onnxruntime --with huggingface_hub python scripts/export_detector.py [imgsz]
-#   imgsz 缺省 640（与现役一致）；传 1280 导高分辨率版（小图标召回更高、更慢）。
-#
-# 产物：scripts/ui_detect.onnx（640）或 ui_detect_1280.onnx —— 验证通过后上传到 GitHub releases，
-# desktop_pet/eyes/detect.py 一行都不用改（输入尺寸它从模型自读，解码对单类 YOLO 通用）。
-#
-# 许可证提醒：icon_detect 继承 ultralytics 的 AGPL-3.0。MOCHI 是运行时让用户自行下载模型、
-# 不随包分发，属常见缓冲做法；若要彻底干净需另行评估。仓库里会一并下到 icon_detect/LICENSE。
+# 把omniparser v2的icon_detect导出成ui_detect.onnx 构建期一次性脚本 产物上传github releases
 
 from __future__ import annotations
 
