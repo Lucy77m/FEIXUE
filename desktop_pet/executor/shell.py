@@ -290,6 +290,12 @@ class _BgShell:
             self.pos = len(self.lines)
         return chunk, dropped
 
+    def peek_tail(self, max_chars: int = 2000) -> str:
+        """看输出尾巴 不动增量游标"""
+        with self.lock:
+            text = "".join(self.lines)
+        return text[-max_chars:]
+
     def running(self) -> bool:
         return self.proc.poll() is None
 
@@ -354,6 +360,20 @@ def check_background(task_id: int = 0, kill: bool = False) -> str:
     if not chunk.strip() and not dropped:
         return head + "\n(no new output since last check)"
     return head + "\n" + _bg_trim(chunk, dropped)
+
+
+def background_snapshot() -> list[dict]:
+    """后台任务快照给守望用 不碰游标"""
+    with _bg_lock:
+        tasks = list(_bg_tasks.values())
+    out = []
+    for t in sorted(tasks, key=lambda x: x.id):
+        rc = t.proc.poll()
+        out.append({
+            "id": t.id, "command": t.command, "running": rc is None,
+            "returncode": rc, "started": t.started, "tail": t.peek_tail(1600),
+        })
+    return out
 
 
 def _bg_trim(chunk: str, dropped: int) -> str:

@@ -9,6 +9,7 @@ import random
 import re
 import sys
 import threading
+import time
 import traceback
 from datetime import datetime
 
@@ -34,6 +35,7 @@ from desktop_pet.pet.chat import InputBox, SpeechText, ThoughtBubble, ThoughtBub
 from desktop_pet.pet.todo_board import TodoBoard
 from desktop_pet.pet.control_panel import ControlPanel
 from desktop_pet.pet.media import MediaFrame
+from desktop_pet.executor import shell as shell_exec
 from desktop_pet.pet import feeding
 from desktop_pet.pet.confirm import ConfirmBox
 from desktop_pet.pet.entrance import next_entrance_kind
@@ -56,6 +58,8 @@ _REMINDER_POLL_MS = 15_000
 _PROACTIVE_POLL_MS = 60_000
 _WATCH_POLL_MS = 15_000
 _REMOTE_POLL_MS = 8_000
+_BGWATCH_POLL_MS = 5_000
+_BGWATCH_MIN_RUNTIME_S = 10.0  # 秒退的任务agent当场看到 不播报
 _PROACTIVE_RAPPORT_GATE = {"安静": 0.45, "正常": 0.30, "话痨": 0.15}
 _PROACTIVE_RAPPORT_GATE_DEFAULT = 0.30
 _CELEBRATE_CHANCE = 0.25
@@ -433,6 +437,9 @@ class PetApp(QObject):
         self._watch_timer.timeout.connect(self._check_watch)
         self._remote_timer = QTimer(self)
         self._remote_timer.timeout.connect(self._check_inbox)
+        self._bgwatch_timer = QTimer(self)
+        self._bgwatch_timer.timeout.connect(self._scan_background_shells)
+        self._bg_announced: set[int] = set()
         self._just_returned = False
 
         self._tray = Tray(
@@ -977,6 +984,31 @@ class PetApp(QObject):
 
     def _feed_pop(self, text: str) -> None:
         self._thought.pop(text, self._pet)
+
+    def _scan_background_shells(self) -> None:
+        """守望后台shell 跑完庆祝 挂了安慰并叫agent看"""
+        try:
+            snap = shell_exec.background_snapshot()
+        except Exception:
+            return
+        for t in snap:
+            if t["running"] or t["id"] in self._bg_announced:
+                continue
+            self._bg_announced.add(t["id"])
+            if time.time() - t["started"] < _BGWATCH_MIN_RUNTIME_S:
+                continue
+            if t["returncode"] == 0:
+                self._pet.react("celebrate")
+                self._feed_pop(i18n.t("bgwatch_ok").format(id=t["id"]))
+                emotion.apply("task_done")
+                selector.set_emotion(*emotion.snapshot())
+            else:
+                self._pet.react("droop")
+                self._feed_pop(i18n.t("bgwatch_fail").format(id=t["id"], code=t["returncode"]))
+                if not self._worker.is_running:
+                    self.request_message.emit(i18n.t("bgwatch_analyze_msg").format(
+                        id=t["id"], command=t["command"][:80], code=t["returncode"],
+                        tail=t["tail"][-1200:]))
 
     @Slot(bool)
     def _on_busy(self, busy: bool) -> None:
@@ -1582,6 +1614,7 @@ class PetApp(QObject):
         self._proactive_timer.start(_PROACTIVE_POLL_MS)
         self._watch_timer.start(_WATCH_POLL_MS)
         self._remote_timer.start(_REMOTE_POLL_MS)
+        self._bgwatch_timer.start(_BGWATCH_POLL_MS)
         if self._settings.remote_inbox:
             remote_inbox.ensure_dir()
         self._hotkeys.start()
