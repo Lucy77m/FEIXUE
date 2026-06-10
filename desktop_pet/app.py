@@ -60,6 +60,9 @@ _WATCH_POLL_MS = 15_000
 _REMOTE_POLL_MS = 8_000
 _BGWATCH_POLL_MS = 5_000
 _BGWATCH_MIN_RUNTIME_S = 10.0  # 秒退的任务agent当场看到 不播报
+_GIVEBACK_MIN_INTERVAL_S = 4 * 3600
+_GIVEBACK_MIN_AGE_H = 2.0  # 收藏攒够这么久才值得拿出来
+_GIVEBACK_RAPPORT_GATE = 0.45
 _PROACTIVE_RAPPORT_GATE = {"安静": 0.45, "正常": 0.30, "话痨": 0.15}
 _PROACTIVE_RAPPORT_GATE_DEFAULT = 0.30
 _CELEBRATE_CHANCE = 0.25
@@ -440,6 +443,9 @@ class PetApp(QObject):
         self._bgwatch_timer = QTimer(self)
         self._bgwatch_timer.timeout.connect(self._scan_background_shells)
         self._bg_announced: set[int] = set()
+        from collections import deque
+        self._clip_treasures: deque = deque(maxlen=12)  # 帮用户收着的剪贴小宝贝 只在内存
+        self._last_giveback: datetime | None = None
         self._just_returned = False
 
         self._tray = Tray(
@@ -675,6 +681,9 @@ class PetApp(QObject):
 
     @Slot(str, str)
     def _on_clip_interesting(self, kind: str, text: str) -> None:
+        # 顺手收藏一份留着回赠 只进内存不落盘
+        if all(text != t for _k, t, _ts in self._clip_treasures):
+            self._clip_treasures.append((kind, text, datetime.now()))
         s = self._settings
         if not s.clip_alchemy:
             return
@@ -1169,10 +1178,39 @@ class PetApp(QObject):
         try:
             if self._maybe_peek():
                 return
-            if not self._maybe_occasion():
-                self._maybe_speak_up()
+            if self._maybe_occasion():
+                return
+            if self._maybe_giveback():
+                return
+            self._maybe_speak_up()
         except Exception:
             pass
+
+    def _maybe_giveback(self) -> bool:
+        """亲密度够了 把几小时前帮用户收着的剪贴宝贝拿出来提一嘴"""
+        if not self._settings.proactive_enabled or not self._clip_treasures:
+            return False
+        if self._worker.is_running or self._engaged() or not self._pet.isVisible() or self._pet.is_asleep:
+            return False
+        if presence.idle_seconds() >= _AWAY_S:
+            return False
+        _val, _aro, rapport = emotion.snapshot()
+        if rapport < _GIVEBACK_RAPPORT_GATE:
+            return False
+        now = datetime.now()
+        if self._last_giveback is not None and (now - self._last_giveback).total_seconds() < _GIVEBACK_MIN_INTERVAL_S:
+            return False
+        kind, text, ts = self._clip_treasures[0]
+        age_h = (now - ts).total_seconds() / 3600
+        if age_h < _GIVEBACK_MIN_AGE_H:
+            return False
+        self._clip_treasures.popleft()
+        self._last_giveback = now
+        snippet = text.strip().replace("\n", " ")[:60]
+        self._pet.react("peek")
+        self.request_message.emit(i18n.t("giveback_msg").format(
+            hours=f"{age_h:.0f}", kind=kind, snippet=snippet))
+        return True
 
     @Slot()
     def _on_wants_travel(self) -> None:
