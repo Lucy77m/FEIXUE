@@ -866,12 +866,13 @@ class BlobPet:
 
 
     _FX_GLOOM = frozenset({"slump", "droop", "deflate", "sigh"})
+    _FX_MUNCH = frozenset({"eating"})
 
     def _draw_react_fx(self, painter: QPainter, name: str, p: float, cx: float, cy: float,
                        bw: float, bh: float) -> None:
         """按反应名分发到对应特效"""
         if name not in (self._FX_NOTES | self._FX_CONFETTI | self._FX_SWOOSH | self._FX_SHOCK
-                        | self._FX_RING | self._FX_GLOOM):
+                        | self._FX_RING | self._FX_GLOOM | self._FX_MUNCH):
             return
         painter.save()
         self._fx_origin_y = cy
@@ -888,7 +889,79 @@ class BlobPet:
             self._fx_ring(painter, p, bw, bh)
         elif name in self._FX_GLOOM:
             self._fx_gloom(painter, p, bw, bh)
+        elif name in self._FX_MUNCH:
+            self._fx_munch(painter, p, bw, bh)
         painter.restore()
+
+    def _fx_munch(self, painter: QPainter, p: float, bw: float, bh: float) -> None:
+        """吃东西全程特效 文件落下 碎屑 咕咚 打嗝星"""
+        mouth_y = bh * 0.26
+        if p < 0.15:
+            # 小文件从头顶落进嘴里 越落越小
+            k = ease_in(p / 0.15)
+            fy = -bh * 0.95 + (mouth_y + bh * 0.95) * k
+            s = bw * 0.16 * (1 - 0.45 * k)
+            painter.setPen(QPen(QColor(120, 118, 140, 230), max(1.2, bw * 0.012)))
+            painter.setBrush(QColor(252, 252, 255, 240))
+            painter.save()
+            painter.translate(0.0, fy)
+            painter.rotate(k * 24)
+            painter.drawRoundedRect(QRectF(-s / 2, -s * 0.62, s, s * 1.24), s * 0.12, s * 0.12)
+            # 折角和两道字纹
+            painter.setBrush(QColor(214, 212, 232, 240))
+            painter.drawPolygon(QPolygonF([QPointF(s * 0.5 - s * 0.3, -s * 0.62),
+                                           QPointF(s * 0.5, -s * 0.62 + s * 0.3),
+                                           QPointF(s * 0.5, -s * 0.62)]))
+            for i in (0, 1):
+                yy = -s * 0.15 + i * s * 0.3
+                painter.drawRect(QRectF(-s * 0.3, yy, s * 0.6, s * 0.07))
+            painter.restore()
+            return
+        if p < 0.55:
+            # 嘴边崩碎屑 左右交替
+            q = (p - 0.15) / 0.4
+            painter.setPen(Qt.PenStyle.NoPen)
+            for k in range(5):
+                ph = (q * 3 + k * 0.37) % 1.0
+                side = 1 if k % 2 == 0 else -1
+                x = side * (bw * 0.1 + ph * bw * 0.22)
+                y = mouth_y + ph * bh * 0.3 - math.sin(ph * math.pi) * bh * 0.12
+                col = QColor(_INK)
+                col.setAlpha(max(0, int(200 * (1 - ph))))
+                painter.setBrush(col)
+                r = bw * 0.014 * (1 - ph * 0.5)
+                painter.drawEllipse(QPointF(x, y), r, r)
+            return
+        if p < 0.75:
+            # 咕咚 一个圈从嘴滑到肚子
+            q = (p - 0.55) / 0.2
+            y = mouth_y + q * bh * 0.34
+            alpha = max(0, int(150 * math.sin(q * math.pi)))
+            pen = QPen(QColor(150, 170, 215, alpha))
+            pen.setWidthF(max(1.2, bw * 0.014))
+            painter.setPen(pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawEllipse(QPointF(0.0, y), bw * 0.1 * (1 - q * 0.3), bh * 0.045 * (1 - q * 0.3))
+            return
+        # 打嗝小星星往上飘
+        q = (p - 0.75) / 0.25
+        painter.setPen(Qt.PenStyle.NoPen)
+        for k in range(3):
+            ph = max(0.0, q - k * 0.18)
+            if ph <= 0:
+                continue
+            x = (k - 1) * bw * 0.16 + math.sin(ph * math.pi * 2 + k) * bw * 0.05
+            y = -bh * 0.55 - ph * bh * 0.5
+            col = QColor(_DREAM_COLORS[k % len(_DREAM_COLORS)])
+            col.setAlpha(max(0, int(230 * (1 - ph))))
+            painter.setBrush(col)
+            r = bw * (0.030 - 0.008 * k)
+            star = QPolygonF()
+            for i in range(8):
+                ang = i * math.pi / 4 - math.pi / 2
+                rad = r if i % 2 == 0 else r * 0.45
+                star.append(QPointF(x + math.cos(ang) * rad, y + math.sin(ang) * rad))
+            painter.drawPolygon(star)
 
     def _fx_notes(self, painter: QPainter, p: float, bw: float, bh: float) -> None:
         for k in range(4):
@@ -1213,8 +1286,19 @@ class BlobPet:
                 painter.setBrush(Qt.BrushStyle.NoBrush)
                 painter.drawArc(QRectF(cx - ew, ey - eh * 0.1, ew * 2, eh * 0.5), 200 * 16, 140 * 16)
 
+    def _eating_progress(self) -> float | None:
+        """正在吃就给进度 不在吃给None"""
+        if self._react is not None and self._react[0] == "eating":
+            _name, elapsed, dur = self._react
+            return min(1.0, elapsed / max(dur, 0.001))
+        return None
+
     def _draw_mouth(self, painter: QPainter, bw: float, bh: float) -> None:
         my = bh * 0.26
+        eat_p = self._eating_progress()
+        if eat_p is not None:
+            self._draw_eating_mouth(painter, eat_p, bw, bh, my)
+            return
         if self._talking:
             opening = (math.sin(self._t * 18) + 1) / 2
             mw, mh = bw * 0.1, bh * 0.03 + bh * 0.1 * opening
@@ -1236,6 +1320,41 @@ class BlobPet:
         elif self._expr == "surprised":
             painter.setBrush(_INK)
             painter.drawEllipse(QPointF(0.0, my + bh * 0.01), bh * 0.05, bh * 0.05)
+
+    def _draw_eating_mouth(self, painter: QPainter, p: float, bw: float, bh: float, my: float) -> None:
+        """吃东西的嘴 张大等 咀嚼开合 吞咽抿线 满足圆嘴变笑"""
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(_INK)
+        if p < 0.15:
+            k = ease_out(p / 0.15)
+            mw, mh = bw * (0.08 + 0.07 * k), bh * (0.02 + 0.12 * k)
+            painter.drawEllipse(QRectF(-mw / 2, my - mh * 0.2, mw, mh))
+            return
+        if p < 0.55:
+            q = (p - 0.15) / 0.4
+            opening = (math.sin(q * math.pi * 12 - math.pi / 2) + 1) / 2  # 六次开合
+            mw = bw * (0.12 - 0.04 * opening)
+            mh = bh * 0.02 + bh * 0.1 * opening
+            painter.drawRoundedRect(QRectF(-mw / 2, my, mw, mh), mw * 0.35, mw * 0.35)
+            return
+        pen = QPen(_INK)
+        pen.setWidthF(max(1.8, bw * 0.016))
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        if p < 0.75:
+            q = (p - 0.55) / 0.2
+            painter.setPen(pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            wob = math.sin(q * math.pi) * bh * 0.015  # 咽下去那一下嘴角动一动
+            painter.drawLine(QPointF(-bw * 0.05, my + bh * 0.03 + wob), QPointF(bw * 0.05, my + bh * 0.03 - wob))
+            return
+        q = (p - 0.75) / 0.25
+        if q < 0.45:  # 打嗝小圆嘴
+            painter.drawEllipse(QPointF(0.0, my + bh * 0.02), bh * 0.035, bh * 0.035)
+        else:  # 回味的笑
+            painter.setPen(pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            mw = bw * 0.16
+            painter.drawArc(QRectF(-mw / 2, my - bh * 0.05, mw, bh * 0.12), 200 * 16, 140 * 16)
 
 
     def _draw_costume_worn(self, painter: QPainter, bw: float, bh: float) -> None:

@@ -153,6 +153,9 @@ class PetWindow(QWidget):
     def react(self, name: str, intensity: float = 1.0) -> None:
         self._blob.react(name, intensity)
 
+    def set_expression(self, name: str) -> None:
+        self._blob.set_expression(name)
+
     @property
     def is_reacting(self) -> bool:
         return self._blob.is_reacting

@@ -220,21 +220,27 @@ def _slump(p: float, bw: float, bh: float) -> PoseDelta:
 
 
 def _eating(p: float, bw: float, bh: float) -> PoseDelta:
-    """吃东西 凑近期待 咀嚼 吞咽 满足小跳"""
+    """吃东西 仰头等接 腮帮咀嚼 仰头吞咽 满足弹跳"""
     if p < 0.15:
-        k = ease_in(p / 0.15)
-        return PoseDelta(0.0, k * bh * 0.05, -5.0 * k, 1 + 0.06 * k, 1 - 0.04 * k)
+        k = ease_out(p / 0.15)
+        # 仰头张嘴等文件落进来 微微后坐
+        return PoseDelta(0.0, k * bh * 0.04, -7.0 * k, 1 + 0.05 * k, 1 - 0.05 * k + 0.04 * math.sin(p * 40))
     if p < 0.55:
         q = (p - 0.15) / 0.4
-        chew = abs(math.sin(q * math.pi * 6))
-        return PoseDelta(0.0, chew * bh * 0.03, math.sin(q * math.pi * 6) * 2, 1 + 0.05 * chew, 1 - 0.06 * chew)
+        chew = (math.sin(q * math.pi * 12 - math.pi / 2) + 1) / 2  # 和嘴同步六次
+        sway = math.sin(q * math.pi * 6)  # 腮帮左右倒
+        return PoseDelta(sway * bw * 0.035, chew * bh * 0.035, sway * 4.5,
+                         1 + 0.06 * chew, 1 - 0.07 * chew)
     if p < 0.75:
         q = (p - 0.55) / 0.2
         s = math.sin(q * math.pi)
-        return PoseDelta(0.0, -s * bh * 0.04, 0.0, 1 - 0.05 * s, 1 + 0.1 * s)
+        # 仰头咽下去 脖子拉长那感觉
+        return PoseDelta(0.0, -s * bh * 0.07, -s * 5, 1 - 0.07 * s, 1 + 0.14 * s)
     q = (p - 0.75) / 0.25
-    hic = abs(math.sin(q * math.pi * 2)) * (1 - q * 0.5)
-    return PoseDelta(0.0, -hic * bh * 0.1, 0.0, 1 + 0.1 * hic, 1 - 0.06 * hic)
+    hop = math.sin(min(q * 2.2, 1.0) * math.pi)  # 满足地弹一下
+    settle = math.sin(q * math.pi * 3) * (1 - q)  # 落地余晃
+    return PoseDelta(0.0, -hop * bh * 0.16 + settle * bh * 0.02, settle * 3,
+                     1 + 0.08 * hop, 1 - 0.1 * hop)
 
 
 # 一行一个反应 名字 时长 曲线 valence arousal weight rarity

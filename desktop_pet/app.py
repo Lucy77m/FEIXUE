@@ -983,6 +983,7 @@ class PetApp(QObject):
         stats.add_eaten(total, len(paths))
         emotion.apply("fed")
         selector.set_emotion(*emotion.snapshot())
+        self._pet.set_expression("happy")
         if total > 100 * 1024 * 1024:
             journal.add(f"主人喂我吃了 {feeding.human_size(total)} 的垃圾文件 饱了")
         self._feed_pop(i18n.t("feed_eaten").format(size=feeding.human_size(total)))
