@@ -63,6 +63,8 @@ _BGWATCH_MIN_RUNTIME_S = 10.0  # 秒退的任务agent当场看到 不播报
 _GIVEBACK_MIN_INTERVAL_S = 4 * 3600
 _GIVEBACK_MIN_AGE_H = 2.0  # 收藏攒够这么久才值得拿出来
 _GIVEBACK_RAPPORT_GATE = 0.45
+_BUG_SCAN_MS = 45 * 60 * 1000
+_BUG_TEMP_BYTES = 500 * 1024 * 1024  # temp堆到这么大就生虫
 _PROACTIVE_RAPPORT_GATE = {"安静": 0.45, "正常": 0.30, "话痨": 0.15}
 _PROACTIVE_RAPPORT_GATE_DEFAULT = 0.30
 _CELEBRATE_CHANCE = 0.25
@@ -354,6 +356,8 @@ class PetApp(QObject):
     request_rewrite = Signal(str)
     request_clip_alchemy = Signal(str, str)
     _feed_note = Signal(str)
+    _bug_found = Signal(int)
+    _bug_cleaned = Signal(int, int)
     _voice_chunk_done = Signal(int)
     _voice_chunk_start = Signal(int)
     _voice_chunk_progress = Signal(int, int)
@@ -443,6 +447,12 @@ class PetApp(QObject):
         self._bgwatch_timer = QTimer(self)
         self._bgwatch_timer.timeout.connect(self._scan_background_shells)
         self._bg_announced: set[int] = set()
+        self._bug_timer = QTimer(self)
+        self._bug_timer.timeout.connect(self._check_bugs)
+        self._bug = None
+        self._bug_scanning = False
+        self._bug_found.connect(self._on_bug_found)
+        self._bug_cleaned.connect(self._on_bug_cleaned)
         from collections import deque
         self._clip_treasures: deque = deque(maxlen=12)  # 帮用户收着的剪贴小宝贝 只在内存
         self._last_giveback: datetime | None = None
@@ -994,6 +1004,73 @@ class PetApp(QObject):
 
     def _feed_pop(self, text: str) -> None:
         self._thought.pop(text, self._pet)
+
+    def _check_bugs(self) -> None:
+        """定时扫temp 垃圾堆大了生一只虫"""
+        if self._bug is not None or self._bug_scanning:
+            return
+        if not self._settings.proactive_enabled:
+            return
+        if self._engaged() or not self._pet.isVisible() or self._pet.is_asleep:
+            return
+        if presence.idle_seconds() >= _AWAY_S:
+            return
+        self._bug_scanning = True
+        threading.Thread(target=self._scan_temp_thread, daemon=True).start()
+
+    def _scan_temp_thread(self) -> None:
+        try:
+            size = feeding.temp_junk_size()
+            if size >= _BUG_TEMP_BYTES:
+                self._bug_found.emit(size)
+        finally:
+            self._bug_scanning = False
+
+    @Slot(int)
+    def _on_bug_found(self, size: int) -> None:
+        if self._bug is not None or not self._pet.isVisible():
+            return
+        from desktop_pet.pet.bug import BugWindow
+        from desktop_pet.eyes import capture
+        bug = BugWindow()
+        capture.register_own_window(int(bug.winId()))
+        bug.squished.connect(self._on_bug_squished)
+        bug.escaped.connect(self._on_bug_escaped)
+        geo = self._pet.frameGeometry()
+        screen = self._app.primaryScreen().availableGeometry()
+        side = 1 if geo.center().x() < screen.center().x() else -1
+        bug.spawn_near(geo.center().x() + side * (geo.width() // 2 + 70),
+                       min(geo.bottom() + 10, screen.bottom() - 80), screen)
+        self._bug = bug
+        self._pet.react("double_take")
+        self._feed_pop(i18n.t("bug_spotted").format(size=feeding.human_size(size)))
+
+    @Slot()
+    def _on_bug_squished(self) -> None:
+        self._bug = None
+        threading.Thread(target=self._clean_temp_thread, daemon=True).start()
+
+    def _clean_temp_thread(self) -> None:
+        try:
+            freed, count = feeding.clean_temp()
+            self._bug_cleaned.emit(freed, count)
+        except Exception:
+            self._bug_cleaned.emit(0, 0)
+
+    @Slot(int, int)
+    def _on_bug_cleaned(self, freed: int, count: int) -> None:
+        if count <= 0:
+            self._feed_pop(i18n.t("bug_nothing"))
+            return
+        stats.add_eaten(freed, 0)  # 算它吃的 但不算文件投喂数
+        emotion.apply("fed")
+        selector.set_emotion(*emotion.snapshot())
+        self._pet.react("celebrate")
+        self._feed_pop(i18n.t("bug_squished_msg").format(n=count, size=feeding.human_size(freed)))
+
+    @Slot()
+    def _on_bug_escaped(self) -> None:
+        self._bug = None
 
     def _scan_background_shells(self) -> None:
         """守望后台shell 跑完庆祝 挂了安慰并叫agent看"""
@@ -1654,6 +1731,7 @@ class PetApp(QObject):
         self._watch_timer.start(_WATCH_POLL_MS)
         self._remote_timer.start(_REMOTE_POLL_MS)
         self._bgwatch_timer.start(_BGWATCH_POLL_MS)
+        self._bug_timer.start(_BUG_SCAN_MS)
         if self._settings.remote_inbox:
             remote_inbox.ensure_dir()
         self._hotkeys.start()

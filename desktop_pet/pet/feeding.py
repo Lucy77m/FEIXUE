@@ -112,6 +112,53 @@ def human_size(nbytes: int) -> str:
     return f"{size:.1f}GB"
 
 
+def temp_junk_size(cap_files: int = 30000) -> int:
+    """算temp目录体积 给虫子扫描用"""
+    import tempfile
+    total = 0
+    seen = 0
+    try:
+        for root, _dirs, files in os.walk(tempfile.gettempdir()):
+            for name in files:
+                try:
+                    total += (Path(root) / name).stat().st_size
+                except OSError:
+                    pass
+                seen += 1
+                if seen >= cap_files:
+                    return total
+    except OSError:
+        pass
+    return total
+
+
+def clean_temp(older_than_days: float = 7.0, cap_files: int = 5000) -> tuple[int, int]:
+    """删过期temp文件 返回清掉的字节和个数 占用中的跳过"""
+    import tempfile
+    import time as _time
+    cutoff = _time.time() - older_than_days * 86400
+    freed = 0
+    count = 0
+    try:
+        for root, _dirs, files in os.walk(tempfile.gettempdir()):
+            for name in files:
+                p = Path(root) / name
+                try:
+                    st = p.stat()
+                    if st.st_mtime >= cutoff:
+                        continue
+                    p.unlink()
+                    freed += st.st_size
+                    count += 1
+                except OSError:
+                    continue  # 被占用删不掉很正常
+                if count >= cap_files:
+                    return freed, count
+    except OSError:
+        pass
+    return freed, count
+
+
 def recycle(paths: list[str]) -> str | None:
     """整批送回收站 成功返回None 失败返回原因"""
     try:
