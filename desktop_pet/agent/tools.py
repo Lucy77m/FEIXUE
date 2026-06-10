@@ -67,16 +67,20 @@ TOOLS = [
     _function(
         "run_python",
         "Run code in a persistent Python environment (variables/imports survive across calls); returns stdout. pip-install libraries, call APIs, read/write files, drive automation libraries. "
-        "Each call has a 60s limit — on timeout the session RESTARTS and all variables are LOST, so split long work into <60s steps (or use run_shell for long commands).",
-        {"code": {"type": "string", "description": "the Python code to run"}},
+        "Default limit 60s per call — pass timeout (up to 600) for longer work. On timeout the session RESTARTS and all variables are LOST, so keep steps within the limit you set.",
+        {
+            "code": {"type": "string", "description": "the Python code to run"},
+            "timeout": {"type": "integer", "description": "seconds allowed for this call (default 60, max 600); raise it for known-slow work instead of letting it die"},
+        },
         ["code"],
     ),
     _function(
         "read_file",
-        "Read a text file's contents (long files are truncated to ~20k chars). If you see a truncation note, call again with offset to continue reading from where it stopped.",
+        "Read a text file's contents (truncated to ~20k chars by default; raise max_chars up to 100k when you need a big file in one go). If you see a truncation note, call again with offset to continue reading from where it stopped.",
         {
             "path": {"type": "string", "description": "file path"},
             "offset": {"type": "integer", "description": "character offset to start reading from (use the value given in a previous truncation note); default 0"},
+            "max_chars": {"type": "integer", "description": "max characters to return in this call (default 20000, max 100000)"},
         },
         ["path"],
     ),
@@ -109,10 +113,11 @@ TOOLS = [
     ),
     _function(
         "search_code",
-        "Regex-search the contents of code/text files; returns file:line: content (auto-skips .venv/.git/caches). Use to find code, locate symbols, check usage.",
+        "Regex-search the contents of code/text files; returns file:line: content (auto-skips .venv/.git/caches). Use to find code, locate symbols, check usage. Set context to also see lines around each hit without a follow-up read.",
         {
             "pattern": {"type": "string", "description": "regular expression"},
             "path": {"type": "string", "description": "search root dir or file, default current dir"},
+            "context": {"type": "integer", "description": "lines of surrounding context to show around each match (0-5, default 0)"},
         },
         ["pattern"],
     ),
@@ -741,9 +746,13 @@ def _dispatch_impl(
             run_shell(arguments["command"], arguments.get("shell", "powershell"), session=shell_session)
         )
     if name == "run_python":
-        return ToolResult(python.run(arguments["code"]))
+        try:
+            t = max(10, min(int(arguments.get("timeout") or 60), 600))
+        except (TypeError, ValueError):
+            t = 60
+        return ToolResult(python.run(arguments["code"], timeout=t))
     if name == "read_file":
-        return ToolResult(fs.read_file(arguments["path"], arguments.get("offset", 0)))
+        return ToolResult(fs.read_file(arguments["path"], arguments.get("offset", 0), arguments.get("max_chars", 0)))
     if name == "write_file":
         return ToolResult(fs.write_file(arguments["path"], arguments["content"]))
     if name == "list_dir":
@@ -753,7 +762,7 @@ def _dispatch_impl(
             fs.edit_file(arguments["path"], arguments["old"], arguments["new"], bool(arguments.get("replace_all", False)))
         )
     if name == "search_code":
-        return ToolResult(fs.search_code(arguments["pattern"], arguments.get("path", ".")))
+        return ToolResult(fs.search_code(arguments["pattern"], arguments.get("path", "."), context=arguments.get("context", 0)))
     if name == "glob_files":
         return ToolResult(fs.glob_files(arguments["pattern"], arguments.get("path", ".")))
     if name == "review_diff":

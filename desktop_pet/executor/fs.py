@@ -10,8 +10,10 @@ from fnmatch import fnmatch
 from pathlib import Path
 
 _MAX_READ = 20000
+_MAX_READ_CAP = 100_000
 _MAX_ENTRIES = 200
 _MAX_HITS = 80
+_MAX_SEARCH_CHARS = 18_000
 _IGNORE_DIRS = frozenset(
     {".venv", "venv", "__pycache__", ".git", "node_modules", ".idea",
      ".mypy_cache", ".pytest_cache", ".ruff_cache", "dist", "build"}
@@ -35,8 +37,8 @@ def _read_with_encoding(target: Path) -> tuple[str, str]:
     return raw.decode("utf-8", errors="replace"), "utf-8"
 
 
-def read_file(path: str, offset: int = 0) -> str:
-    """读文件 超长分片 offset 续读"""
+def read_file(path: str, offset: int = 0, max_chars: int = 0) -> str:
+    """读文件 超长分片 offset 续读 max_chars 可调"""
     target = Path(path).expanduser()
     if not target.is_file():
         return f"[not a file or doesn't exist: {path}]"
@@ -48,15 +50,20 @@ def read_file(path: str, offset: int = 0) -> str:
         off = max(0, int(offset))  # offset 转不了就当从头读
     except (TypeError, ValueError):
         off = 0
+    try:
+        cap = min(int(max_chars), _MAX_READ_CAP) if int(max_chars) > 0 else _MAX_READ
+    except (TypeError, ValueError):
+        cap = _MAX_READ
+    cap = max(cap, 1000)
     total = len(text)
-    if off == 0 and total <= _MAX_READ:
+    if off == 0 and total <= cap:
         return text or "(empty file)"
     if off >= total:
         return f"[offset {off} is past the end of the file ({total} chars) — nothing more to read]"
-    chunk = text[off : off + _MAX_READ]
+    chunk = text[off : off + cap]
     end = off + len(chunk)
     header = f"[chars {off}–{end} of {total}]\n"
-    footer = f"\n[truncated; continue with offset={end}]" if end < total else "\n[end of file]"
+    footer = f"\n[truncated; continue with offset={end} (or raise max_chars, up to {_MAX_READ_CAP})]" if end < total else "\n[end of file]"
     return header + chunk + footer
 
 
@@ -192,17 +199,23 @@ def _iter_files(base: Path):
             yield Path(root) / name
 
 
-def search_code(pattern: str, path: str = ".", max_results: int = _MAX_HITS) -> str:
-    """正则逐行搜文本文件"""
+def search_code(pattern: str, path: str = ".", max_results: int = _MAX_HITS, context: int = 0) -> str:
+    """正则逐行搜文本文件 context 给命中行带前后文"""
     try:
         regex = re.compile(pattern)
     except re.error as exc:
         return f"[invalid regex: {exc}]"
+    try:
+        ctx = max(0, min(int(context), 5))
+    except (TypeError, ValueError):
+        ctx = 0
     base = Path(path).expanduser()
     if not base.exists():
         return f"[path doesn't exist: {path}]"
     candidates = [base] if base.is_file() else _iter_files(base)
-    hits: list[str] = []
+    out: list[str] = []
+    used = 0
+    count = 0
     for file in candidates:
         if file.suffix.lower() not in _TEXT_EXT:
             continue
@@ -210,12 +223,24 @@ def search_code(pattern: str, path: str = ".", max_results: int = _MAX_HITS) -> 
             text, _ = _read_with_encoding(file)
         except Exception:
             continue
-        for number, line in enumerate(text.splitlines(), 1):
-            if regex.search(line):
-                hits.append(f"{file}:{number}: {line.strip()[:160]}")
-                if len(hits) >= max_results:
-                    return "\n".join(hits) + f"\n…[hit the {max_results}-result cap; narrow the search]"
-    return "\n".join(hits) if hits else "(no matches)"
+        lines = text.splitlines()
+        for idx, line in enumerate(lines):
+            if not regex.search(line):
+                continue
+            if ctx:
+                block = [
+                    f"{file}:{j + 1}{':' if j == idx else '-'} {lines[j].strip()[:160]}"
+                    for j in range(max(0, idx - ctx), min(len(lines), idx + ctx + 1))
+                ]
+                piece = ("--\n" if out else "") + "\n".join(block)
+            else:
+                piece = f"{file}:{idx + 1}: {line.strip()[:160]}"
+            out.append(piece)
+            used += len(piece)
+            count += 1
+            if count >= max_results or used >= _MAX_SEARCH_CHARS:
+                return "\n".join(out) + f"\n…[truncated at {count} results; narrow the search]"
+    return "\n".join(out) if out else "(no matches)"
 
 
 def glob_files(pattern: str, path: str = ".", max_results: int = _MAX_ENTRIES) -> str:
