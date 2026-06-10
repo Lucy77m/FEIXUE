@@ -18,7 +18,7 @@ from PySide6.QtGui import (
 )
 
 from desktop_pet.emotion.tags import EXPRESSIONS as _EXPRESSIONS
-from desktop_pet.pet import palette, props
+from desktop_pet.pet import adornments, palette, props
 from desktop_pet.pet.behavior import selector
 from desktop_pet.pet.behaviors import Category, registry
 from desktop_pet.pet.behaviors.easing import ease_in, ease_out, ease_out_back
@@ -996,19 +996,19 @@ class BlobPet:
         self._draw_mouth(painter, bw, bh)
         self._draw_costume_worn(painter, bw, bh)
         if self._pendant_n > 0 and self._blanket_e < 0.3:
-            self._draw_pendant(painter, bw, bh)
+            adornments.draw_pendant(painter, bw, bh, self._t)
         if self._shy_e > 0.01:
-            self._draw_shy_hands(painter, bw, bh, self._shy_e)
+            adornments.draw_shy_hands(painter, bw, bh, self._shy_e, self._t)
         if self._squeeze_e > 0.01 and self._calm_e > 0.05:
-            self._draw_squeeze_marks(painter, bw, bh, self._squeeze_e * self._calm_e)
+            adornments.draw_squeeze_marks(painter, bw, bh, self._squeeze_e * self._calm_e, self._t)
         if self._hot_e > 0.01 and self._calm_e > 0.05:
-            self._draw_hot(painter, bw, bh, self._hot_e * self._calm_e)
+            adornments.draw_hot(painter, bw, bh, self._hot_e * self._calm_e, self._t)
         if self._blanket_e > 0.01:
-            self._draw_blanket(painter, bw, bh, self._blanket_e)
+            adornments.draw_blanket(painter, bw, bh, self._blanket_e, self._t)
         if self._lowbatt_e > 0.01 and self._calm_e > 0.05:
-            self._draw_lowbatt(painter, bw, bh, self._lowbatt_e * self._calm_e)
+            adornments.draw_lowbatt(painter, bw, bh, self._lowbatt_e * self._calm_e, self._t)
         if self._weather_e > 0.01 and self._calm_e > 0.05:
-            self._draw_weather(painter, bw, bh, self._weather_e * self._calm_e)
+            adornments.draw_weather(painter, bw, bh, self._weather, self._weather_e * self._calm_e, self._t)
         if think_gate > 0.01 and not self._react and not self._worn_costume and self._shy_e < 0.3:
             self._draw_think_hand(painter, bw, bh, think_gate)
         if self._lecturing:
@@ -1017,7 +1017,10 @@ class BlobPet:
 
         self._draw_costume_ambient(painter, cx, head_y, bw, bh)
         if self._cake_e > 0.01 or self._cake_smoke > 0.0:
-            self._draw_cake(painter, cx, head_y, bw, bh)
+            adornments.draw_cake(
+                painter, cx, head_y, bw, bh,
+                self._cake_e, self._cake_lit, self._cake_smoke, self._t,
+            )
         if self._sleep_e > 0.01:
             self._draw_zzz(painter, cx, head_y, bw, bh, self._sleep_e)
 
@@ -1482,7 +1485,7 @@ class BlobPet:
             rp = min(1.0, relapsed / max(rdur, 0.001))
             gate = math.sin(min(rp * 3, 1.0, (1 - rp) * 3) * math.pi / 2)  # 进出渐变
             if rname in ("giggle", "purr", "snuggle"):
-                self._draw_blush(painter, bw, bh, gate)
+                adornments.draw_blush(painter, bw, bh, gate)
                 dx, ey, ew, eh = bw * 0.24, bh * 0.05, bw * 0.15, bh * 0.26
                 self._eye_arc(painter, -dx, ey, ew, eh)
                 self._eye_arc(painter, dx, ey, ew, eh)
@@ -1565,259 +1568,6 @@ class BlobPet:
                 painter.setPen(pen)
                 painter.setBrush(Qt.BrushStyle.NoBrush)
                 painter.drawArc(QRectF(cx - ew, ey - eh * 0.1, ew * 2, eh * 0.5), 200 * 16, 140 * 16)
-
-    def _draw_blush(self, painter: QPainter, bw: float, bh: float, k: float) -> None:
-        """脸颊两团红晕"""
-        if k <= 0.01:
-            return
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(244, 142, 162, int(72 * k)))
-        for sx in (-1, 1):
-            painter.drawEllipse(QPointF(sx * bw * 0.31, bh * 0.17), bw * 0.085, bh * 0.05)
-
-    def _draw_shy_hands(self, painter: QPainter, bw: float, bh: float, e: float) -> None:
-        """双手从下面升起来捂住眼"""
-        k = ease_out(e)
-        dx, ey = bw * 0.24, bh * 0.05
-        start_y = bh * 0.42
-        painter.setPen(self._think_hand_pen(bw))
-        painter.setBrush(_SKIN)
-        wob = math.sin(self._t * 2.2) * bh * 0.012  # 捂着也会微微动
-        for sx in (-1, 1):
-            hx = sx * dx * (1.25 - 0.25 * k)
-            hy = start_y + (ey - start_y) * k + wob
-            painter.drawEllipse(QPointF(hx, hy), bw * 0.115, bw * 0.10)
-
-    def _draw_weather(self, painter: QPainter, bw: float, bh: float, e: float) -> None:
-        """天气装饰 雨伞 雪人 化水"""
-        kind = self._weather or ("rain" if e > 0 else "")
-        if kind == "rain":
-            # 头顶小伞 伞下安全 周围雨丝
-            k = ease_out(e)
-            top = -bh * (0.55 + 0.32 * k)
-            painter.setPen(QPen(_INK, max(1.5, bw * 0.015)))
-            painter.setBrush(QColor(122, 108, 255, int(235 * e)))
-            span = bw * 0.55
-            painter.drawChord(QRectF(-span, top, span * 2, bh * 0.5), 0, 180 * 16)
-            # 伞骨尖和柄
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            for i in range(3):
-                px = -span + span * i
-                painter.drawLine(QPointF(px, top + bh * 0.25), QPointF(px, top + bh * 0.28))
-            painter.drawLine(QPointF(0, top + bh * 0.25), QPointF(0, -bh * 0.42))
-            # 雨丝 伞外落
-            pen = QPen(QColor(140, 180, 235, int(190 * e)))
-            pen.setWidthF(max(1.3, bw * 0.012))
-            painter.setPen(pen)
-            for i in range(5):
-                ph = (self._t * 0.9 + i * 0.23) % 1.0
-                side = -1 if i % 2 == 0 else 1
-                rx = side * (bw * 0.66 + (i % 3) * bw * 0.08)
-                ry = -bh * 0.5 + ph * bh * 1.0
-                painter.drawLine(QPointF(rx, ry), QPointF(rx - bw * 0.02, ry + bh * 0.07))
-        elif kind == "snow":
-            # 脚边小雪人 头顶飘雪
-            k = ease_out(e)
-            sx0, sy0 = bw * 0.72, bh * 0.36
-            painter.setPen(QPen(QColor(150, 160, 186, int(230 * e)), max(1.3, bw * 0.013)))
-            painter.setBrush(QColor(250, 250, 254, int(240 * e)))
-            painter.drawEllipse(QPointF(sx0, sy0), bw * 0.13 * k, bh * 0.085 * k)
-            painter.drawEllipse(QPointF(sx0, sy0 - bh * 0.115 * k), bw * 0.085 * k, bh * 0.06 * k)
-            if k > 0.6:
-                painter.setPen(Qt.PenStyle.NoPen)
-                painter.setBrush(QColor(40, 38, 48, int(255 * e)))
-                for ex in (-1, 1):
-                    painter.drawEllipse(QPointF(sx0 + ex * bw * 0.022, sy0 - bh * 0.125), bw * 0.008, bw * 0.008)
-                painter.setBrush(QColor(238, 140, 70, int(255 * e)))
-                painter.drawPolygon(QPolygonF([
-                    QPointF(sx0, sy0 - bh * 0.105), QPointF(sx0 + bw * 0.045, sy0 - bh * 0.095),
-                    QPointF(sx0, sy0 - bh * 0.085)]))
-            # 飘雪
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor(255, 255, 255, int(220 * e)))
-            for i in range(4):
-                ph = (self._t * 0.35 + i * 0.27) % 1.0
-                fx2 = math.sin((ph * 2.5 + i) * math.pi) * bw * 0.4
-                fy = -bh * 0.85 + ph * bh * 1.1
-                painter.drawEllipse(QPointF(fx2, fy), bw * 0.014, bw * 0.014)
-        elif kind == "melt":
-            # 身底一摊水渍 加汗
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor(150, 200, 240, int(90 * e)))
-            painter.drawEllipse(QPointF(0, bh * 0.46), bw * 0.55 * e, bh * 0.05 * e)
-            ph = (self._t * 0.5) % 1.0
-            a = int(200 * e * math.sin(min(ph * 3, 1.0, (1 - ph) * 4) * math.pi / 2))
-            if a > 0:
-                painter.setBrush(QColor(140, 190, 240, a))
-                painter.drawEllipse(QPointF(bw * 0.40, -bh * 0.28 + ph * bh * 0.4), bw * 0.024, bw * 0.030)
-
-    def _draw_pendant(self, painter: QPainter, bw: float, bh: float) -> None:
-        """胸前小吊牌 替用户收着东西的标记"""
-        sway = math.sin(self._t * 1.6) * bw * 0.008
-        cy = bh * 0.40
-        pen = QPen(QColor(110, 104, 130, 200))
-        pen.setWidthF(max(1.2, bw * 0.010))
-        painter.setPen(pen)
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        # 挂绳两段
-        painter.drawLine(QPointF(-bw * 0.16, bh * 0.30), QPointF(sway, cy))
-        painter.drawLine(QPointF(bw * 0.16, bh * 0.30), QPointF(sway, cy))
-        # 圆牌带高光
-        painter.setPen(QPen(_INK, max(1.2, bw * 0.012)))
-        painter.setBrush(QColor(98, 90, 124))
-        r = bw * 0.045
-        painter.drawEllipse(QPointF(sway, cy + r * 0.6), r, r)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(190, 182, 214, 190))
-        painter.drawEllipse(QPointF(sway - r * 0.3, cy + r * 0.3), r * 0.28, r * 0.28)
-
-    def _draw_cake(self, painter: QPainter, cx: float, head_y: float, bw: float, bh: float) -> None:
-        """纪念日小蛋糕 两层三蜡烛 火苗会摆 吹灭冒烟"""
-        e = ease_out(self._cake_e)
-        gx = cx + bw * 0.72
-        gy = head_y + bh * 0.46 + (1 - e) * bh * 0.35  # 从下面端上来
-        painter.save()
-        painter.translate(gx, gy)
-        alpha = int(255 * min(1.0, self._cake_e * 1.4 + (0.4 if self._cake_smoke > 0 else 0.0)))
-        # 托盘
-        painter.setPen(QPen(QColor(120, 108, 96, alpha), max(1.3, bw * 0.012)))
-        painter.setBrush(QColor(238, 234, 244, alpha))
-        painter.drawEllipse(QPointF(0, bh * 0.020), bw * 0.30, bh * 0.045)
-        # 下层
-        painter.setBrush(QColor(248, 226, 198, alpha))
-        painter.drawRoundedRect(QRectF(-bw * 0.24, -bh * 0.10, bw * 0.48, bh * 0.12), 4, 4)
-        # 上层
-        painter.setBrush(QColor(252, 238, 214, alpha))
-        painter.drawRoundedRect(QRectF(-bw * 0.16, -bh * 0.19, bw * 0.32, bh * 0.10), 4, 4)
-        # 奶油波边
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(244, 168, 184, alpha))
-        for i in range(5):
-            px = -bw * 0.20 + i * bw * 0.10
-            painter.drawEllipse(QPointF(px, -bh * 0.10), bw * 0.030, bh * 0.020)
-        # 三根蜡烛
-        for i, px in enumerate((-bw * 0.09, 0.0, bw * 0.09)):
-            painter.setBrush(QColor(168, 196, 240, alpha))
-            painter.drawRect(QRectF(px - bw * 0.012, -bh * 0.265, bw * 0.024, bh * 0.075))
-            if self._cake_lit:
-                # 火苗 各自摆
-                fx_off = math.sin(self._t * 7 + i * 2.1) * bw * 0.008
-                fl = QColor(252, 186, 86, alpha)
-                painter.setBrush(fl)
-                painter.drawEllipse(QPointF(px + fx_off, -bh * 0.295), bw * 0.016, bh * 0.026)
-                painter.setBrush(QColor(255, 232, 150, alpha))
-                painter.drawEllipse(QPointF(px + fx_off, -bh * 0.288), bw * 0.008, bh * 0.013)
-        # 吹灭的烟
-        if self._cake_smoke > 0.0:
-            k = 1 - self._cake_smoke / 2.2
-            painter.setPen(Qt.PenStyle.NoPen)
-            for i, px in enumerate((-bw * 0.09, 0.0, bw * 0.09)):
-                ph = min(1.0, k * 1.6 + i * 0.08)
-                sa = max(0, int(150 * (1 - ph)))
-                painter.setBrush(QColor(170, 170, 184, sa))
-                sy = -bh * 0.30 - ph * bh * 0.22
-                sx2 = px + math.sin(ph * 5 + i) * bw * 0.02
-                painter.drawEllipse(QPointF(sx2, sy), bw * 0.014 + ph * bw * 0.012, bh * 0.018)
-        painter.restore()
-
-    def _draw_hot(self, painter: QPainter, bw: float, bh: float, e: float) -> None:
-        """热成这样 汗滴下滑 折扇狂扇"""
-        # 两滴汗 沿脸侧循环下滑
-        painter.setPen(Qt.PenStyle.NoPen)
-        for k, sx in ((0, -1), (1, 1)):
-            ph = (self._t * 0.45 + k * 0.5) % 1.0
-            drop_y = -bh * 0.30 + ph * bh * 0.42
-            a = int(200 * e * math.sin(min(ph * 3, 1.0, (1 - ph) * 4) * math.pi / 2))
-            if a <= 0:
-                continue
-            painter.setBrush(QColor(140, 190, 240, a))
-            r = bw * 0.030
-            x = sx * bw * 0.40
-            painter.drawEllipse(QPointF(x, drop_y), r * 0.78, r)
-            painter.drawPolygon(QPolygonF([
-                QPointF(x - r * 0.5, drop_y - r * 0.5),
-                QPointF(x + r * 0.5, drop_y - r * 0.5),
-                QPointF(x, drop_y - r * 1.55),
-            ]))
-        # 右手折扇 快速摆
-        k = ease_out(e)
-        hand = QPointF(bw * 0.52, bh * 0.10 - k * bh * 0.06)
-        painter.save()
-        painter.translate(hand)
-        painter.rotate(-22 + math.sin(self._t * 13) * 26 * e)
-        fan_l = bw * 0.30
-        painter.setPen(QPen(_INK, max(1.4, bw * 0.014)))
-        painter.setBrush(QColor(250, 244, 226, int(245 * e)))
-        path_pts = [QPointF(0, 0)]
-        for i in range(7):
-            ang = math.radians(-58 + i * 19)
-            path_pts.append(QPointF(math.sin(ang) * fan_l, -math.cos(ang) * fan_l))
-        path_pts.append(QPointF(0, 0))
-        painter.drawPolygon(QPolygonF(path_pts))
-        for i in range(7):  # 扇骨
-            ang = math.radians(-58 + i * 19)
-            painter.drawLine(QPointF(0, 0), QPointF(math.sin(ang) * fan_l, -math.cos(ang) * fan_l))
-        painter.restore()
-        # 手
-        painter.setPen(self._think_hand_pen(bw))
-        painter.setBrush(_SKIN)
-        painter.drawEllipse(hand, bw * 0.09, bw * 0.09)
-
-    def _draw_squeeze_marks(self, painter: QPainter, bw: float, bh: float, e: float) -> None:
-        """两侧压力痕 被挤的难受"""
-        pen = QPen(QColor(_INK.red(), _INK.green(), _INK.blue(), int(150 * e)))
-        pen.setWidthF(max(1.6, bw * 0.016))
-        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-        painter.setPen(pen)
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        for sx in (-1, 1):
-            for i in range(3):
-                x = sx * (bw * 0.56 + i * bw * 0.05)
-                ln = bh * (0.16 - i * 0.035)
-                y0 = -ln / 2 + math.sin(self._t * 9 + i) * bh * 0.012
-                painter.drawLine(QPointF(x, y0), QPointF(x, y0 + ln))
-
-    def _draw_blanket(self, painter: QPainter, bw: float, bh: float, e: float) -> None:
-        """从下往上盖的小被子 波浪边带圆点花纹"""
-        k = ease_out(e)
-        top = bh * (0.55 - 0.42 * k)  # 被沿位置
-        breathe = math.sin(self._t * _SLEEP_BREATH_HZ) * bh * 0.012
-        top += breathe
-        w = bw * 0.62
-        painter.setPen(QPen(QColor(120, 108, 96, int(230 * e)), max(1.4, bw * 0.014)))
-        painter.setBrush(QColor(248, 232, 198, int(240 * e)))
-        # 被身
-        body = QPolygonF()
-        steps = 9
-        for i in range(steps + 1):  # 上沿波浪
-            x = -w + (2 * w) * i / steps
-            y = top + math.sin(i * math.pi) * 0  # 占位直线 用弧画波浪太繁 改小圆齿
-            body.append(QPointF(x, y + (bh * 0.018 if i % 2 else 0.0)))
-        body.append(QPointF(w, bh * 0.62))
-        body.append(QPointF(-w, bh * 0.62))
-        painter.drawPolygon(body)
-        # 圆点花纹
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(236, 196, 150, int(200 * e)))
-        for i in range(4):
-            px = -w * 0.7 + i * w * 0.46
-            py = top + bh * 0.16 + (i % 2) * bh * 0.10
-            if py < bh * 0.58:
-                painter.drawEllipse(QPointF(px, py), bw * 0.025, bw * 0.025)
-
-    def _draw_lowbatt(self, painter: QPainter, bw: float, bh: float, e: float) -> None:
-        """头顶红色低电量图标 闪烁"""
-        blink = (math.sin(self._t * 5) + 1) / 2
-        a = int((90 + 150 * blink) * e)
-        x, y = bw * 0.34, -bh * 0.72
-        w, h = bw * 0.17, bh * 0.105
-        painter.setPen(QPen(QColor(220, 70, 86, a), max(1.5, bw * 0.016)))
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.drawRoundedRect(QRectF(x - w / 2, y - h / 2, w, h), 2.5, 2.5)
-        painter.drawRect(QRectF(x + w / 2, y - h * 0.2, w * 0.10, h * 0.4))  # 电极头
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(220, 70, 86, a))
-        painter.drawRect(QRectF(x - w / 2 + w * 0.10, y - h * 0.26, w * 0.16, h * 0.52))  # 只剩一格
 
     def _draw_eating_eyes(self, painter: QPainter, p: float, bw: float, bh: float) -> None:
         """吃东西的眼神 追着文件看 咀嚼眯眼 吞咽闭眼 打嗝瞪圆再变笑"""
