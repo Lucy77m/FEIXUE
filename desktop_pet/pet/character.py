@@ -1227,6 +1227,10 @@ class BlobPet:
         if self._sleep_e > 0.0:
             self._draw_sleeping_eyes(painter, bw, bh, self._sleep_e)
             return
+        eat_p = self._eating_progress()
+        if eat_p is not None:
+            self._draw_eating_eyes(painter, eat_p, bw, bh)
+            return
         dx, ey, ew, eh = bw * 0.24, bh * 0.05, bw * 0.15, bh * 0.26
         shift = self._turn * bw * 0.1           # 朝向偏移眼珠 远侧眼压扁
         scale_l = 1 - max(self._turn, 0.0) * 0.55
@@ -1285,6 +1289,44 @@ class BlobPet:
                 painter.setPen(pen)
                 painter.setBrush(Qt.BrushStyle.NoBrush)
                 painter.drawArc(QRectF(cx - ew, ey - eh * 0.1, ew * 2, eh * 0.5), 200 * 16, 140 * 16)
+
+    def _draw_eating_eyes(self, painter: QPainter, p: float, bw: float, bh: float) -> None:
+        """吃东西的眼神 追着文件看 咀嚼眯眼 吞咽闭眼 打嗝瞪圆再变笑"""
+        dx, ey, ew, eh = bw * 0.24, bh * 0.05, bw * 0.15, bh * 0.26
+        if p < 0.15:
+            # 圆睁 视线从头顶追到嘴边
+            k = ease_out(p / 0.15)
+            look = -eh * 0.3 + k * eh * 0.55
+            scale = 1.15 + 0.1 * math.sin(p * 50)  # 好奇放大
+            self._eye_oval(painter, -dx, ey + look, ew * scale, eh * scale)
+            self._eye_oval(painter, dx, ey + look, ew * scale, eh * scale)
+            return
+        if p < 0.55:
+            # 满足地眯起 弧线随咀嚼微颤
+            q = (p - 0.15) / 0.4
+            wob = math.sin(q * math.pi * 12 - math.pi / 2) * eh * 0.03
+            self._eye_arc(painter, -dx, ey + wob, ew, eh)
+            self._eye_arc(painter, dx, ey + wob, ew, eh)
+            return
+        if p < 0.75:
+            # 咽下去那一下闭紧
+            pen = QPen(_INK)
+            pen.setWidthF(max(2.0, eh * 0.18))
+            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            painter.setPen(pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            for sx in (-1, 1):
+                painter.drawLine(QPointF(sx * dx - ew * 0.5, ey), QPointF(sx * dx + ew * 0.5, ey))
+            return
+        q = (p - 0.75) / 0.25
+        if q < 0.45:
+            # 打嗝把自己惊到 瞪圆
+            self._eye_oval(painter, -dx, ey - eh * 0.06, ew * 1.3, eh * 1.25)
+            self._eye_oval(painter, dx, ey - eh * 0.06, ew * 1.3, eh * 1.25)
+            return
+        # 回味的笑眼
+        self._eye_arc(painter, -dx, ey, ew, eh)
+        self._eye_arc(painter, dx, ey, ew, eh)
 
     def _eating_progress(self) -> float | None:
         """正在吃就给进度 不在吃给None"""
