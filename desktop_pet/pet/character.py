@@ -335,6 +335,14 @@ class BlobPet:
         self._react_intensity = 1.0
         self._shy = False
         self._shy_e = 0.0
+        self._hot = False
+        self._hot_e = 0.0
+        self._squeeze = False
+        self._squeeze_e = 0.0
+        self._lowbatt = False
+        self._lowbatt_e = 0.0
+        self._blanket = False
+        self._blanket_e = 0.0
         self._settle = 0.0
         self._hold = 0.0
         self._busy = False
@@ -380,6 +388,22 @@ class BlobPet:
     def set_shy(self, on: bool) -> None:
         """看到密码框捂眼回避"""
         self._shy = bool(on)
+
+    def set_hot(self, on: bool) -> None:
+        """cpu烧起来了 冒汗扇扇子"""
+        self._hot = bool(on)
+
+    def set_squeeze(self, on: bool) -> None:
+        """内存满了被挤扁"""
+        self._squeeze = bool(on)
+
+    def set_low_batt(self, on: bool) -> None:
+        """电量告急 焦躁"""
+        self._lowbatt = bool(on)
+
+    def set_blanket(self, on: bool) -> None:
+        """深夜盖小被子"""
+        self._blanket = bool(on)
 
     def set_expression(self, name: str) -> None:
         if name in _EXPRESSIONS:
@@ -554,6 +578,13 @@ class BlobPet:
             self._shy_e = min(1.0, self._shy_e + dt * 3.5)
         else:
             self._shy_e = max(0.0, self._shy_e - dt * 2.5)
+        for flag, attr in (("_hot", "_hot_e"), ("_squeeze", "_squeeze_e"),
+                           ("_lowbatt", "_lowbatt_e"), ("_blanket", "_blanket_e")):
+            e = getattr(self, attr)
+            if getattr(self, flag):
+                setattr(self, attr, min(1.0, e + dt * 1.6))
+            else:
+                setattr(self, attr, max(0.0, e - dt * 1.2))
         if self._hold > 0.0 and not self._busy and self._activity is None:
             self._hold -= dt
             if self._hold <= 0.0:
@@ -839,6 +870,18 @@ class BlobPet:
             rot += self._shy_e * 7
             sxm *= 1 - 0.04 * self._shy_e
             oy += self._shy_e * bh * 0.02
+        if self._squeeze_e > 0.0:
+            # 被内存挤扁
+            sym *= 1 - 0.22 * self._squeeze_e
+            sxm *= 1 + 0.16 * self._squeeze_e
+            oy += bh * 0.1 * self._squeeze_e
+        if self._hot_e > 0.0:
+            # 热得发蔫 缓慢晃
+            oy += bh * 0.02 * self._hot_e
+            rot += math.sin(self._t * 1.1) * 2.0 * self._hot_e
+        if self._lowbatt_e > 0.0:
+            # 没电焦躁 高频小颤
+            ox += math.sin(self._t * 23) * bw * 0.008 * self._lowbatt_e
 
         head_y = cy + oy
         painter.save()
@@ -851,6 +894,14 @@ class BlobPet:
         self._draw_costume_worn(painter, bw, bh)
         if self._shy_e > 0.01:
             self._draw_shy_hands(painter, bw, bh, self._shy_e)
+        if self._squeeze_e > 0.01:
+            self._draw_squeeze_marks(painter, bw, bh, self._squeeze_e)
+        if self._hot_e > 0.01:
+            self._draw_hot(painter, bw, bh, self._hot_e)
+        if self._blanket_e > 0.01:
+            self._draw_blanket(painter, bw, bh, self._blanket_e)
+        if self._lowbatt_e > 0.01:
+            self._draw_lowbatt(painter, bw, bh, self._lowbatt_e)
         if think_gate > 0.01 and not self._react and not self._worn_costume:
             self._draw_think_hand(painter, bw, bh, think_gate)
         if self._lecturing:
@@ -886,12 +937,14 @@ class BlobPet:
     _FX_GLOOM = frozenset({"slump", "droop", "deflate", "sigh", "splat"})
     _FX_MUNCH = frozenset({"eating"})
     _FX_TICKLE = frozenset({"giggle"})
+    _FX_WARM = frozenset({"snuggle"})
 
     def _draw_react_fx(self, painter: QPainter, name: str, p: float, cx: float, cy: float,
                        bw: float, bh: float) -> None:
         """按反应名分发到对应特效"""
         if name not in (self._FX_NOTES | self._FX_CONFETTI | self._FX_SWOOSH | self._FX_SHOCK
-                        | self._FX_RING | self._FX_GLOOM | self._FX_MUNCH | self._FX_TICKLE):
+                        | self._FX_RING | self._FX_GLOOM | self._FX_MUNCH | self._FX_TICKLE
+                        | self._FX_WARM):
             return
         painter.save()
         self._fx_origin_y = cy
@@ -912,7 +965,29 @@ class BlobPet:
             self._fx_munch(painter, p, bw, bh)
         elif name in self._FX_TICKLE:
             self._fx_tickle(painter, p, bw, bh)
+        elif name in self._FX_WARM:
+            self._fx_warm(painter, p, bw, bh)
         painter.restore()
+
+    def _fx_warm(self, painter: QPainter, p: float, bw: float, bh: float) -> None:
+        """身侧升起的热气波纹"""
+        gate = math.sin(min(p * 3, 1.0, (1 - p) * 3) * math.pi / 2)
+        for k in range(3):
+            ph = (p * 1.6 + k * 0.33) % 1.0
+            x0 = (k - 1) * bw * 0.34
+            rise = ph * bh * 0.7
+            a = max(0, int(170 * gate * math.sin(ph * math.pi)))
+            pen = QPen(QColor(238, 150, 92, a))
+            pen.setWidthF(max(1.6, bw * 0.018))
+            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            painter.setPen(pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            pts = QPolygonF()
+            for i in range(9):
+                t = i / 8.0
+                pts.append(QPointF(x0 + math.sin((t * 2.2 + ph * 2) * math.pi) * bw * 0.05,
+                                   bh * 0.1 - rise - t * bh * 0.28))
+            painter.drawPolyline(pts)
 
     def _fx_tickle(self, painter: QPainter, p: float, bw: float, bh: float) -> None:
         """痒得乱蹦的小星和墨点"""
@@ -1282,7 +1357,7 @@ class BlobPet:
             rname, relapsed, rdur = self._react
             rp = min(1.0, relapsed / max(rdur, 0.001))
             gate = math.sin(min(rp * 3, 1.0, (1 - rp) * 3) * math.pi / 2)  # 进出渐变
-            if rname in ("giggle", "purr"):
+            if rname in ("giggle", "purr", "snuggle"):
                 self._draw_blush(painter, bw, bh, gate)
                 dx, ey, ew, eh = bw * 0.24, bh * 0.05, bw * 0.15, bh * 0.26
                 self._eye_arc(painter, -dx, ey, ew, eh)
@@ -1382,6 +1457,105 @@ class BlobPet:
             hx = sx * dx * (1.25 - 0.25 * k)
             hy = start_y + (ey - start_y) * k + wob
             painter.drawEllipse(QPointF(hx, hy), bw * 0.115, bw * 0.10)
+
+    def _draw_hot(self, painter: QPainter, bw: float, bh: float, e: float) -> None:
+        """热成这样 汗滴下滑 折扇狂扇"""
+        # 两滴汗 沿脸侧循环下滑
+        painter.setPen(Qt.PenStyle.NoPen)
+        for k, sx in ((0, -1), (1, 1)):
+            ph = (self._t * 0.45 + k * 0.5) % 1.0
+            drop_y = -bh * 0.30 + ph * bh * 0.42
+            a = int(200 * e * math.sin(min(ph * 3, 1.0, (1 - ph) * 4) * math.pi / 2))
+            if a <= 0:
+                continue
+            painter.setBrush(QColor(140, 190, 240, a))
+            r = bw * 0.030
+            x = sx * bw * 0.40
+            painter.drawEllipse(QPointF(x, drop_y), r * 0.78, r)
+            painter.drawPolygon(QPolygonF([
+                QPointF(x - r * 0.5, drop_y - r * 0.5),
+                QPointF(x + r * 0.5, drop_y - r * 0.5),
+                QPointF(x, drop_y - r * 1.55),
+            ]))
+        # 右手折扇 快速摆
+        k = ease_out(e)
+        hand = QPointF(bw * 0.52, bh * 0.10 - k * bh * 0.06)
+        painter.save()
+        painter.translate(hand)
+        painter.rotate(-22 + math.sin(self._t * 13) * 26 * e)
+        fan_l = bw * 0.30
+        painter.setPen(QPen(_INK, max(1.4, bw * 0.014)))
+        painter.setBrush(QColor(250, 244, 226, int(245 * e)))
+        path_pts = [QPointF(0, 0)]
+        for i in range(7):
+            ang = math.radians(-58 + i * 19)
+            path_pts.append(QPointF(math.sin(ang) * fan_l, -math.cos(ang) * fan_l))
+        path_pts.append(QPointF(0, 0))
+        painter.drawPolygon(QPolygonF(path_pts))
+        for i in range(7):  # 扇骨
+            ang = math.radians(-58 + i * 19)
+            painter.drawLine(QPointF(0, 0), QPointF(math.sin(ang) * fan_l, -math.cos(ang) * fan_l))
+        painter.restore()
+        # 手
+        painter.setPen(self._think_hand_pen(bw))
+        painter.setBrush(_SKIN)
+        painter.drawEllipse(hand, bw * 0.09, bw * 0.09)
+
+    def _draw_squeeze_marks(self, painter: QPainter, bw: float, bh: float, e: float) -> None:
+        """两侧压力痕 被挤的难受"""
+        pen = QPen(QColor(_INK.red(), _INK.green(), _INK.blue(), int(150 * e)))
+        pen.setWidthF(max(1.6, bw * 0.016))
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        for sx in (-1, 1):
+            for i in range(3):
+                x = sx * (bw * 0.56 + i * bw * 0.05)
+                ln = bh * (0.16 - i * 0.035)
+                y0 = -ln / 2 + math.sin(self._t * 9 + i) * bh * 0.012
+                painter.drawLine(QPointF(x, y0), QPointF(x, y0 + ln))
+
+    def _draw_blanket(self, painter: QPainter, bw: float, bh: float, e: float) -> None:
+        """从下往上盖的小被子 波浪边带圆点花纹"""
+        k = ease_out(e)
+        top = bh * (0.55 - 0.42 * k)  # 被沿位置
+        breathe = math.sin(self._t * _SLEEP_BREATH_HZ) * bh * 0.012
+        top += breathe
+        w = bw * 0.62
+        painter.setPen(QPen(QColor(120, 108, 96, int(230 * e)), max(1.4, bw * 0.014)))
+        painter.setBrush(QColor(248, 232, 198, int(240 * e)))
+        # 被身
+        body = QPolygonF()
+        steps = 9
+        for i in range(steps + 1):  # 上沿波浪
+            x = -w + (2 * w) * i / steps
+            y = top + math.sin(i * math.pi) * 0  # 占位直线 用弧画波浪太繁 改小圆齿
+            body.append(QPointF(x, y + (bh * 0.018 if i % 2 else 0.0)))
+        body.append(QPointF(w, bh * 0.62))
+        body.append(QPointF(-w, bh * 0.62))
+        painter.drawPolygon(body)
+        # 圆点花纹
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(236, 196, 150, int(200 * e)))
+        for i in range(4):
+            px = -w * 0.7 + i * w * 0.46
+            py = top + bh * 0.16 + (i % 2) * bh * 0.10
+            if py < bh * 0.58:
+                painter.drawEllipse(QPointF(px, py), bw * 0.025, bw * 0.025)
+
+    def _draw_lowbatt(self, painter: QPainter, bw: float, bh: float, e: float) -> None:
+        """头顶红色低电量图标 闪烁"""
+        blink = (math.sin(self._t * 5) + 1) / 2
+        a = int((90 + 150 * blink) * e)
+        x, y = bw * 0.34, -bh * 0.72
+        w, h = bw * 0.17, bh * 0.105
+        painter.setPen(QPen(QColor(220, 70, 86, a), max(1.5, bw * 0.016)))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRoundedRect(QRectF(x - w / 2, y - h / 2, w, h), 2.5, 2.5)
+        painter.drawRect(QRectF(x + w / 2, y - h * 0.2, w * 0.10, h * 0.4))  # 电极头
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(220, 70, 86, a))
+        painter.drawRect(QRectF(x - w / 2 + w * 0.10, y - h * 0.26, w * 0.16, h * 0.52))  # 只剩一格
 
     def _draw_eating_eyes(self, painter: QPainter, p: float, bw: float, bh: float) -> None:
         """吃东西的眼神 追着文件看 咀嚼眯眼 吞咽闭眼 打嗝瞪圆再变笑"""

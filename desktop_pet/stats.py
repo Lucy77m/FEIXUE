@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 import json
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from desktop_pet.settings import DATA_DIR, atomic_write_text
 
@@ -43,6 +43,20 @@ def bump_interactions() -> None:
     data = _load()
     data["interactions"] = int(data.get("interactions", 0) or 0) + 1
     _save(data)
+
+
+def mark_late_night() -> int:
+    """记一次熬夜 返回连续熬了几天 当天重复调用不重计"""
+    data = _load()
+    today = date.today().isoformat()
+    if data.get("last_late") == today:
+        return int(data.get("late_streak", 1) or 1)
+    yesterday = (date.today() - timedelta(days=1)).isoformat()
+    streak = int(data.get("late_streak", 0) or 0) + 1 if data.get("last_late") == yesterday else 1
+    data["last_late"] = today
+    data["late_streak"] = streak
+    _save(data)
+    return streak
 
 
 def add_eaten(nbytes: int, nfiles: int = 1) -> None:

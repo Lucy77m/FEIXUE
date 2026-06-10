@@ -264,6 +264,15 @@ def _purr(p: float, bw: float, bh: float) -> PoseDelta:
                      1 + 0.04 * ease + rumble, 1 - 0.05 * ease + rumble)
 
 
+def _snuggle(p: float, bw: float, bh: float) -> PoseDelta:
+    """挨着热乎地方蜷成一团蹭"""
+    ease = math.sin(min(p * 2.5, 1.0) * math.pi / 2) * (1 - max(0.0, p - 0.82) * 5.5)
+    ease = max(0.0, ease)
+    rub = math.sin(p * math.pi * 5) * ease
+    return PoseDelta(rub * bw * 0.03, bh * 0.07 * ease, rub * 4,
+                     1 - 0.07 * ease, 1 - 0.09 * ease)
+
+
 def _splat(p: float, bw: float, bh: float) -> PoseDelta:
     """重摔 压超扁 缓回弹 抖两下喘"""
     if p < 0.12:
@@ -317,6 +326,7 @@ _REACTIONS = (
     ("giggle", 1.9, _giggle, 0.8, 0.8, 0.0, COMMON),  # 挠痒专用
     ("purr", 2.8, _purr, 0.7, 0.25, 0.0, COMMON),  # 长按专用
     ("splat", 2.4, _splat, -0.5, 0.7, 0.0, COMMON),  # 摔疼专用
+    ("snuggle", 3.4, _snuggle, 0.6, 0.15, 0.0, COMMON),  # 蹭暖专用
 )
 
 # 亲密向动作 好感度够高才放出来

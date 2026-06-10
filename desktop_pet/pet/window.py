@@ -180,6 +180,18 @@ class PetWindow(QWidget):
     def set_shy(self, on: bool) -> None:
         self._blob.set_shy(on)
 
+    def set_hot(self, on: bool) -> None:
+        self._blob.set_hot(on)
+
+    def set_squeeze(self, on: bool) -> None:
+        self._blob.set_squeeze(on)
+
+    def set_low_batt(self, on: bool) -> None:
+        self._blob.set_low_batt(on)
+
+    def set_blanket(self, on: bool) -> None:
+        self._blob.set_blanket(on)
+
     @property
     def is_reacting(self) -> bool:
         return self._blob.is_reacting

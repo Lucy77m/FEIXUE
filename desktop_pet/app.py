@@ -67,6 +67,10 @@ _BUG_SCAN_MS = 45 * 60 * 1000
 _BUG_TEMP_BYTES = 500 * 1024 * 1024  # temp堆到这么大就生虫
 _SHY_POLL_MS = 2500
 _SHY_POP_COOLDOWN_S = 120.0
+_VITALS_POLL_MS = 10_000
+_HOT_POP_COOLDOWN_S = 600.0
+_MEM_POP_COOLDOWN_S = 900.0
+_SNUGGLE_COOLDOWN_S = 3600.0
 _PROACTIVE_RAPPORT_GATE = {"安静": 0.45, "正常": 0.30, "话痨": 0.15}
 _PROACTIVE_RAPPORT_GATE_DEFAULT = 0.30
 _CELEBRATE_CHANCE = 0.25
@@ -361,6 +365,7 @@ class PetApp(QObject):
     _bug_found = Signal(int)
     _bug_cleaned = Signal(int, int)
     _shy_changed = Signal(bool)
+    _vitals_ready = Signal(object)
     _voice_chunk_done = Signal(int)
     _voice_chunk_start = Signal(int)
     _voice_chunk_progress = Signal(int, int)
@@ -462,6 +467,21 @@ class PetApp(QObject):
         self._shy_checking = False
         self._shy_last_pop = 0.0
         self._shy_changed.connect(self._on_shy_changed)
+        self._vitals_timer = QTimer(self)
+        self._vitals_timer.timeout.connect(self._check_vitals)
+        self._vitals_busy = False
+        self._vitals_ready.connect(self._on_vitals)
+        self._hot_on = False
+        self._cpu_high_n = 0
+        self._hot_last_pop = 0.0
+        self._squeeze_on = False
+        self._mem_last_pop = 0.0
+        self._lowbatt_on = False
+        self._blanket_on = False
+        self._late_popped_date = ""
+        self._cpu_idle_n = 0
+        self._cpu_warm_n = 0
+        self._snuggle_last = 0.0
         from collections import deque
         self._clip_treasures: deque = deque(maxlen=12)  # 帮用户收着的剪贴小宝贝 只在内存
         self._last_giveback: datetime | None = None
@@ -1060,6 +1080,92 @@ class PetApp(QObject):
             if now - self._shy_last_pop > _SHY_POP_COOLDOWN_S:
                 self._shy_last_pop = now
                 self._feed_pop(i18n.t("pwd_shy"))
+
+    def _check_vitals(self) -> None:
+        """十秒一次读机器体征 后台线程采"""
+        if self._vitals_busy:
+            return
+        self._vitals_busy = True
+        threading.Thread(target=self._vitals_thread, daemon=True).start()
+
+    def _vitals_thread(self) -> None:
+        try:
+            import psutil
+            cpu = psutil.cpu_percent(None)
+            mem = psutil.virtual_memory().percent
+            b = psutil.sensors_battery()
+            batt = (b.percent, b.power_plugged) if b is not None else None
+            self._vitals_ready.emit({"cpu": cpu, "mem": mem, "batt": batt})
+        except Exception:
+            pass
+        finally:
+            self._vitals_busy = False
+
+    @Slot(object)
+    def _on_vitals(self, v: dict) -> None:
+        """体征状态机 拟态进退都带迟滞"""
+        if not self._pet.isVisible():
+            return
+        now = time.time()
+        cpu, mem, batt = v["cpu"], v["mem"], v["batt"]
+        # cpu高烧 连续两次85进 70退
+        self._cpu_high_n = self._cpu_high_n + 1 if cpu >= 85 else 0
+        if not self._hot_on and self._cpu_high_n >= 2:
+            self._hot_on = True
+            self._pet.set_hot(True)
+            if now - self._hot_last_pop > _HOT_POP_COOLDOWN_S:
+                self._hot_last_pop = now
+                self._feed_pop(i18n.t("hot_cpu"))
+        elif self._hot_on and cpu < 70:
+            self._hot_on = False
+            self._pet.set_hot(False)
+        # 内存挤压 88进 80退 95再喊
+        if not self._squeeze_on and mem >= 88:
+            self._squeeze_on = True
+            self._pet.set_squeeze(True)
+        elif self._squeeze_on and mem < 80:
+            self._squeeze_on = False
+            self._pet.set_squeeze(False)
+        if self._squeeze_on and mem >= 95 and now - self._mem_last_pop > _MEM_POP_COOLDOWN_S:
+            self._mem_last_pop = now
+            self._feed_pop(i18n.t("mem_full"))
+        # 低电量 20进 25或插电退
+        if batt is not None:
+            pct, plugged = batt
+            if not self._lowbatt_on and pct <= 20 and not plugged:
+                self._lowbatt_on = True
+                self._pet.set_low_batt(True)
+                self._feed_pop(i18n.t("low_batt").format(pct=int(pct)))
+            elif self._lowbatt_on and (pct >= 25 or plugged):
+                self._lowbatt_on = False
+                self._pet.set_low_batt(False)
+        # 深夜盖被子 23点半到凌晨5点
+        dt_now = datetime.now()
+        late = (dt_now.hour == 23 and dt_now.minute >= 30) or dt_now.hour < 5
+        if late and not self._blanket_on:
+            self._blanket_on = True
+            self._pet.set_blanket(True)
+            today = dt_now.date().isoformat()
+            if self._late_popped_date != today and presence.idle_seconds() < _AWAY_S:
+                self._late_popped_date = today
+                streak = stats.mark_late_night()
+                self._pet.react("yawn")
+                if streak >= 3:
+                    self._feed_pop(i18n.t("late_night_streak").format(n=streak))
+                else:
+                    self._feed_pop(i18n.t("late_night"))
+        elif not late and self._blanket_on:
+            self._blanket_on = False
+            self._pet.set_blanket(False)
+        # 冬天机器发热 凑过去蹭暖
+        warm_month = dt_now.month in (12, 1, 2)
+        self._cpu_warm_n = self._cpu_warm_n + 1 if cpu >= 55 else 0
+        if (warm_month and self._cpu_warm_n >= 3 and not self._hot_on
+                and now - self._snuggle_last > _SNUGGLE_COOLDOWN_S
+                and not self._engaged() and not self._pet.is_asleep):
+            self._snuggle_last = now
+            self._pet.react("snuggle")
+            self._feed_pop(i18n.t("snuggle_warm"))
 
     def _check_bugs(self) -> None:
         """定时扫temp 垃圾堆大了生一只虫"""
@@ -1789,6 +1895,7 @@ class PetApp(QObject):
         self._bgwatch_timer.start(_BGWATCH_POLL_MS)
         self._bug_timer.start(_BUG_SCAN_MS)
         self._shy_timer.start(_SHY_POLL_MS)
+        self._vitals_timer.start(_VITALS_POLL_MS)
         if self._settings.remote_inbox:
             remote_inbox.ensure_dir()
         self._hotkeys.start()
