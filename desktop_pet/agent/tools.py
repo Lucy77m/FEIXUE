@@ -198,10 +198,11 @@ TOOLS = [
     ),
     _function(
         "perform",
-        "Act out a move or a little skit yourself — call this when the user asks you to dance / have a coffee / fish / look at the stars, etc., and your body really performs it. "
-        "Skits (a few-to-ten-second mini-scene): coffee, fish, sleuth, read, music, game, stars. "
+        "Act out a move or a little skit yourself — call this when the user asks you to dance / have a coffee / fish / play with yarn, etc., and your body really performs it. "
+        "Skits (a few-to-ten-second mini-scene): coffee, fish, sleuth, read, music, game, stars, yarn. "
         "One-shot actions: dance, cheer, celebrate, spin, jump_spin, flip, roll, "
-        "hop2, bounce, nod, wobble, stretch, yawn, headbang, puff_up, boing, pop.",
+        "hop2, bounce, nod, wobble, stretch, yawn, headbang, puff_up, boing, pop, "
+        "giggle, purr, snuggle, wave, eating.",
         {"name": {"type": "string", "description": "the action or skit name (see the list above; use the English key)"}},
         ["name"],
     ),

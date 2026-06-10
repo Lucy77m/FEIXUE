@@ -19,7 +19,7 @@ from PySide6.QtWidgets import QApplication
 
 from pathlib import Path
 
-from desktop_pet import i18n, journal, occasions, persona, presence, stats, voice
+from desktop_pet import i18n, journal, occasions, persona, presence, somatic, stats, voice
 from desktop_pet.audit import audit
 from desktop_pet.docs import docs
 from desktop_pet.memory.store import store
@@ -1086,6 +1086,8 @@ class PetApp(QObject):
         emotion.apply("fed")
         selector.set_emotion(*emotion.snapshot())
         self._pet.set_expression("happy")
+        names = Path(paths[0]).name + (f" 等{len(paths)}个" if len(paths) > 1 else "")
+        somatic.note(f"主人投喂了你 你吃掉了 {names}（{feeding.human_size(total)} 已进回收站）")
         if total > 100 * 1024 * 1024:
             journal.add(f"主人喂我吃了 {feeding.human_size(total)} 的垃圾文件 饱了")
         self._feed_pop(i18n.t("feed_eaten").format(size=feeding.human_size(total)))
@@ -1105,6 +1107,9 @@ class PetApp(QObject):
         emotion.apply("hurt")
         selector.set_emotion(*emotion.snapshot())
         self._pet.set_expression("sad")
+        somatic.note("被主人甩出去重重摔到了 很疼")
+        somatic.set_state("grudge", "你正在记仇中（半小时内被摔疼的）对主人可以稍微别扭一点 但被哄了就好")
+        QTimer.singleShot(30 * 60 * 1000, lambda: somatic.set_state("grudge", None))
         self._feed_pop(i18n.t("toss_ouch"))
 
     @Slot()
@@ -1113,6 +1118,7 @@ class PetApp(QObject):
         emotion.apply("praised")
         selector.set_emotion(*emotion.snapshot())
         stats.bump_interactions()
+        somatic.note("被主人挠痒痒 笑得直打滚")
 
     def _check_password_focus(self) -> None:
         """低频看一眼焦点是不是密码框 是就捂眼"""
@@ -1176,12 +1182,14 @@ class PetApp(QObject):
         if not self._hot_on and self._cpu_high_n >= 2:
             self._hot_on = True
             self._pet.set_hot(True)
+            somatic.set_state("hot", "CPU负载很高 机器烫得你直冒汗扇扇子")
             if now - self._hot_last_pop > _HOT_POP_COOLDOWN_S:
                 self._hot_last_pop = now
                 self._feed_pop(i18n.t("hot_cpu"))
         elif self._hot_on and cpu < 70:
             self._hot_on = False
             self._pet.set_hot(False)
+            somatic.set_state("hot", None)
         # 内存挤压 88进 80退 95再喊
         if not self._squeeze_on and mem >= 88:
             self._squeeze_on = True
@@ -1317,8 +1325,10 @@ class PetApp(QObject):
         if in_use and not self._meeting_mode:
             self._thought.pop(i18n.t("meeting_on"), self._pet)  # 进静音前最后说一句
             self._meeting_mode = True
+            somatic.set_state("meeting", "主人好像在开会（麦克风占用中）你已自动进入安静模式 回答尽量简短")
         elif not in_use and self._meeting_mode:
             self._meeting_mode = False
+            somatic.set_state("meeting", None)
             self._thought.pop(i18n.t("meeting_off"), self._pet)
 
     def _check_desktop(self) -> None:
@@ -1425,6 +1435,7 @@ class PetApp(QObject):
         self._pet.react("celebrate")
         emotion.apply("praised")
         selector.set_emotion(*emotion.snapshot())
+        somatic.note("玩捉迷藏被主人找到了 又开心又不甘心")
         self._feed_pop(i18n.t("hs_found"))
 
     @Slot()
@@ -1472,6 +1483,9 @@ class PetApp(QObject):
             return
         self._weather_kind = kind
         self._pet.set_weather(kind)
+        weather_text = {"rain": "外面在下雨 你撑着小伞", "snow": "外面在下雪 你堆了个小雪人",
+                        "melt": "今天高温 你热得快化了"}.get(kind)
+        somatic.set_state("weather", weather_text)
         if kind:
             self._feed_pop(i18n.t("weather_" + kind))
 
@@ -1514,6 +1528,7 @@ class PetApp(QObject):
         self._pet.react("jump_spin")
         emotion.apply("praised")
         selector.set_emotion(*emotion.snapshot())
+        somatic.note("主人丢球和你玩 你跳起来接住了")
         QTimer.singleShot(900, lambda: self._feed_pop(i18n.t("ball_caught")))
 
     @Slot()
@@ -1590,17 +1605,21 @@ class PetApp(QObject):
         if time.time() < self._focus_until:
             self._focus_timer.stop()
             self._focus_until = 0.0
+            somatic.set_state("focus", None)
             self._feed_pop(i18n.t("focus_cancel"))
             return
         self._focus_until = time.time() + _FOCUS_MINUTES * 60
         self._focus_timer.start(_FOCUS_MINUTES * 60 * 1000)
         self._pet.perform("read")
+        somatic.set_state("focus", "主人开了番茄钟正在专注 你在旁边安静陪着 别主动闲聊")
         self._feed_pop(i18n.t("focus_start").format(m=_FOCUS_MINUTES))
 
     def _end_focus(self) -> None:
         if self._focus_until <= 0:
             return
         self._focus_until = 0.0
+        somatic.set_state("focus", None)
+        somatic.note("陪主人完成了一轮25分钟的专注")
         self._pet.react("celebrate")
         emotion.apply("task_done")
         selector.set_emotion(*emotion.snapshot())
@@ -1667,6 +1686,7 @@ class PetApp(QObject):
         emotion.apply("fed")
         selector.set_emotion(*emotion.snapshot())
         self._pet.react("celebrate")
+        somatic.note(f"主人帮你拍死了垃圾虫 清掉了{count}个过期临时文件（{feeding.human_size(freed)}）")
         self._feed_pop(i18n.t("bug_squished_msg").format(n=count, size=feeding.human_size(freed)))
 
     @Slot()
@@ -2148,6 +2168,7 @@ class PetApp(QObject):
         if milestone and stats.get_note("cake") != today:
             stats.set_note("cake", today)
             self._cake_on = True
+            somatic.note(f"今天是和主人认识第{days}天的纪念日 你端出了蛋糕等他来吹蜡烛")
             QTimer.singleShot(4200, lambda: (
                 self._pet.set_cake(True),
                 self._feed_pop(i18n.t("cake_day").format(days=days)),
@@ -2167,6 +2188,7 @@ class PetApp(QObject):
             self._cake_on = False
             emotion.apply("praised")
             selector.set_emotion(*emotion.snapshot())
+            somatic.note("主人帮你吹灭了纪念日蛋糕的蜡烛 你许了个愿")
             QTimer.singleShot(900, lambda: self._pet.react("celebrate"))
             QTimer.singleShot(1100, lambda: self._feed_pop(i18n.t("cake_blow")))
             QTimer.singleShot(2600, lambda: self._pet.set_cake(False))

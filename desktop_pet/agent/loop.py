@@ -393,6 +393,10 @@ class Agent:
     def _turn_context(self, query: str | None = None) -> str:
         """每轮现算的状态注记"""
         parts = [emotion.tone_hint(), prompts.time_hint()]
+        from desktop_pet import somatic
+        body = somatic.context()
+        if body:
+            parts.append(body)
         memory_context = store.as_context(query)
         if memory_context:
             parts.append(memory_context)
