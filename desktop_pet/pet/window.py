@@ -204,6 +204,9 @@ class PetWindow(QWidget):
     def bind_activity_done(self, callback) -> None:
         self._blob.on_activity_done = callback
 
+    def set_weather(self, kind: str) -> None:
+        self._blob.set_weather(kind)
+
     @property
     def is_reacting(self) -> bool:
         return self._blob.is_reacting

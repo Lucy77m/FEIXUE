@@ -375,6 +375,7 @@ class PetApp(QObject):
     _dl_found = Signal(str)
     _mic_changed = Signal(bool)
     _desk_crowded = Signal(int)
+    _weather_ready = Signal(str)
     _voice_chunk_done = Signal(int)
     _voice_chunk_start = Signal(int)
     _voice_chunk_progress = Signal(int, int)
@@ -511,6 +512,12 @@ class PetApp(QObject):
         self._perch_timer = QTimer(self)
         self._perch_timer.timeout.connect(self._check_perch)
         self._perch_last = 0.0
+        self._weather_timer = QTimer(self)
+        self._weather_timer.timeout.connect(self._check_weather)
+        self._weather_busy = False
+        self._weather_kind = ""
+        self._weather_ready.connect(self._on_weather)
+        QTimer.singleShot(60_000, self._check_weather)
         self._hot_on = False
         self._cpu_high_n = 0
         self._hot_last_pop = 0.0
@@ -1432,6 +1439,41 @@ class PetApp(QObject):
             self._tail.stop()
             self._tail = None
             self._hs_reveal(None)
+
+    def _check_weather(self) -> None:
+        """两小时问一次天气 拟态跟着换"""
+        if self._weather_busy or not self._settings.allow_web:
+            return
+        self._weather_busy = True
+        threading.Thread(target=self._weather_thread, daemon=True).start()
+
+    def _weather_thread(self) -> None:
+        try:
+            from desktop_pet.settings import build_http_client
+            client = build_http_client(self._settings.proxy)
+            r = client.get("https://wttr.in/?format=j1", timeout=15)
+            cur = r.json()["current_condition"][0]
+            temp = float(cur.get("temp_C", 20))
+            precip = float(cur.get("precipMM", 0) or 0)
+            kind = ""
+            if temp >= 33:
+                kind = "melt"
+            elif precip > 0.1:
+                kind = "snow" if temp <= 2 else "rain"
+            self._weather_ready.emit(kind)
+        except Exception:
+            pass
+        finally:
+            self._weather_busy = False
+
+    @Slot(str)
+    def _on_weather(self, kind: str) -> None:
+        if kind == self._weather_kind:
+            return
+        self._weather_kind = kind
+        self._pet.set_weather(kind)
+        if kind:
+            self._feed_pop(i18n.t("weather_" + kind))
 
     def _on_activity_done(self, name: str) -> None:
         """小品演完的彩蛋 钓鱼有渔获"""
@@ -2366,6 +2408,7 @@ class PetApp(QObject):
         self._dl_timer.start(_DL_POLL_MS)
         self._mic_timer.start(_MIC_POLL_MS)
         self._desk_timer.start(_DESK_POLL_MS)
+        self._weather_timer.start(2 * 3600 * 1000)
         if self._settings.remote_inbox:
             remote_inbox.ensure_dir()
         self._hotkeys.start()

@@ -379,6 +379,8 @@ class BlobPet:
         self._cake_smoke = 0.0
         self._pendant_n = 0
         self.on_activity_done = None  # 小品演完的回调 上层挂
+        self._weather = ""  # rain snow melt
+        self._weather_e = 0.0
         self._settle = 0.0
         self._hold = 0.0
         self._busy = False
@@ -459,6 +461,13 @@ class BlobPet:
     def set_pendant(self, n: int) -> None:
         """脖子上的小吊牌 收着几件剪贴宝贝"""
         self._pendant_n = max(0, int(n))
+
+    def set_weather(self, kind: str) -> None:
+        """天气拟态 rain打伞 snow堆雪人 melt热化"""
+        if kind in ("rain", "snow", "melt"):
+            self._weather = kind
+        else:
+            self._weather = ""
 
     def set_expression(self, name: str) -> None:
         if name in _EXPRESSIONS:
@@ -643,6 +652,10 @@ class BlobPet:
                 setattr(self, attr, max(0.0, e - dt * 1.2))
         if self._cake_smoke > 0.0:
             self._cake_smoke = max(0.0, self._cake_smoke - dt)
+        if self._weather:
+            self._weather_e = min(1.0, self._weather_e + dt * 1.2)
+        else:
+            self._weather_e = max(0.0, self._weather_e - dt * 1.0)
         if self._hold > 0.0 and not self._busy and self._activity is None:
             self._hold -= dt
             if self._hold <= 0.0:
@@ -946,6 +959,11 @@ class BlobPet:
         if self._lowbatt_e > 0.0:
             # 没电焦躁 高频小颤
             ox += math.sin(self._t * 23) * bw * 0.008 * self._lowbatt_e
+        if self._weather == "melt" and self._weather_e > 0.0:
+            # 热到化了 摊下去
+            sym *= 1 - 0.14 * self._weather_e
+            sxm *= 1 + 0.10 * self._weather_e
+            oy += bh * 0.07 * self._weather_e
 
         head_y = cy + oy
         painter.save()
@@ -968,6 +986,8 @@ class BlobPet:
             self._draw_blanket(painter, bw, bh, self._blanket_e)
         if self._lowbatt_e > 0.01:
             self._draw_lowbatt(painter, bw, bh, self._lowbatt_e)
+        if self._weather_e > 0.01:
+            self._draw_weather(painter, bw, bh, self._weather_e)
         if think_gate > 0.01 and not self._react and not self._worn_costume:
             self._draw_think_hand(painter, bw, bh, think_gate)
         if self._lecturing:
@@ -1446,6 +1466,12 @@ class BlobPet:
                 self._eye_arc(painter, -dx, ey, ew, eh)
                 self._eye_arc(painter, dx, ey, ew, eh)
                 return
+            if rname in ("happy_wiggle", "cheer", "celebrate", "bounce", "hop2", "dance", "headbang", "wave"):
+                # 开心系反应统一笑眼 表演感拉满
+                dx, ey, ew, eh = bw * 0.24, bh * 0.05, bw * 0.15, bh * 0.26
+                self._eye_arc(painter, -dx, ey, ew, eh)
+                self._eye_arc(painter, dx, ey, ew, eh)
+                return
             if rname == "splat" and rp < 0.55:
                 # 摔懵了 X眼
                 pen = QPen(_INK)
@@ -1540,6 +1566,69 @@ class BlobPet:
             hx = sx * dx * (1.25 - 0.25 * k)
             hy = start_y + (ey - start_y) * k + wob
             painter.drawEllipse(QPointF(hx, hy), bw * 0.115, bw * 0.10)
+
+    def _draw_weather(self, painter: QPainter, bw: float, bh: float, e: float) -> None:
+        """天气装饰 雨伞 雪人 化水"""
+        kind = self._weather or ("rain" if e > 0 else "")
+        if kind == "rain":
+            # 头顶小伞 伞下安全 周围雨丝
+            k = ease_out(e)
+            top = -bh * (0.55 + 0.32 * k)
+            painter.setPen(QPen(_INK, max(1.5, bw * 0.015)))
+            painter.setBrush(QColor(122, 108, 255, int(235 * e)))
+            span = bw * 0.55
+            painter.drawChord(QRectF(-span, top, span * 2, bh * 0.5), 0, 180 * 16)
+            # 伞骨尖和柄
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            for i in range(3):
+                px = -span + span * i
+                painter.drawLine(QPointF(px, top + bh * 0.25), QPointF(px, top + bh * 0.28))
+            painter.drawLine(QPointF(0, top + bh * 0.25), QPointF(0, -bh * 0.42))
+            # 雨丝 伞外落
+            pen = QPen(QColor(140, 180, 235, int(190 * e)))
+            pen.setWidthF(max(1.3, bw * 0.012))
+            painter.setPen(pen)
+            for i in range(5):
+                ph = (self._t * 0.9 + i * 0.23) % 1.0
+                side = -1 if i % 2 == 0 else 1
+                rx = side * (bw * 0.66 + (i % 3) * bw * 0.08)
+                ry = -bh * 0.5 + ph * bh * 1.0
+                painter.drawLine(QPointF(rx, ry), QPointF(rx - bw * 0.02, ry + bh * 0.07))
+        elif kind == "snow":
+            # 脚边小雪人 头顶飘雪
+            k = ease_out(e)
+            sx0, sy0 = bw * 0.72, bh * 0.36
+            painter.setPen(QPen(QColor(150, 160, 186, int(230 * e)), max(1.3, bw * 0.013)))
+            painter.setBrush(QColor(250, 250, 254, int(240 * e)))
+            painter.drawEllipse(QPointF(sx0, sy0), bw * 0.13 * k, bh * 0.085 * k)
+            painter.drawEllipse(QPointF(sx0, sy0 - bh * 0.115 * k), bw * 0.085 * k, bh * 0.06 * k)
+            if k > 0.6:
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(QColor(40, 38, 48, int(255 * e)))
+                for ex in (-1, 1):
+                    painter.drawEllipse(QPointF(sx0 + ex * bw * 0.022, sy0 - bh * 0.125), bw * 0.008, bw * 0.008)
+                painter.setBrush(QColor(238, 140, 70, int(255 * e)))
+                painter.drawPolygon(QPolygonF([
+                    QPointF(sx0, sy0 - bh * 0.105), QPointF(sx0 + bw * 0.045, sy0 - bh * 0.095),
+                    QPointF(sx0, sy0 - bh * 0.085)]))
+            # 飘雪
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(255, 255, 255, int(220 * e)))
+            for i in range(4):
+                ph = (self._t * 0.35 + i * 0.27) % 1.0
+                fx2 = math.sin((ph * 2.5 + i) * math.pi) * bw * 0.4
+                fy = -bh * 0.85 + ph * bh * 1.1
+                painter.drawEllipse(QPointF(fx2, fy), bw * 0.014, bw * 0.014)
+        elif kind == "melt":
+            # 身底一摊水渍 加汗
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(150, 200, 240, int(90 * e)))
+            painter.drawEllipse(QPointF(0, bh * 0.46), bw * 0.55 * e, bh * 0.05 * e)
+            ph = (self._t * 0.5) % 1.0
+            a = int(200 * e * math.sin(min(ph * 3, 1.0, (1 - ph) * 4) * math.pi / 2))
+            if a > 0:
+                painter.setBrush(QColor(140, 190, 240, a))
+                painter.drawEllipse(QPointF(bw * 0.40, -bh * 0.28 + ph * bh * 0.4), bw * 0.024, bw * 0.030)
 
     def _draw_pendant(self, painter: QPainter, bw: float, bh: float) -> None:
         """胸前小吊牌 替用户收着东西的标记"""
