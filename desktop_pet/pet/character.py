@@ -378,6 +378,7 @@ class BlobPet:
         self._cake_lit = True
         self._cake_smoke = 0.0
         self._pendant_n = 0
+        self.on_activity_done = None  # 小品演完的回调 上层挂
         self._settle = 0.0
         self._hold = 0.0
         self._busy = False
@@ -746,9 +747,15 @@ class BlobPet:
             if self._stage_left <= 0.0:
                 self._stage_i += 1
                 if self._stage_i >= len(stages):
+                    done_name = self._activity
                     finish = _ACTIVITIES[self._activity][2]
                     self._end_activity()
                     self.react(finish)
+                    if self.on_activity_done is not None:
+                        try:
+                            self.on_activity_done(done_name)
+                        except Exception:
+                            pass
                 else:
                     self._enter_stage(stages[self._stage_i])
         else:

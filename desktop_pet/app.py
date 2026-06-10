@@ -505,6 +505,12 @@ class PetApp(QObject):
         self._paw_last = QPoint()
         self._pet.moved.connect(self._on_pet_moved_paws)
         self._tail = None  # 捉迷藏的尾巴窗
+        self._ball = None  # 玩具球
+        self._pet.bind_activity_done(self._on_activity_done)
+        self._perch_hwnd = 0
+        self._perch_timer = QTimer(self)
+        self._perch_timer.timeout.connect(self._check_perch)
+        self._perch_last = 0.0
         self._hot_on = False
         self._cpu_high_n = 0
         self._hot_last_pop = 0.0
@@ -530,6 +536,7 @@ class PetApp(QObject):
             on_toggle_show=self._toggle_power,
             is_shown=lambda: self._shown,
             on_focus=self._toggle_focus,
+            on_ball=self._throw_ball,
         )
         self._hotkeys = GlobalHotkeys({
             "summon": self._settings.hotkey_summon,
@@ -1426,6 +1433,116 @@ class PetApp(QObject):
             self._tail = None
             self._hs_reveal(None)
 
+    def _on_activity_done(self, name: str) -> None:
+        """小品演完的彩蛋 钓鱼有渔获"""
+        if name != "fish":
+            return
+        catch = ""
+        try:
+            if self._clip_treasures and random.random() < 0.5:
+                _k, text, _ts = random.choice(list(self._clip_treasures))
+                catch = text.strip().replace("\n", " ")[:46]
+            else:
+                today_lines = [str(it.get("text", "")) for it in journal.recent(6)]
+                if today_lines:
+                    catch = random.choice(today_lines)[:46]
+        except Exception:
+            pass
+        if catch:
+            QTimer.singleShot(1200, lambda: self._feed_pop(i18n.t("fish_catch").format(thing=catch)))
+
+    def _throw_ball(self) -> None:
+        """丢颗球给它玩"""
+        if self._ball is not None or not self._pet.isVisible() or self._pet.is_asleep:
+            return
+        from desktop_pet.pet.ball import BallWindow
+        from desktop_pet.eyes import capture
+        ball = BallWindow()
+        capture.register_own_window(int(ball.winId()))
+        ball.caught.connect(self._on_ball_caught)
+        ball.stopped.connect(self._on_ball_stopped)
+        scr = self._app.primaryScreen().availableGeometry()
+        ball.throw_from_top(scr, self._pet.frameGeometry())
+        self._ball = ball
+        self._pet.react("perk_up")
+
+    @Slot()
+    def _on_ball_caught(self) -> None:
+        self._ball = None
+        self._pet.react("jump_spin")
+        emotion.apply("praised")
+        selector.set_emotion(*emotion.snapshot())
+        QTimer.singleShot(900, lambda: self._feed_pop(i18n.t("ball_caught")))
+
+    @Slot()
+    def _on_ball_stopped(self) -> None:
+        self._ball = None
+        self._pet.react("peek")
+
+    def _maybe_perch(self) -> bool:
+        """偶尔跳上前台窗口顶上待着 窗口一动摔下来"""
+        if not self._settings.proactive_enabled or self._meeting_mode or self._perch_hwnd:
+            return False
+        if self._engaged() or not self._pet.isVisible() or self._pet.is_asleep or self._tail is not None:
+            return False
+        now = time.time()
+        if now - self._perch_last < 7200 or random.random() > 0.15:
+            return False
+        try:
+            import win32gui
+            hwnd = win32gui.GetForegroundWindow()
+            if not hwnd or hwnd == int(self._pet.winId()):
+                return False
+            left, top, right, _bottom = win32gui.GetWindowRect(hwnd)
+            scr = self._app.primaryScreen().availableGeometry()
+            if right - left < 500 or top < scr.top() + self._pet.height() * 0.8:
+                return False
+            self._perch_last = now
+            self._perch_hwnd = hwnd
+            self._perch_rect = (left, top, right)
+            x = left + int((right - left) * 0.30) - self._pet.width() // 2
+            y = top - int(self._pet.height() * 0.72)
+            self._pet.move(x, y)
+            self._pet.react("peek")
+            self._feed_pop(i18n.t("perch_up"))
+            self._perch_timer.start(700)
+            QTimer.singleShot(180_000, self._perch_done)  # 最多蹲三分钟
+            return True
+        except Exception:
+            return False
+
+    def _check_perch(self) -> None:
+        """蹲守期间窗口动了就摔下来"""
+        if not self._perch_hwnd:
+            self._perch_timer.stop()
+            return
+        try:
+            import win32gui
+            if not win32gui.IsWindowVisible(self._perch_hwnd) or win32gui.IsIconic(self._perch_hwnd):
+                self._perch_fall()
+                return
+            left, top, right, _b = win32gui.GetWindowRect(self._perch_hwnd)
+            ol, ot, orr = self._perch_rect
+            if abs(left - ol) > 8 or abs(top - ot) > 8 or abs(right - orr) > 8:
+                self._perch_fall()
+        except Exception:
+            self._perch_done()
+
+    def _perch_fall(self) -> None:
+        """窗台塌了 摔下去气鼓鼓"""
+        self._perch_hwnd = 0
+        self._perch_timer.stop()
+        self._pet._start_toss(random.uniform(-120, 120), 60.0)
+        QTimer.singleShot(1400, lambda: self._pet.react("puff_up"))
+        QTimer.singleShot(1700, lambda: self._feed_pop(i18n.t("perch_fall")))
+
+    def _perch_done(self) -> None:
+        if not self._perch_hwnd:
+            return
+        self._perch_hwnd = 0
+        self._perch_timer.stop()
+        self._pet.react("stretch")
+
     def _toggle_focus(self) -> None:
         """番茄钟 开一轮或提前结束"""
         if time.time() < self._focus_until:
@@ -1703,6 +1820,8 @@ class PetApp(QObject):
             if self._maybe_occasion():
                 return
             if self._maybe_hide_seek():
+                return
+            if self._maybe_perch():
                 return
             if self._maybe_giveback():
                 return

@@ -201,6 +201,9 @@ class PetWindow(QWidget):
     def set_pendant(self, n: int) -> None:
         self._blob.set_pendant(n)
 
+    def bind_activity_done(self, callback) -> None:
+        self._blob.on_activity_done = callback
+
     @property
     def is_reacting(self) -> bool:
         return self._blob.is_reacting
@@ -243,10 +246,18 @@ class PetWindow(QWidget):
         return True
 
     def _pick_wander_target(self) -> QPoint | None:
-        """挑当前屏幕横向对侧的随机落点"""
+        """挑落点 多屏时偶尔窜去隔壁屏"""
         screen = self.screen()
         if screen is None:
             return None
+        from PySide6.QtWidgets import QApplication
+        others = [s for s in QApplication.screens() if s is not screen]
+        if others and random.random() < 0.3:
+            t = random.choice(others).availableGeometry()
+            w, h = self.width(), self.height()
+            if t.width() > w and t.height() > h:
+                return QPoint(random.randint(t.left(), t.right() - w),
+                              random.randint(t.top(), t.bottom() - h))
         avail = screen.availableGeometry()
         w, h = self.width(), self.height()
         if avail.width() <= w or avail.height() <= h:
