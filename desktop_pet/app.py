@@ -17,11 +17,13 @@ from PySide6.QtCore import QObject, QPoint, QThread, QTimer, Signal, Slot, qInst
 from PySide6.QtGui import QColor, QCursor, QFont, QPalette
 from PySide6.QtWidgets import QApplication
 
-from pathlib import Path
-
-from desktop_pet import i18n, journal, occasions, persona, presence, somatic, stats, voice
-from desktop_pet.agent import prompts as agent_prompts
+from desktop_pet import i18n, journal, occasions, persona, presence, stats, voice
 from desktop_pet.audit import audit
+from desktop_pet.companions.feeding_ctrl import FeedingCtrl
+from desktop_pet.companions.playtime import Playtime
+from desktop_pet.companions.rituals import Rituals
+from desktop_pet.companions.sensors import Sensors
+from desktop_pet.companions.watchers import Watchers
 from desktop_pet.docs import docs
 from desktop_pet.memory.store import store
 from desktop_pet.skills import skills
@@ -36,7 +38,6 @@ from desktop_pet.pet.chat import InputBox, SpeechText, ThoughtBubble, ThoughtBub
 from desktop_pet.pet.todo_board import TodoBoard
 from desktop_pet.pet.control_panel import ControlPanel
 from desktop_pet.pet.media import MediaFrame
-from desktop_pet.executor import shell as shell_exec
 from desktop_pet.pet import feeding
 from desktop_pet.pet.confirm import ConfirmBox
 from desktop_pet.pet.entrance import next_entrance_kind
@@ -59,24 +60,6 @@ _REMINDER_POLL_MS = 15_000
 _PROACTIVE_POLL_MS = 60_000
 _WATCH_POLL_MS = 15_000
 _REMOTE_POLL_MS = 8_000
-_BGWATCH_POLL_MS = 5_000
-_BGWATCH_MIN_RUNTIME_S = 10.0  # 秒退的任务agent当场看到 不播报
-_GIVEBACK_MIN_INTERVAL_S = 4 * 3600
-_GIVEBACK_MIN_AGE_H = 2.0  # 收藏攒够这么久才值得拿出来
-_GIVEBACK_RAPPORT_GATE = 0.45
-_BUG_SCAN_MS = 45 * 60 * 1000
-_BUG_TEMP_BYTES = 500 * 1024 * 1024  # temp堆到这么大就生虫
-_SHY_POLL_MS = 2500
-_SHY_POP_COOLDOWN_S = 120.0
-_VITALS_POLL_MS = 10_000
-_HOT_POP_COOLDOWN_S = 600.0
-_MEM_POP_COOLDOWN_S = 900.0
-_SNUGGLE_COOLDOWN_S = 3600.0
-_DL_POLL_MS = 30_000
-_MIC_POLL_MS = 30_000
-_DESK_POLL_MS = 3600_000
-_DESK_LIMIT = 40
-_FOCUS_MINUTES = 25
 _SHOT_COOLDOWN_S = 300.0
 _PROACTIVE_RAPPORT_GATE = {"安静": 0.45, "正常": 0.30, "话痨": 0.15}
 _PROACTIVE_RAPPORT_GATE_DEFAULT = 0.30
@@ -368,15 +351,6 @@ class PetApp(QObject):
     request_confirm = Signal(str)
     request_rewrite = Signal(str)
     request_clip_alchemy = Signal(str, str)
-    _feed_note = Signal(str)
-    _bug_found = Signal(int)
-    _bug_cleaned = Signal(int, int)
-    _shy_changed = Signal(bool)
-    _vitals_ready = Signal(object)
-    _dl_found = Signal(str)
-    _mic_changed = Signal(bool)
-    _desk_crowded = Signal(int)
-    _weather_ready = Signal(str)
     _voice_chunk_done = Signal(int)
     _voice_chunk_start = Signal(int)
     _voice_chunk_progress = Signal(int, int)
@@ -412,8 +386,6 @@ class PetApp(QObject):
         self._confirm_event = threading.Event()
         self._confirm_result = False
         self._confirm_pending = False
-        self._feed_pending: tuple[list, int] | None = None
-        self._feed_doc: str | None = None
 
         from desktop_pet.agent.loop import Agent
 
@@ -429,12 +401,11 @@ class PetApp(QObject):
         self._todo = TodoBoard()
         self._media = MediaFrame()
         self._confirm_box = ConfirmBox()
-        self._feed_confirm = ConfirmBox()
         self._thought = ThoughtBubble()
         self._think = ThoughtBubbles()
 
         from desktop_pet.eyes import capture
-        for _w in (self._pet, self._speech, self._input, self._board, self._todo, self._media, self._confirm_box, self._feed_confirm, self._thought, self._think):
+        for _w in (self._pet, self._speech, self._input, self._board, self._todo, self._media, self._confirm_box, self._thought, self._think):
             capture.register_own_window(int(_w.winId()))
 
         self._lecturing = False
@@ -463,77 +434,15 @@ class PetApp(QObject):
         self._watch_timer.timeout.connect(self._check_watch)
         self._remote_timer = QTimer(self)
         self._remote_timer.timeout.connect(self._check_inbox)
-        self._bgwatch_timer = QTimer(self)
-        self._bgwatch_timer.timeout.connect(self._scan_background_shells)
-        self._bg_announced: set[int] = set()
-        self._bug_timer = QTimer(self)
-        self._bug_timer.timeout.connect(self._check_bugs)
-        self._bug = None
-        self._bug_scanning = False
-        self._bug_found.connect(self._on_bug_found)
-        self._bug_cleaned.connect(self._on_bug_cleaned)
-        self._shy_timer = QTimer(self)
-        self._shy_timer.timeout.connect(self._check_password_focus)
-        self._shy_now = False
-        self._shy_checking = False
-        self._shy_last_pop = 0.0
-        self._shy_changed.connect(self._on_shy_changed)
-        self._vitals_timer = QTimer(self)
-        self._vitals_timer.timeout.connect(self._check_vitals)
-        self._vitals_busy = False
-        self._vitals_ready.connect(self._on_vitals)
-        self._dl_timer = QTimer(self)
-        self._dl_timer.timeout.connect(self._check_downloads)
-        self._dl_busy = False
-        self._dl_seen: set[str] = set()
-        self._dl_baseline = time.time()
-        self._dl_found.connect(self._on_dl_found)
-        self._mic_timer = QTimer(self)
-        self._mic_timer.timeout.connect(self._check_mic)
-        self._mic_busy = False
         self._meeting_mode = False
-        self._mic_changed.connect(self._on_mic_changed)
-        self._desk_timer = QTimer(self)
-        self._desk_timer.timeout.connect(self._check_desktop)
-        self._desk_busy = False
-        self._desk_crowded.connect(self._on_desk_crowded)
-        self._focus_until = 0.0
-        self._focus_timer = QTimer(self)
-        self._focus_timer.setSingleShot(True)
-        self._focus_timer.timeout.connect(self._end_focus)
         self._shot_last = 0.0
-        from desktop_pet.pet.footprints import FootprintLayer
-        self._paws = FootprintLayer()
-        self._paw_last = QPoint()
-        self._pet.moved.connect(self._on_pet_moved_paws)
-        self._tail = None  # 捉迷藏的尾巴窗
-        self._ball = None  # 玩具球
-        self._pet.bind_activity_done(self._on_activity_done)
-        self._perch_hwnd = 0
-        self._perch_timer = QTimer(self)
-        self._perch_timer.timeout.connect(self._check_perch)
-        self._perch_last = 0.0
-        self._weather_timer = QTimer(self)
-        self._weather_timer.timeout.connect(self._check_weather)
-        self._weather_busy = False
-        self._weather_kind = ""
-        self._weather_ready.connect(self._on_weather)
-        QTimer.singleShot(60_000, self._check_weather)
-        self._hot_on = False
-        self._cpu_high_n = 0
-        self._hot_last_pop = 0.0
-        self._squeeze_on = False
-        self._mem_last_pop = 0.0
-        self._lowbatt_on = False
-        self._blanket_on = False
-        self._late_popped_date = ""
-        self._cpu_idle_n = 0
-        self._cpu_warm_n = 0
-        self._snuggle_last = 0.0
-        from collections import deque
-        self._clip_treasures: deque = deque(maxlen=12)  # 帮用户收着的剪贴小宝贝 只在内存
-        self._last_giveback: datetime | None = None
         self._just_returned = False
+
+        self._feeding = FeedingCtrl(self)
+        self._sensors = Sensors(self)
+        self._playtime = Playtime(self)
+        self._watchers = Watchers(self)
+        self._rituals = Rituals(self)
 
         self._tray = Tray(
             on_open_panel=self._open_panel,
@@ -543,8 +452,8 @@ class PetApp(QObject):
             on_new_topic=self._new_topic,
             on_toggle_show=self._toggle_power,
             is_shown=lambda: self._shown,
-            on_focus=self._toggle_focus,
-            on_ball=self._throw_ball,
+            on_focus=self._rituals.toggle_focus,
+            on_ball=self._playtime.throw_ball,
             on_perform=self._on_perform,
         )
         self._hotkeys = GlobalHotkeys({
@@ -557,7 +466,7 @@ class PetApp(QObject):
 
     def _connect(self) -> None:
         self._pet.clicked.connect(self._toggle_input)
-        self._pet.clicked.connect(self._on_pet_clicked_cake)
+        self._pet.clicked.connect(self._rituals.on_pet_clicked_cake)
         self._pet.moved.connect(self._follow)
         self._pet.grabbed.connect(self._wake)
         self._pet.hid.connect(self._on_hide)
@@ -595,11 +504,6 @@ class PetApp(QObject):
         self._remote_action.connect(self._on_remote_action)
         self.request_confirm.connect(self._on_confirm_requested)
         self._confirm_box.answered.connect(self._on_confirm_answered)
-        self._pet.fed.connect(self._on_fed)
-        self._feed_confirm.answered.connect(self._on_feed_answer)
-        self._feed_note.connect(self._on_feed_note)
-        self._pet.tossed.connect(self._on_tossed)
-        self._pet.tickled.connect(self._on_tickled)
         self._hotkeys.summon.connect(self._summon)
         self._hotkeys.ask_selection.connect(self._ask_selection)
         self._hotkeys.quick_rewrite.connect(self._quick_rewrite)
@@ -663,7 +567,7 @@ class PetApp(QObject):
     def _summon(self) -> None:
         if not self._shown:
             self._power_on()
-        self._hs_abort()
+        self._playtime.hs_abort()
         if not self._pet.isVisible():
             self._pet.setVisible(True)
         self._pet.summon_front()
@@ -785,9 +689,7 @@ class PetApp(QObject):
     @Slot(str, str)
     def _on_clip_interesting(self, kind: str, text: str) -> None:
         # 顺手收藏一份留着回赠 只进内存不落盘 胸前吊牌跟着变
-        if all(text != t for _k, t, _ts in self._clip_treasures):
-            self._clip_treasures.append((kind, text, datetime.now()))
-            self._pet.set_pendant(len(self._clip_treasures))
+        self._watchers.add_treasure(kind, text)
         s = self._settings
         if not s.clip_alchemy:
             return
@@ -1011,712 +913,10 @@ class PetApp(QObject):
         self._confirm_result = ok
         self._confirm_event.set()
 
-    @Slot(list)
-    def _on_fed(self, paths: list) -> None:
-        """投喂入口 按类型分流"""
-        kind = feeding.classify(paths)
-        if kind == "missing":
-            self._feed_pop(i18n.t("feed_missing"))
-            return
-        if kind == "protected":
-            self._pet.react("recoil")
-            self._feed_pop(i18n.t("feed_protected"))
-            return
-        if kind == "risky":
-            self._pet.react("shake")
-            self._feed_pop(i18n.t("feed_risky"))
-            return
-        if kind == "image":
-            if self._worker.is_running:
-                self._feed_pop(i18n.t("feed_busy"))
-                return
-            path = str(Path(paths[0]).expanduser().resolve())
-            self._pet.react("perk_up")
-            self.request_message.emit(agent_prompts.FEED_IMAGE_MSG.format(name=Path(path).name, path=path))
-            return
-        if kind == "doc":
-            self._feed_doc = paths[0]
-            screen = self._app.primaryScreen().availableGeometry()
-            self._feed_confirm.ask(i18n.t("feed_doc_ask").format(name=Path(paths[0]).name), self._pet, screen)
-            return
-        total, truncated = feeding.total_size(paths)
-        if total > feeding._BIG_BYTES or feeding.has_dir(paths) or truncated:
-            self._feed_pending = (paths, total)
-            name = Path(paths[0]).name + (f" +{len(paths) - 1}" if len(paths) > 1 else "")
-            screen = self._app.primaryScreen().availableGeometry()
-            self._feed_confirm.ask(
-                i18n.t("feed_confirm").format(name=name, size=feeding.human_size(total)), self._pet, screen)
-            return
-        self._eat(paths, total)
-
-    @Slot(bool)
-    def _on_feed_answer(self, ok: bool) -> None:
-        """投喂确认回来 文档和大餐两种等待"""
-        if self._feed_doc is not None:
-            path, self._feed_doc = self._feed_doc, None
-            if not ok:
-                return
-            self._pet.react("eating")
-            threading.Thread(target=self._ingest_doc, args=(path,), daemon=True).start()
-            return
-        if self._feed_pending is not None:
-            (paths, total), self._feed_pending = self._feed_pending, None
-            if ok:
-                self._eat(paths, total)
-
-    def _ingest_doc(self, path: str) -> None:
-        """后台线程读文档进知识库"""
-        try:
-            docs.ingest(path)
-            self._feed_note.emit(i18n.t("feed_doc_done"))
-        except Exception:
-            self._feed_note.emit(i18n.t("feed_doc_fail"))
-
-    def _eat(self, paths: list, total: int) -> None:
-        """播吃动画 咽下去时真删"""
-        self._pet.react("eating")
-        QTimer.singleShot(1700, lambda: self._finish_eat(paths, total))
-
-    def _finish_eat(self, paths: list, total: int) -> None:
-        err = feeding.recycle(paths)
-        if err:
-            self._pet.react("droop")
-            self._feed_pop(i18n.t("feed_eat_fail"))
-            audit.reply(f"feed recycle failed: {err}")
-            return
-        stats.add_eaten(total, len(paths))
-        emotion.apply("fed")
-        selector.set_emotion(*emotion.snapshot())
-        self._pet.set_expression("happy")
-        names = Path(paths[0]).name + (f" +{len(paths) - 1}" if len(paths) > 1 else "")
-        somatic.note(agent_prompts.SOMA_FED.format(names=names, size=feeding.human_size(total)))
-        if total > 100 * 1024 * 1024:
-            journal.add(f"主人喂我吃了 {feeding.human_size(total)} 的垃圾文件 饱了")
-        self._feed_pop(i18n.t("feed_eaten").format(size=feeding.human_size(total)))
-
-    @Slot(str)
-    def _on_feed_note(self, text: str) -> None:
-        self._feed_pop(text)
-
     def _feed_pop(self, text: str) -> None:
         if self._meeting_mode:
             return  # 开会静音 主动气泡全咽下去
         self._thought.pop(text, self._pet)
-
-    @Slot(float)
-    def _on_tossed(self, impact: float) -> None:
-        """被重摔了 疼一下还要哄"""
-        emotion.apply("hurt")
-        selector.set_emotion(*emotion.snapshot())
-        self._pet.set_expression("sad")
-        somatic.note(agent_prompts.SOMA_TOSSED)
-        somatic.set_state("grudge", agent_prompts.SOMA_GRUDGE)
-        QTimer.singleShot(30 * 60 * 1000, lambda: somatic.set_state("grudge", None))
-        self._feed_pop(i18n.t("toss_ouch"))
-
-    @Slot()
-    def _on_tickled(self) -> None:
-        """被挠痒 开心计入互动"""
-        emotion.apply("praised")
-        selector.set_emotion(*emotion.snapshot())
-        stats.bump_interactions()
-        somatic.note(agent_prompts.SOMA_TICKLED)
-
-    def _check_password_focus(self) -> None:
-        """低频看一眼焦点是不是密码框 是就捂眼"""
-        if self._shy_checking or not self._settings.allow_control:
-            return
-        if not self._pet.isVisible():
-            return
-        self._shy_checking = True
-        threading.Thread(target=self._shy_probe_thread, daemon=True).start()
-
-    def _shy_probe_thread(self) -> None:
-        try:
-            from desktop_pet.eyes import uia
-            is_pwd = uia.focused_is_password()
-            if is_pwd != self._shy_now:
-                self._shy_changed.emit(is_pwd)
-        except Exception:
-            pass
-        finally:
-            self._shy_checking = False
-
-    @Slot(bool)
-    def _on_shy_changed(self, shy: bool) -> None:
-        self._shy_now = shy
-        self._pet.set_shy(shy)
-        if shy:
-            now = time.time()
-            if now - self._shy_last_pop > _SHY_POP_COOLDOWN_S:
-                self._shy_last_pop = now
-                self._feed_pop(i18n.t("pwd_shy"))
-
-    def _check_vitals(self) -> None:
-        """十秒一次读机器体征 后台线程采"""
-        if self._vitals_busy:
-            return
-        self._vitals_busy = True
-        threading.Thread(target=self._vitals_thread, daemon=True).start()
-
-    def _vitals_thread(self) -> None:
-        try:
-            import psutil
-            cpu = psutil.cpu_percent(None)
-            mem = psutil.virtual_memory().percent
-            b = psutil.sensors_battery()
-            batt = (b.percent, b.power_plugged) if b is not None else None
-            self._vitals_ready.emit({"cpu": cpu, "mem": mem, "batt": batt})
-        except Exception:
-            pass
-        finally:
-            self._vitals_busy = False
-
-    @Slot(object)
-    def _on_vitals(self, v: dict) -> None:
-        """体征状态机 拟态进退都带迟滞"""
-        if not self._pet.isVisible():
-            return
-        now = time.time()
-        cpu, mem, batt = v["cpu"], v["mem"], v["batt"]
-        # cpu高烧 连续两次85进 70退
-        self._cpu_high_n = self._cpu_high_n + 1 if cpu >= 85 else 0
-        if not self._hot_on and self._cpu_high_n >= 2:
-            self._hot_on = True
-            self._pet.set_hot(True)
-            somatic.set_state("hot", agent_prompts.SOMA_HOT_STATE)
-            if now - self._hot_last_pop > _HOT_POP_COOLDOWN_S:
-                self._hot_last_pop = now
-                self._feed_pop(i18n.t("hot_cpu"))
-        elif self._hot_on and cpu < 70:
-            self._hot_on = False
-            self._pet.set_hot(False)
-            somatic.set_state("hot", None)
-        # 内存挤压 88进 80退 95再喊
-        if not self._squeeze_on and mem >= 88:
-            self._squeeze_on = True
-            self._pet.set_squeeze(True)
-        elif self._squeeze_on and mem < 80:
-            self._squeeze_on = False
-            self._pet.set_squeeze(False)
-        if self._squeeze_on and mem >= 95 and now - self._mem_last_pop > _MEM_POP_COOLDOWN_S:
-            self._mem_last_pop = now
-            self._feed_pop(i18n.t("mem_full"))
-        # 低电量 20进 25或插电退
-        if batt is not None:
-            pct, plugged = batt
-            if not self._lowbatt_on and pct <= 20 and not plugged:
-                self._lowbatt_on = True
-                self._pet.set_low_batt(True)
-                self._feed_pop(i18n.t("low_batt").format(pct=int(pct)))
-            elif self._lowbatt_on and (pct >= 25 or plugged):
-                self._lowbatt_on = False
-                self._pet.set_low_batt(False)
-        # 深夜盖被子 23点半到凌晨5点
-        dt_now = datetime.now()
-        late = (dt_now.hour == 23 and dt_now.minute >= 30) or dt_now.hour < 5
-        if late and not self._blanket_on:
-            self._blanket_on = True
-            self._pet.set_blanket(True)
-            today = dt_now.date().isoformat()
-            if self._late_popped_date != today and presence.idle_seconds() < _AWAY_S:
-                self._late_popped_date = today
-                streak = stats.mark_late_night()
-                self._pet.react("yawn")
-                if streak >= 3:
-                    self._feed_pop(i18n.t("late_night_streak").format(n=streak))
-                else:
-                    self._feed_pop(i18n.t("late_night"))
-        elif not late and self._blanket_on:
-            self._blanket_on = False
-            self._pet.set_blanket(False)
-        # 冬天机器发热 凑过去蹭暖
-        warm_month = dt_now.month in (12, 1, 2)
-        self._cpu_warm_n = self._cpu_warm_n + 1 if cpu >= 55 else 0
-        if (warm_month and self._cpu_warm_n >= 3 and not self._hot_on
-                and now - self._snuggle_last > _SNUGGLE_COOLDOWN_S
-                and not self._engaged() and not self._pet.is_asleep):
-            self._snuggle_last = now
-            self._pet.react("snuggle")
-            self._feed_pop(i18n.t("snuggle_warm"))
-        # 机器真闲了五分钟 拿毛线球出来玩
-        self._cpu_idle_n = self._cpu_idle_n + 1 if cpu < 15 else 0
-        if (self._cpu_idle_n >= 30 and now - getattr(self, "_yarn_last", 0.0) > 7200
-                and not self._engaged() and not self._pet.is_asleep):
-            self._yarn_last = now
-            self._cpu_idle_n = 0
-            self._pet.perform("yarn")
-
-    def _check_downloads(self) -> None:
-        """盯下载目录 新文件落地就提一嘴"""
-        if self._dl_busy or self._meeting_mode or not self._pet.isVisible():
-            return
-        self._dl_busy = True
-        threading.Thread(target=self._dl_thread, daemon=True).start()
-
-    def _dl_thread(self) -> None:
-        try:
-            folder = Path.home() / "Downloads"
-            if not folder.is_dir():
-                return
-            now = time.time()
-            for p in folder.iterdir():
-                try:
-                    if not p.is_file() or p.suffix.lower() in (".crdownload", ".part", ".tmp", ".download"):
-                        continue
-                    st = p.stat()
-                    # 启动之后新出现的 且写完稳定了几秒
-                    if st.st_mtime > self._dl_baseline and 4 < now - st.st_mtime < 120 and p.name not in self._dl_seen:
-                        self._dl_seen.add(p.name)
-                        self._dl_found.emit(p.name)
-                        return
-                except OSError:
-                    continue
-        except Exception:
-            pass
-        finally:
-            self._dl_busy = False
-
-    @Slot(str)
-    def _on_dl_found(self, name: str) -> None:
-        self._pet.react("perk_up")
-        self._feed_pop(i18n.t("dl_done").format(name=name[:36]))
-
-    def _check_mic(self) -> None:
-        """读注册表看麦克风是否被占用 开会自动安静"""
-        if self._mic_busy:
-            return
-        self._mic_busy = True
-        threading.Thread(target=self._mic_thread, daemon=True).start()
-
-    def _mic_thread(self) -> None:
-        try:
-            import winreg
-            in_use = False
-            base = r"SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\microphone\NonPackaged"
-            try:
-                root = winreg.OpenKey(winreg.HKEY_CURRENT_USER, base)
-            except OSError:
-                root = None
-            if root is not None:
-                i = 0
-                while True:
-                    try:
-                        sub = winreg.EnumKey(root, i)
-                        i += 1
-                    except OSError:
-                        break
-                    try:
-                        with winreg.OpenKey(root, sub) as k:
-                            stop, _ = winreg.QueryValueEx(k, "LastUsedTimeStop")
-                            if int(stop) == 0:  # 还没停 = 正在用
-                                in_use = True
-                                break
-                    except OSError:
-                        continue
-                winreg.CloseKey(root)
-            if in_use != self._meeting_mode:
-                self._mic_changed.emit(in_use)
-        except Exception:
-            pass
-        finally:
-            self._mic_busy = False
-
-    @Slot(bool)
-    def _on_mic_changed(self, in_use: bool) -> None:
-        if in_use and not self._meeting_mode:
-            self._thought.pop(i18n.t("meeting_on"), self._pet)  # 进静音前最后说一句
-            self._meeting_mode = True
-            somatic.set_state("meeting", agent_prompts.SOMA_MEETING_STATE)
-        elif not in_use and self._meeting_mode:
-            self._meeting_mode = False
-            somatic.set_state("meeting", None)
-            self._thought.pop(i18n.t("meeting_off"), self._pet)
-
-    def _check_desktop(self) -> None:
-        """桌面图标太多了 让agent提议收拾"""
-        if self._desk_busy or self._meeting_mode:
-            return
-        self._desk_busy = True
-        threading.Thread(target=self._desk_thread, daemon=True).start()
-
-    def _desk_thread(self) -> None:
-        try:
-            desk = Path.home() / "Desktop"
-            if not desk.is_dir():
-                return
-            n = sum(1 for p in desk.iterdir() if p.is_file() and p.suffix.lower() != ".lnk")
-            if n >= _DESK_LIMIT:
-                today = datetime.now().date().isoformat()
-                if stats.get_note("desk_tidy") != today:
-                    stats.set_note("desk_tidy", today)
-                    self._desk_crowded.emit(n)
-        except Exception:
-            pass
-        finally:
-            self._desk_busy = False
-
-    @Slot(int)
-    def _on_desk_crowded(self, n: int) -> None:
-        if self._worker.is_running:
-            return
-        self.request_message.emit(agent_prompts.DESK_TIDY_MSG.format(n=n))
-
-    def _on_pet_moved_paws(self) -> None:
-        """走动时心情好就留脚印 节日换花样"""
-        try:
-            _val, _aro, _r = emotion.snapshot()
-            if _val < 0.25:
-                return
-            pos = self._pet.frameGeometry().center()
-            d = pos - self._paw_last
-            if (d.x() * d.x() + d.y() * d.y()) < 70 * 70:
-                return
-            import math as _m
-            heading = _m.atan2(d.y(), d.x()) if self._paw_last != QPoint() else 0.0
-            self._paw_last = QPoint(pos)
-            kind = "paw"
-            okey = occasions.today_key(datetime.now()) or ""
-            if "spring" in okey or "newyear" in okey:
-                kind = "flower"
-            elif "christmas" in okey or "winter" in okey:
-                kind = "snow"
-            self._paws.add(pos.x(), pos.y() + self._pet.height() // 4, heading, kind)
-        except Exception:
-            pass
-
-    def _maybe_hide_seek(self) -> bool:
-        """偶尔藏起来让用户找 一天最多一次"""
-        if not self._settings.proactive_enabled or self._meeting_mode:
-            return False
-        if self._engaged() or not self._pet.isVisible() or self._pet.is_asleep or self._tail is not None:
-            return False
-        if presence.idle_seconds() >= 60:
-            return False
-        _val, _aro, rapport = emotion.snapshot()
-        if rapport < 0.5:
-            return False
-        today = datetime.now().date().isoformat()
-        if stats.get_note("hideseek") == today or random.random() > 0.12:
-            return False
-        stats.set_note("hideseek", today)
-        self._feed_pop(i18n.t("hs_start"))
-        QTimer.singleShot(1500, self._hs_hide)
-        return True
-
-    def _hs_hide(self) -> None:
-        from desktop_pet.pet.hideseek import TailWindow
-        from desktop_pet.eyes import capture
-        if self._tail is not None or not self._pet.isVisible():
-            return
-        scr = self._app.primaryScreen().availableGeometry()
-        x = random.randint(scr.left() + 120, scr.right() - 120)
-        y = random.randint(scr.top() + 160, scr.bottom() - 120)
-        tail = TailWindow()
-        capture.register_own_window(int(tail.winId()))
-        tail.found.connect(self._hs_found)
-        tail.gave_up.connect(self._hs_gave_up)
-        self._pet.setVisible(False)
-        tail.appear_at(x, y)
-        self._tail = tail
-
-    def _hs_reveal(self, near: "QPoint | None") -> None:
-        if near is not None:
-            scr = self._app.primaryScreen().availableGeometry()
-            nx = max(scr.left(), min(near.x() - self._pet.width() // 2, scr.right() - self._pet.width()))
-            ny = max(scr.top(), min(near.y() - self._pet.height() // 2, scr.bottom() - self._pet.height()))
-            self._pet.move(nx, ny)
-        self._pet.setVisible(True)
-        self._pet.wake()
-
-    @Slot()
-    def _hs_found(self) -> None:
-        tail, self._tail = self._tail, None
-        pos = tail.pos() if tail is not None else None
-        self._hs_reveal(pos)
-        self._pet.react("celebrate")
-        emotion.apply("praised")
-        selector.set_emotion(*emotion.snapshot())
-        somatic.note(agent_prompts.SOMA_HS_FOUND)
-        self._feed_pop(i18n.t("hs_found"))
-
-    @Slot()
-    def _hs_gave_up(self) -> None:
-        self._tail = None
-        self._hs_reveal(None)
-        self._feed_pop(i18n.t("hs_giveup"))
-
-    def _hs_abort(self) -> None:
-        """藏着的时候被召唤就直接现身"""
-        if self._tail is not None:
-            self._tail.stop()
-            self._tail = None
-            self._hs_reveal(None)
-
-    def _check_weather(self) -> None:
-        """两小时问一次天气 拟态跟着换"""
-        if self._weather_busy or not self._settings.allow_web:
-            return
-        self._weather_busy = True
-        threading.Thread(target=self._weather_thread, daemon=True).start()
-
-    def _weather_thread(self) -> None:
-        try:
-            from desktop_pet.settings import build_http_client
-            client = build_http_client(self._settings.proxy)
-            r = client.get("https://wttr.in/?format=j1", timeout=15)
-            cur = r.json()["current_condition"][0]
-            temp = float(cur.get("temp_C", 20))
-            precip = float(cur.get("precipMM", 0) or 0)
-            kind = ""
-            if temp >= 33:
-                kind = "melt"
-            elif precip > 0.1:
-                kind = "snow" if temp <= 2 else "rain"
-            self._weather_ready.emit(kind)
-        except Exception:
-            pass
-        finally:
-            self._weather_busy = False
-
-    @Slot(str)
-    def _on_weather(self, kind: str) -> None:
-        if kind == self._weather_kind:
-            return
-        self._weather_kind = kind
-        self._pet.set_weather(kind)
-        somatic.set_state("weather", agent_prompts.SOMA_WEATHER.get(kind))
-        if kind:
-            self._feed_pop(i18n.t("weather_" + kind))
-
-    def _on_activity_done(self, name: str) -> None:
-        """小品演完的彩蛋 钓鱼有渔获"""
-        if name != "fish":
-            return
-        catch = ""
-        try:
-            if self._clip_treasures and random.random() < 0.5:
-                _k, text, _ts = random.choice(list(self._clip_treasures))
-                catch = text.strip().replace("\n", " ")[:46]
-            else:
-                today_lines = [str(it.get("text", "")) for it in journal.recent(6)]
-                if today_lines:
-                    catch = random.choice(today_lines)[:46]
-        except Exception:
-            pass
-        if catch:
-            QTimer.singleShot(1200, lambda: self._feed_pop(i18n.t("fish_catch").format(thing=catch)))
-
-    def _throw_ball(self) -> None:
-        """丢颗球给它玩"""
-        if self._ball is not None or not self._pet.isVisible() or self._pet.is_asleep:
-            return
-        from desktop_pet.pet.ball import BallWindow
-        from desktop_pet.eyes import capture
-        ball = BallWindow()
-        capture.register_own_window(int(ball.winId()))
-        ball.caught.connect(self._on_ball_caught)
-        ball.stopped.connect(self._on_ball_stopped)
-        scr = self._app.primaryScreen().availableGeometry()
-        ball.throw_from_top(scr, self._pet.frameGeometry())
-        self._ball = ball
-        self._pet.react("perk_up")
-
-    @Slot()
-    def _on_ball_caught(self) -> None:
-        self._ball = None
-        self._pet.react("jump_spin")
-        emotion.apply("praised")
-        selector.set_emotion(*emotion.snapshot())
-        somatic.note(agent_prompts.SOMA_BALL)
-        QTimer.singleShot(900, lambda: self._feed_pop(i18n.t("ball_caught")))
-
-    @Slot()
-    def _on_ball_stopped(self) -> None:
-        self._ball = None
-        self._pet.react("peek")
-
-    def _maybe_perch(self) -> bool:
-        """偶尔跳上前台窗口顶上待着 窗口一动摔下来"""
-        if not self._settings.proactive_enabled or self._meeting_mode or self._perch_hwnd:
-            return False
-        if self._engaged() or not self._pet.isVisible() or self._pet.is_asleep or self._tail is not None:
-            return False
-        now = time.time()
-        if now - self._perch_last < 7200 or random.random() > 0.15:
-            return False
-        try:
-            import win32gui
-            hwnd = win32gui.GetForegroundWindow()
-            if not hwnd or hwnd == int(self._pet.winId()):
-                return False
-            left, top, right, _bottom = win32gui.GetWindowRect(hwnd)
-            scr = self._app.primaryScreen().availableGeometry()
-            if right - left < 500 or top < scr.top() + self._pet.height() * 0.8:
-                return False
-            self._perch_last = now
-            self._perch_hwnd = hwnd
-            self._perch_rect = (left, top, right)
-            x = left + int((right - left) * 0.30) - self._pet.width() // 2
-            y = top - int(self._pet.height() * 0.72)
-            self._pet.move(x, y)
-            self._pet.react("peek")
-            self._feed_pop(i18n.t("perch_up"))
-            self._perch_timer.start(700)
-            QTimer.singleShot(180_000, self._perch_done)  # 最多蹲三分钟
-            return True
-        except Exception:
-            return False
-
-    def _check_perch(self) -> None:
-        """蹲守期间窗口动了就摔下来"""
-        if not self._perch_hwnd:
-            self._perch_timer.stop()
-            return
-        try:
-            import win32gui
-            if not win32gui.IsWindowVisible(self._perch_hwnd) or win32gui.IsIconic(self._perch_hwnd):
-                self._perch_fall()
-                return
-            left, top, right, _b = win32gui.GetWindowRect(self._perch_hwnd)
-            ol, ot, orr = self._perch_rect
-            if abs(left - ol) > 8 or abs(top - ot) > 8 or abs(right - orr) > 8:
-                self._perch_fall()
-        except Exception:
-            self._perch_done()
-
-    def _perch_fall(self) -> None:
-        """窗台塌了 摔下去气鼓鼓"""
-        self._perch_hwnd = 0
-        self._perch_timer.stop()
-        self._pet._start_toss(random.uniform(-120, 120), 60.0)
-        QTimer.singleShot(1400, lambda: self._pet.react("puff_up"))
-        QTimer.singleShot(1700, lambda: self._feed_pop(i18n.t("perch_fall")))
-
-    def _perch_done(self) -> None:
-        if not self._perch_hwnd:
-            return
-        self._perch_hwnd = 0
-        self._perch_timer.stop()
-        self._pet.react("stretch")
-
-    def _toggle_focus(self) -> None:
-        """番茄钟 开一轮或提前结束"""
-        if time.time() < self._focus_until:
-            self._focus_timer.stop()
-            self._focus_until = 0.0
-            somatic.set_state("focus", None)
-            self._feed_pop(i18n.t("focus_cancel"))
-            return
-        self._focus_until = time.time() + _FOCUS_MINUTES * 60
-        self._focus_timer.start(_FOCUS_MINUTES * 60 * 1000)
-        self._pet.perform("read")
-        somatic.set_state("focus", agent_prompts.SOMA_FOCUS_STATE)
-        self._feed_pop(i18n.t("focus_start").format(m=_FOCUS_MINUTES))
-
-    def _end_focus(self) -> None:
-        if self._focus_until <= 0:
-            return
-        self._focus_until = 0.0
-        somatic.set_state("focus", None)
-        somatic.note(agent_prompts.SOMA_FOCUS_DONE)
-        self._pet.react("celebrate")
-        emotion.apply("task_done")
-        selector.set_emotion(*emotion.snapshot())
-        self._feed_pop(i18n.t("focus_done").format(m=_FOCUS_MINUTES))
-
-    def _check_bugs(self) -> None:
-        """定时扫temp 垃圾堆大了生一只虫"""
-        if self._bug is not None or self._bug_scanning:
-            return
-        if not self._settings.proactive_enabled:
-            return
-        if self._engaged() or not self._pet.isVisible() or self._pet.is_asleep:
-            return
-        if presence.idle_seconds() >= _AWAY_S:
-            return
-        self._bug_scanning = True
-        threading.Thread(target=self._scan_temp_thread, daemon=True).start()
-
-    def _scan_temp_thread(self) -> None:
-        try:
-            size = feeding.temp_junk_size()
-            if size >= _BUG_TEMP_BYTES:
-                self._bug_found.emit(size)
-        finally:
-            self._bug_scanning = False
-
-    @Slot(int)
-    def _on_bug_found(self, size: int) -> None:
-        if self._bug is not None or not self._pet.isVisible():
-            return
-        from desktop_pet.pet.bug import BugWindow
-        from desktop_pet.eyes import capture
-        bug = BugWindow()
-        capture.register_own_window(int(bug.winId()))
-        bug.squished.connect(self._on_bug_squished)
-        bug.escaped.connect(self._on_bug_escaped)
-        geo = self._pet.frameGeometry()
-        screen = self._app.primaryScreen().availableGeometry()
-        side = 1 if geo.center().x() < screen.center().x() else -1
-        bug.spawn_near(geo.center().x() + side * (geo.width() // 2 + 70),
-                       min(geo.bottom() + 10, screen.bottom() - 80), screen)
-        self._bug = bug
-        self._pet.react("double_take")
-        self._feed_pop(i18n.t("bug_spotted").format(size=feeding.human_size(size)))
-
-    @Slot()
-    def _on_bug_squished(self) -> None:
-        self._bug = None
-        threading.Thread(target=self._clean_temp_thread, daemon=True).start()
-
-    def _clean_temp_thread(self) -> None:
-        try:
-            freed, count = feeding.clean_temp()
-            self._bug_cleaned.emit(freed, count)
-        except Exception:
-            self._bug_cleaned.emit(0, 0)
-
-    @Slot(int, int)
-    def _on_bug_cleaned(self, freed: int, count: int) -> None:
-        if count <= 0:
-            self._feed_pop(i18n.t("bug_nothing"))
-            return
-        stats.add_eaten(freed, 0)  # 算它吃的 但不算文件投喂数
-        emotion.apply("fed")
-        selector.set_emotion(*emotion.snapshot())
-        self._pet.react("celebrate")
-        somatic.note(agent_prompts.SOMA_BUG.format(n=count, size=feeding.human_size(freed)))
-        self._feed_pop(i18n.t("bug_squished_msg").format(n=count, size=feeding.human_size(freed)))
-
-    @Slot()
-    def _on_bug_escaped(self) -> None:
-        self._bug = None
-
-    def _scan_background_shells(self) -> None:
-        """守望后台shell 跑完庆祝 挂了安慰并叫agent看"""
-        try:
-            snap = shell_exec.background_snapshot()
-        except Exception:
-            return
-        for t in snap:
-            if t["running"] or t["id"] in self._bg_announced:
-                continue
-            self._bg_announced.add(t["id"])
-            if time.time() - t["started"] < _BGWATCH_MIN_RUNTIME_S:
-                continue
-            if t["returncode"] == 0:
-                self._pet.react("celebrate")
-                self._feed_pop(i18n.t("bgwatch_ok").format(id=t["id"]))
-                emotion.apply("task_done")
-                selector.set_emotion(*emotion.snapshot())
-            else:
-                self._pet.react("droop")
-                self._feed_pop(i18n.t("bgwatch_fail").format(id=t["id"], code=t["returncode"]))
-                if not self._worker.is_running:
-                    self.request_message.emit(agent_prompts.BGWATCH_ANALYZE_MSG.format(
-                        id=t["id"], command=t["command"][:80], code=t["returncode"],
-                        tail=t["tail"][-1200:]))
 
     @Slot(bool)
     def _on_busy(self, busy: bool) -> None:
@@ -1881,42 +1081,15 @@ class PetApp(QObject):
                 return
             if self._maybe_occasion():
                 return
-            if self._maybe_hide_seek():
+            if self._playtime.maybe_hide_seek():
                 return
-            if self._maybe_perch():
+            if self._playtime.maybe_perch():
                 return
-            if self._maybe_giveback():
+            if self._watchers.maybe_giveback():
                 return
             self._maybe_speak_up()
         except Exception:
             pass
-
-    def _maybe_giveback(self) -> bool:
-        """亲密度够了 把几小时前帮用户收着的剪贴宝贝拿出来提一嘴"""
-        if not self._settings.proactive_enabled or not self._clip_treasures:
-            return False
-        if self._worker.is_running or self._engaged() or not self._pet.isVisible() or self._pet.is_asleep:
-            return False
-        if presence.idle_seconds() >= _AWAY_S:
-            return False
-        _val, _aro, rapport = emotion.snapshot()
-        if rapport < _GIVEBACK_RAPPORT_GATE:
-            return False
-        now = datetime.now()
-        if self._last_giveback is not None and (now - self._last_giveback).total_seconds() < _GIVEBACK_MIN_INTERVAL_S:
-            return False
-        kind, text, ts = self._clip_treasures[0]
-        age_h = (now - ts).total_seconds() / 3600
-        if age_h < _GIVEBACK_MIN_AGE_H:
-            return False
-        self._clip_treasures.popleft()
-        self._pet.set_pendant(len(self._clip_treasures))
-        self._last_giveback = now
-        snippet = text.strip().replace("\n", " ")[:60]
-        self._pet.react("peek")
-        self.request_message.emit(agent_prompts.GIVEBACK_MSG.format(
-            hours=f"{age_h:.0f}", kind=kind, snippet=snippet))
-        return True
 
     @Slot()
     def _on_wants_travel(self) -> None:
@@ -2141,57 +1314,9 @@ class PetApp(QObject):
             self._pet.move(rest)
             self._pet.show()
             self._pet.play_entrance(next_entrance_kind(), rest, screen)
-            QTimer.singleShot(5200, self._morning_ritual)
+            QTimer.singleShot(5200, self._rituals.morning_ritual)
         else:
             self._pet.wake()
-
-    def _morning_ritual(self) -> None:
-        """每天第一次见面 起床气加心情预报 纪念日端蛋糕"""
-        today = datetime.now().date().isoformat()
-        if stats.get_note("forecast") != today:
-            stats.set_note("forecast", today)
-            self._pet.react("yawn")
-            val, _aro, rapport = emotion.snapshot()
-            if val >= 0.25:
-                key = "forecast_sunny"
-            elif val >= -0.15:
-                key = "forecast_cloudy"
-            else:
-                key = "forecast_rain"
-            text = i18n.t(key)
-            if rapport >= 0.6:
-                text += i18n.t("forecast_close_suffix")
-            QTimer.singleShot(1800, lambda: self._feed_pop(text))
-        # 纪念日
-        days = stats.snapshot()["days"]
-        milestone = days in (7, 30, 100, 200, 520) or (days > 0 and days % 365 == 0)
-        if milestone and stats.get_note("cake") != today:
-            stats.set_note("cake", today)
-            self._cake_on = True
-            somatic.note(agent_prompts.SOMA_CAKE_OUT.format(days=days))
-            QTimer.singleShot(4200, lambda: (
-                self._pet.set_cake(True),
-                self._feed_pop(i18n.t("cake_day").format(days=days)),
-            ))
-            QTimer.singleShot(10 * 60 * 1000, self._cake_timeout)
-
-    def _cake_timeout(self) -> None:
-        if getattr(self, "_cake_on", False):
-            self._cake_on = False
-            self._pet.set_cake(False)
-
-    def _on_pet_clicked_cake(self) -> None:
-        """点宠物时蛋糕亮着就是吹蜡烛"""
-        if not getattr(self, "_cake_on", False):
-            return
-        if self._pet.blow_cake():
-            self._cake_on = False
-            emotion.apply("praised")
-            selector.set_emotion(*emotion.snapshot())
-            somatic.note(agent_prompts.SOMA_CAKE_BLOWN)
-            QTimer.singleShot(900, lambda: self._pet.react("celebrate"))
-            QTimer.singleShot(1100, lambda: self._feed_pop(i18n.t("cake_blow")))
-            QTimer.singleShot(2600, lambda: self._pet.set_cake(False))
 
     def _bond_snapshot(self) -> dict:
         """控制面板羁绊页快照"""
@@ -2358,21 +1483,7 @@ class PetApp(QObject):
         self._do_quit()
 
     def _do_quit(self) -> None:
-        if self._entered and self._pet.isVisible() and not getattr(self, "_farewell_done", False):
-            # 走之前挥个手说晚安 再真正退
-            self._farewell_done = True
-            self._pet.react("wave")
-            line = ""
-            try:
-                today = datetime.now().date().isoformat()
-                for it in reversed(journal.recent(6)):
-                    if str(it.get("ts", "")).startswith(today):
-                        line = str(it.get("text", ""))[:42]
-                        break
-            except Exception:
-                pass
-            self._feed_pop(i18n.t("bye_with_note").format(note=line) if line else i18n.t("bye_plain"))
-            QTimer.singleShot(1700, self._do_quit)
+        if self._rituals.farewell():
             return
         for _t in (self._presence_timer, self._reminder_timer, self._proactive_timer,
                    self._watch_timer, self._remote_timer):
@@ -2423,14 +1534,11 @@ class PetApp(QObject):
         self._proactive_timer.start(_PROACTIVE_POLL_MS)
         self._watch_timer.start(_WATCH_POLL_MS)
         self._remote_timer.start(_REMOTE_POLL_MS)
-        self._bgwatch_timer.start(_BGWATCH_POLL_MS)
-        self._bug_timer.start(_BUG_SCAN_MS)
-        self._shy_timer.start(_SHY_POLL_MS)
-        self._vitals_timer.start(_VITALS_POLL_MS)
-        self._dl_timer.start(_DL_POLL_MS)
-        self._mic_timer.start(_MIC_POLL_MS)
-        self._desk_timer.start(_DESK_POLL_MS)
-        self._weather_timer.start(2 * 3600 * 1000)
+        self._feeding.start()
+        self._sensors.start()
+        self._playtime.start()
+        self._watchers.start()
+        self._rituals.start()
         if self._settings.remote_inbox:
             remote_inbox.ensure_dir()
         self._hotkeys.start()
