@@ -4,7 +4,9 @@
 
 from __future__ import annotations
 
+import os
 import re
+from fnmatch import fnmatch
 from pathlib import Path
 
 _MAX_READ = 20000
@@ -23,6 +25,8 @@ _TEXT_EXT = frozenset(
 
 
 def _read_with_encoding(target: Path) -> tuple[str, str]:
+    """读文本并猜编码 → (text, encoding)。utf-8-sig 优先(顺手吃掉 BOM)，再退 gbk —— 国内机器一堆
+    记事本/老工具存的 gbk 源码；都不成才 utf-8 + replace 硬解，保证 edit 回写时编码不串。"""
     raw = target.read_bytes()
     for encoding in ("utf-8-sig", "gbk"):
         try:
@@ -32,17 +36,29 @@ def _read_with_encoding(target: Path) -> tuple[str, str]:
     return raw.decode("utf-8", errors="replace"), "utf-8"
 
 
-def read_file(path: str) -> str:
+def read_file(path: str, offset: int = 0) -> str:
+    """读文件，超 _MAX_READ 就分片：offset 从字符位续读，footer 带下一段 offset 让模型自己翻页。"""
     target = Path(path).expanduser()
     if not target.is_file():
         return f"[not a file or doesn't exist: {path}]"
     try:
-        text = target.read_text(encoding="utf-8", errors="replace")
+        text, _ = _read_with_encoding(target)
     except Exception as exc:
         return f"[read failed: {exc}]"
-    if len(text) > _MAX_READ:
-        return text[:_MAX_READ] + f"\n[truncated; full text is {len(text)} chars]"
-    return text or "(empty file)"
+    try:
+        off = max(0, int(offset))  # 模型常把 offset 传成字符串/null，转不了就当从头读
+    except (TypeError, ValueError):
+        off = 0
+    total = len(text)
+    if off == 0 and total <= _MAX_READ:
+        return text or "(empty file)"
+    if off >= total:
+        return f"[offset {off} is past the end of the file ({total} chars) — nothing more to read]"
+    chunk = text[off : off + _MAX_READ]
+    end = off + len(chunk)
+    header = f"[chars {off}–{end} of {total}]\n"
+    footer = f"\n[truncated; continue with offset={end}]" if end < total else "\n[end of file]"
+    return header + chunk + footer
 
 
 def write_file(path: str, content: str) -> str:
@@ -81,7 +97,7 @@ def list_dir(path: str = ".") -> str:
 
 
 def _norm_eol(s: str) -> str:
-    """统一到 \\n，消除 CRLF/CR 差异(匹配只在 \\n 空间里做)。"""
+    """匹配只在 \\n 空间里做 —— CRLF/CR 先抹平，省得 old_string 因换行风格不同对不上。"""
     return s.replace("\r\n", "\n").replace("\r", "\n")
 
 
@@ -135,6 +151,8 @@ def _fuzzy_replace(text: str, old: str, new: str, replace_all: bool):
 
 
 def edit_file(path: str, old: str, new: str, replace_all: bool = False) -> str:
+    """改文件：先精确替换；多处命中又没给 replace_all 就报歧义不动手。精确不中再走 _fuzzy_replace
+    按行容错。回写时保留原编码和原换行风格。"""
     target = Path(path).expanduser()
     if not target.is_file():
         return f"[not a file or doesn't exist: {path}]"
@@ -144,7 +162,7 @@ def edit_file(path: str, old: str, new: str, replace_all: bool = False) -> str:
         raw, encoding = _read_with_encoding(target)
     except Exception as exc:
         return f"[read failed: {exc}]"
-    nl = "\r\n" if "\r\n" in raw else "\n"
+    nl = "\r\n" if "\r\n" in raw else "\n"  # 记住原换行：匹配统一在 \n 里做，回写再换回去，别把整文件刷成 LF 炸出满屏 diff
     text, old_n, new_n = _norm_eol(raw), _norm_eol(old), _norm_eol(new)
 
     count = text.count(old_n)
@@ -169,7 +187,17 @@ def edit_file(path: str, old: str, new: str, replace_all: bool = False) -> str:
     return f"Replaced {count if replace_all else 1} occurrence(s) in {path}.{note}"
 
 
+def _iter_files(base: Path):
+    """走目录树，原地剪掉 _IGNORE_DIRS —— dirs[:] 切片就地改 os.walk 才会真的不下钻，
+    比 rglob('*') 全捞完再按 parts 过滤省掉整个 node_modules/.git 的遍历。"""
+    for root, dirs, files in os.walk(base):
+        dirs[:] = [d for d in dirs if d not in _IGNORE_DIRS]
+        for name in files:
+            yield Path(root) / name
+
+
 def search_code(pattern: str, path: str = ".", max_results: int = _MAX_HITS) -> str:
+    """正则逐行搜 —— 只碰 _TEXT_EXT 白名单(跳过二进制/图片)，命中满 max_results 就截断返回。"""
     try:
         regex = re.compile(pattern)
     except re.error as exc:
@@ -177,18 +205,16 @@ def search_code(pattern: str, path: str = ".", max_results: int = _MAX_HITS) -> 
     base = Path(path).expanduser()
     if not base.exists():
         return f"[path doesn't exist: {path}]"
-    candidates = [base] if base.is_file() else base.rglob("*")
+    candidates = [base] if base.is_file() else _iter_files(base)
     hits: list[str] = []
     for file in candidates:
-        if not file.is_file() or file.suffix.lower() not in _TEXT_EXT:
-            continue
-        if any(part in _IGNORE_DIRS for part in file.parts):
+        if file.suffix.lower() not in _TEXT_EXT:
             continue
         try:
-            lines = file.read_text(encoding="utf-8", errors="ignore").splitlines()
-        except OSError:
+            text, _ = _read_with_encoding(file)
+        except Exception:
             continue
-        for number, line in enumerate(lines, 1):
+        for number, line in enumerate(text.splitlines(), 1):
             if regex.search(line):
                 hits.append(f"{file}:{number}: {line.strip()[:160]}")
                 if len(hits) >= max_results:
@@ -202,8 +228,10 @@ def glob_files(pattern: str, path: str = ".", max_results: int = _MAX_ENTRIES) -
         return f"[path doesn't exist: {path}]"
     matches: list[str] = []
     try:
-        for file in base.rglob(pattern):
-            if any(part in _IGNORE_DIRS for part in file.parts):
+        for file in _iter_files(base):
+            rel = file.relative_to(base).as_posix()
+            # 两头都试：纯文件名(*.py)和相对路径(sub/*.py)都能中；rel 统一 posix 斜杠，免得 Windows 反斜杠匹配不上
+            if not (fnmatch(file.name, pattern) or fnmatch(rel, pattern)):
                 continue
             matches.append(str(file))
             if len(matches) >= max_results:

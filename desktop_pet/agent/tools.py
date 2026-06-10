@@ -32,6 +32,7 @@ class ToolResult:
 
 
 def _function(name: str, description: str, properties: dict, required: list[str]) -> dict:
+    """包一层 OpenAI function-calling 的工具 schema —— TOOLS 里全靠它，省得每条手写嵌套。"""
     return {
         "type": "function",
         "function": {
@@ -46,6 +47,7 @@ def _function(name: str, description: str, properties: dict, required: list[str]
     }
 
 
+# 鼠标系工具共用的 x/y 参数
 _XY = {
     "x": {"type": "integer", "description": "screen X, pixels"},
     "y": {"type": "integer", "description": "screen Y, pixels"},
@@ -54,7 +56,8 @@ _XY = {
 TOOLS = [
     _function(
         "run_shell",
-        "Run a PowerShell/cmd command on this machine; returns exit code and output. First choice for files, processes, system settings, launching programs, installing software, etc.",
+        "Run a PowerShell/cmd command on this machine; returns exit code and output. First choice for files, processes, system settings, launching programs, installing software, etc. "
+        "Killed after 120s with no output or 600s total — run servers/watch-mode in the background (Start-Process / Start-Job) instead of blocking.",
         {
             "command": {"type": "string", "description": "the command to run"},
             "shell": {"type": "string", "enum": ["powershell", "cmd"], "description": "default powershell"},
@@ -63,14 +66,18 @@ TOOLS = [
     ),
     _function(
         "run_python",
-        "Run code in a persistent Python environment (variables/imports survive across calls); returns stdout. pip-install libraries, call APIs, read/write files, drive automation libraries.",
+        "Run code in a persistent Python environment (variables/imports survive across calls); returns stdout. pip-install libraries, call APIs, read/write files, drive automation libraries. "
+        "Each call has a 60s limit — on timeout the session RESTARTS and all variables are LOST, so split long work into <60s steps (or use run_shell for long commands).",
         {"code": {"type": "string", "description": "the Python code to run"}},
         ["code"],
     ),
     _function(
         "read_file",
-        "Read a text file's contents (long files are truncated).",
-        {"path": {"type": "string", "description": "file path"}},
+        "Read a text file's contents (long files are truncated to ~20k chars). If you see a truncation note, call again with offset to continue reading from where it stopped.",
+        {
+            "path": {"type": "string", "description": "file path"},
+            "offset": {"type": "integer", "description": "character offset to start reading from (use the value given in a previous truncation note); default 0"},
+        },
         ["path"],
     ),
     _function(
@@ -132,8 +139,8 @@ TOOLS = [
     _function(
         "run_tests",
         "Run the project's tests and return a pass/fail summary — use it after changing code to confirm you didn't break "
-        "anything. Without a command it auto-detects (pytest for Python, npm test for Node). Has its own long timeout "
-        "(5 min), unlike run_shell's 60s. Pass path = the project directory.",
+        "anything. Without a command it auto-detects (pytest for Python, npm test for Node). Timeout 5 min "
+        "(run_shell is 120s-idle/600s-total). Pass path = the project directory.",
         {
             "command": {"type": "string", "description": "optional custom test command; omit to auto-detect"},
             "path": {"type": "string", "description": "project directory to run tests in; default current dir"},
@@ -147,6 +154,7 @@ TOOLS = [
             "url": {"type": "string", "description": "request URL"},
             "method": {"type": "string", "description": "GET/POST etc., default GET"},
             "body": {"type": "string", "description": "request body, optional"},
+            "headers": {"type": "object", "description": "request headers, optional, e.g. {\"Content-Type\": \"application/json\", \"Authorization\": \"Bearer …\"}"},
         },
         ["url"],
     ),
@@ -220,12 +228,18 @@ TOOLS = [
         "screenshot",
         "Take a screenshot and return the image to you; the text gives the screen resolution, and mouse coordinates follow it. Use only when you must see the GUI. "
         "Pick the scope: for the whole desktop / locating a window use fullscreen (default); to see the active window clearly use window. "
+        "If small text/icons are unreadable (games, videos, dense custom UIs), re-shoot with region to ZOOM into that area at native resolution. "
         "By default you (the pet) are NOT in the shot; set include_self to true only when you actually want to see yourself.",
         {
             "scope": {
                 "type": "string",
                 "enum": ["fullscreen", "window"],
                 "description": "framing: fullscreen = whole screen (default), window = only the active window. Choose by what you need to see.",
+            },
+            "region": {
+                "type": "string",
+                "description": "optional ZOOM: left,top,width,height in IMAGE pixels (same coordinate space as the previous screenshot / ocr_screen). "
+                "Crops that area at NATIVE resolution so small details become readable — take a fullscreen shot first, then re-shoot zoomed on the part you must see clearly.",
             },
             "include_self": {
                 "type": "boolean",
@@ -239,13 +253,14 @@ TOOLS = [
         "OCR the on-screen text and return each segment's CENTER coordinate — unlike eyeballing a screenshot, this tells you exactly "
         "where text is so you can click the coordinate directly. Use to read a lot of on-screen text, or to click a specific piece of text. "
         "Optional region scans just one area.",
-        {"region": {"type": "string", "description": "optional, scan only this area: left,top,width,height (screen pixels); blank = whole screen"}},
+        {"region": {"type": "string", "description": "optional, scan only this area: left,top,width,height in IMAGE pixels — the same coordinate space as screenshot images and the coordinates this tool returns; blank = whole screen"}},
         [],
     ),
     _function(
         "find_on_screen",
         "Locate a small template image (an icon/button screenshot) on screen; returns its center coordinate (click it directly). "
-        "Use to click elements with no accessibility node — icons in custom-drawn UIs or game screens. Prepare the template image file first.",
+        "Use to click elements with no accessibility node — icons in custom-drawn UIs or game screens. Prepare the template image file first. "
+        "Matches on edge structure as well as brightness, so a template keeps working across theme / lighting / dark-mode changes (even an inverted palette).",
         {
             "template_path": {"type": "string", "description": "local path of the template image (a small screenshot of the icon/button to find)"},
             "confidence": {"type": "number", "description": "match threshold 0–1, default 0.8; lower it if not found"},
@@ -256,18 +271,23 @@ TOOLS = [
         "screen_elements",
         "BEST way to operate a GUI: detect all actionable elements on the active screen (accessibility controls + on-screen text), draw NUMBERED boxes on a screenshot, and return it plus a numbered list. "
         "Then call act_element with the number — you pick a number instead of guessing pixel coordinates, and the click lands exactly. Prefer this over screenshot+click for any normal app/web UI. "
+        "If a dense toolbar / small icons come back unlabeled or merged, pass region to ZOOM in: it re-detects just that area at native resolution, surfacing small elements a full-screen pass misses. "
         "(Won't find much on pure game/canvas surfaces — there fall back to ocr_screen, or raw click/move by coordinate.)",
-        {},
+        {"region": {"type": "string", "description": "optional ZOOM: left,top,width,height in IMAGE pixels (same coordinate space as screenshot / ocr_screen). Re-detects only that area at native resolution for denser/smaller elements; blank = whole screen"}},
         [],
     ),
     _function(
         "act_element",
-        "Act on a numbered element from the most recent screen_elements result. Clicks the element's exact coordinate, or — for standard controls — invokes it directly via the accessibility API (no cursor moved, works in the background). "
-        "action: click (default) / double / right / type (type needs text). Re-run screen_elements first if the screen changed.",
+        "Act on a numbered element from the most recent screen_elements result. "
+        "action: click (default) / double / right / type (type needs text). Re-run screen_elements first if the screen changed. "
+        "By default (mode=auto) it avoids the user's real mouse: accessibility invoke → synthetic window messages (work even on covered windows), and only falls back to a real click when message delivery itself fails. "
+        "It AUTO-VERIFIES: after the action it re-checks the screen and the result says whether anything actually changed. If it reports '⚠ NOTHING changed' (common when games/custom UIs ignore synthetic input), retry with mode=real; only trust '✓ verified' as actually done. "
+        "mode=ghost: NEVER touch the real mouse, report failure instead (user asked not to interfere). mode=real: skip ghost, click for real (use after a verified no-effect ghost attempt).",
         {
             "index": {"type": "integer", "description": "the element number from screen_elements"},
             "action": {"type": "string", "enum": ["click", "double", "right", "type"], "description": "default click"},
             "text": {"type": "string", "description": "text to type when action=type"},
+            "mode": {"type": "string", "enum": ["auto", "ghost", "real"], "description": "auto (default): no-cursor first, real mouse only if delivery fails; ghost: never touch the real mouse; real: real mouse directly"},
         },
         ["index"],
     ),
@@ -556,15 +576,25 @@ TOOLS = [
 ]
 
 
+# 这些工具不碰共享的 UI/输入状态(纯读、跑子进程、走网络)，可以绕过 _DISPATCH_LOCK 真正并行 ——
+# 不在名单里的(鼠标/键盘/窗口/截屏那些)会互相抢全局光标和前台焦点，必须串行。
 _CONCURRENT_SAFE = frozenset(
     {"http_request", "read_file", "list_dir", "run_shell", "run_python", "run_skill",
      "web_search", "web_fetch", "search_code", "glob_files", "recall_docs", "list_docs",
      "system_memory", "read_process_memory", "recall_clipboard",
-     "review_diff", "run_tests"}
+     "review_diff", "run_tests",
+     "install_package"}
 )
+
+# 从 TOOLS 里抽出每个工具的必填参数，dispatch 进来先比一遍 —— 比让执行器抛 KeyError 更早、报错也更准。
+_REQUIRED_ARGS: dict[str, tuple[str, ...]] = {
+    t["function"]["name"]: tuple(t["function"]["parameters"].get("required") or ())
+    for t in TOOLS
+}
 
 
 def _resolve_reminder_time(fire_at: str | None, in_minutes: float | None) -> datetime | None:
+    """把模型给的时间解析成绝对 datetime —— in_minutes 优先，否则按几种格式试 fire_at；都不认返回 None。"""
     now = datetime.now()
     if in_minutes is not None:
         try:
@@ -573,19 +603,21 @@ def _resolve_reminder_time(fire_at: str | None, in_minutes: float | None) -> dat
             return None
     if not fire_at:
         return None
-    text = fire_at.strip().replace("T", " ")
+    text = fire_at.strip().replace("T", " ")  # 容忍 ISO 的 "2026-01-01T08:00" 写法
+    # 带日期的当成绝对时刻
     for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y/%m/%d %H:%M"):
         try:
             return datetime.strptime(text, fmt)
         except ValueError:
             pass
+    # 只给了 HH:MM —— 落到今天这个点；已经过了就顺到明天，不然 "提醒我 8 点" 会立刻触发。
     for fmt in ("%H:%M:%S", "%H:%M"):
         try:
             clock = datetime.strptime(text, fmt).time()
         except ValueError:
             continue
         fire = now.replace(hour=clock.hour, minute=clock.minute, second=clock.second, microsecond=0)
-        if fire < now.replace(second=0, microsecond=0):
+        if fire < now.replace(second=0, microsecond=0):  # 比到分钟，避免把"就这一分钟"误判成已过
             fire += timedelta(days=1)
         return fire
     return None
@@ -685,21 +717,26 @@ def _stop_background_task(task_id) -> str:
 def dispatch(
     name: str, arguments: dict, *, shell_session=None, py_session=None
 ) -> ToolResult:
+    """工具调用总入口 —— 并发安全的放行直跑，其余串行上锁，异常全兜成文字回给模型。"""
+    # 必填参数缺了就直接退回，让模型补 —— 别等执行器里炸 KeyError，报错说不清缺哪个。
+    missing = [k for k in _REQUIRED_ARGS.get(name, ()) if k not in (arguments or {})]
+    if missing:
+        return ToolResult(f"[tool {name} is missing required argument(s): {', '.join(missing)}; fill in and retry]")
     try:
         if name in _CONCURRENT_SAFE:
             return _dispatch_impl(name, arguments, shell_session=shell_session, py_session=py_session)
-        with _DISPATCH_LOCK:
+        with _DISPATCH_LOCK:  # 会动光标/焦点的工具串行，免得并发互相打架
             return _dispatch_impl(name, arguments, shell_session=shell_session, py_session=py_session)
-    except KeyError as exc:
-        return ToolResult(f"[tool {name} is missing required argument {exc}; fill it in and retry]")
     except Exception as exc:
+        # 工具炸了不往上抛 —— 包成一行文字回给模型，让它自己看错误重试，别把整轮对话带崩。
         return ToolResult(f"[tool {name} failed: {type(exc).__name__}: {exc}]")
 
 
 def _dispatch_impl(
     name: str, arguments: dict, *, shell_session=None, py_session=None
 ) -> ToolResult:
-    python = py_session or _python
+    """按工具名分发到各执行器 —— 一长串 if，新增工具就在这加一条；mcp__ 前缀的统一转交 mcp_hub。"""
+    python = py_session or _python  # 后台任务会传自己独立的 py 会话进来，没传就用进程级那个常驻的
     if name == "run_shell":
         return ToolResult(
             run_shell(arguments["command"], arguments.get("shell", "powershell"), session=shell_session)
@@ -707,7 +744,7 @@ def _dispatch_impl(
     if name == "run_python":
         return ToolResult(python.run(arguments["code"]))
     if name == "read_file":
-        return ToolResult(fs.read_file(arguments["path"]))
+        return ToolResult(fs.read_file(arguments["path"], arguments.get("offset", 0)))
     if name == "write_file":
         return ToolResult(fs.write_file(arguments["path"], arguments["content"]))
     if name == "list_dir":
@@ -725,14 +762,16 @@ def _dispatch_impl(
     if name == "run_tests":
         return ToolResult(devtools.run_tests(arguments.get("command", ""), arguments.get("path", ".")))
     if name == "http_request":
-        return ToolResult(net.http_request(arguments["url"], arguments.get("method", "GET"), arguments.get("body")))
+        return ToolResult(net.http_request(
+            arguments["url"], arguments.get("method", "GET"), arguments.get("body"), arguments.get("headers")
+        ))
     if name == "web_search":
         return ToolResult(web.web_search(arguments["query"]))
     if name == "web_fetch":
         return ToolResult(web.web_fetch(arguments["url"]))
     if name == "install_package":
         result = install_package(arguments["name"])
-        python.refresh_native_dlls() 
+        python.refresh_native_dlls()  # 新装的包可能带 .pyd/DLL，刷一下让常驻解释器当场 import 得到，不用重启会话
         return ToolResult(result)
     if name == "system_memory":
         return ToolResult(sysmem.system_memory(arguments.get("top", 12)))
@@ -742,8 +781,34 @@ def _dispatch_impl(
         )
     if name == "screenshot":
         scope = arguments.get("scope") or CAPTURE_FULLSCREEN
-        cap = capture_screen(scope, include_self=bool(arguments.get("include_self", False)))
-        if cap.focus_title:
+        region: tuple[int, int, int, int] | None = None
+        raw_region = str(arguments.get("region") or "").strip()
+        if raw_region:
+            try:
+                vals = tuple(int(v) for v in raw_region.split(","))
+                if len(vals) != 4:  # 必须正好 left,top,width,height 四个，多了少了都拒
+                    raise ValueError
+                region = vals
+            except ValueError:
+                return ToolResult("[region must be left,top,width,height (image pixels)]")
+        try:
+            cap = capture_screen(scope, include_self=bool(arguments.get("include_self", False)), region=region)
+        except ValueError as exc:
+            return ToolResult(f"[{exc}]")
+        if cap.region:
+            l, t, w, h = cap.region
+            # 给模型一句换算公式，好把放大图里量的点折回全屏坐标去点：
+            # 原生分辨率没被缩放(图尺寸==区域尺寸)就只是平移，直接加左上角偏移；被缩放了才要按比例还原。
+            mapping = (
+                f"ADD ({l}, {t}) to coordinates you measure in this zoomed image"
+                if (cap.width, cap.height) == (w, h)
+                else f"full_x = {l} + x*{w}/{cap.width}, full_y = {t} + y*{h}/{cap.height}"
+            )
+            text = (
+                f"Zoomed screenshot of region ({l},{t},{w},{h}) at native detail, {cap.width}x{cap.height}. "
+                f"To convert a point HERE into full-screen image coordinates (for click / ocr_screen region): {mapping}."
+            )
+        elif cap.focus_title:
             text = (
                 f"Screenshot taken (showing only the active window \"{cap.focus_title}\"; the rest is hidden), "
                 f"resolution {cap.width}x{cap.height}; coordinates are still full-screen."
@@ -757,12 +822,15 @@ def _dispatch_impl(
         return ToolResult(vision.find_on_screen(arguments["template_path"], arguments.get("confidence", 0.8)))
     if name == "screen_elements":
         from desktop_pet.eyes import elements
-        jpeg, listing = elements.screen_elements()
-        return ToolResult(listing, to_data_url(jpeg))
+        jpeg, listing = elements.screen_elements(arguments.get("region", ""))
+        return ToolResult(listing, to_data_url(jpeg) if jpeg else None)
     if name == "act_element":
         from desktop_pet.eyes import elements
         return ToolResult(
-            elements.act_element(int(arguments["index"]), arguments.get("action", "click"), arguments.get("text", ""))
+            elements.act_element(
+                int(arguments["index"]), arguments.get("action", "click"), arguments.get("text", ""),
+                mode=arguments.get("mode", "auto"),
+            )
         )
     if name == "list_windows":
         return ToolResult(windows.list_windows())
@@ -846,19 +914,20 @@ def _dispatch_impl(
         if code is None:
             return ToolResult(f"No skill named \"{arguments['name']}\"; use list_skills to see what's available.")
         raw_args = arguments.get("args")
-        if isinstance(raw_args, str):
+        if isinstance(raw_args, str):  # 模型有时把 args 当字符串塞 JSON 进来，解一层
             try:
                 raw_args = json.loads(raw_args)
             except (ValueError, TypeError):
                 raw_args = {}
         if not isinstance(raw_args, dict):
             raw_args = {}
+        # 把入参用 repr 拼成 args = {...} 当头注入 —— 技能代码约定从全局 args 读参数。repr 保证字面量安全、不被当代码执行。
         script = f"args = {raw_args!r}\n\n{code}"
         return ToolResult(python.run(script))
     if name == "edit_skill":
         return ToolResult(skills.edit(arguments["name"], arguments["code"]))
     if name == "list_skills":
         return ToolResult(skills.listing())
-    if name.startswith("mcp__"):
+    if name.startswith("mcp__"):  # 外挂 MCP 工具不在上面那串里，按前缀整体甩给 mcp_hub
         return ToolResult(mcp_hub.call(name, arguments))
     return ToolResult(f"[unknown tool: {name}]")

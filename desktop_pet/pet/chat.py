@@ -134,6 +134,15 @@ QTextEdit#editor {
     selection-background-color: rgba(236, 160, 188, 150);
     selection-color: #322f37;
 }
+QTextEdit#editor QScrollBar:vertical {
+    background: transparent; width: 7px; margin: 3px 1px 3px 0;
+}
+QTextEdit#editor QScrollBar::handle:vertical {
+    background: rgba(214, 196, 224, 200); border-radius: 3px; min-height: 28px;
+}
+QTextEdit#editor QScrollBar::handle:vertical:hover { background: rgba(150, 124, 226, 220); }
+QTextEdit#editor QScrollBar::add-line:vertical, QTextEdit#editor QScrollBar::sub-line:vertical { height: 0; }
+QTextEdit#editor QScrollBar::add-page:vertical, QTextEdit#editor QScrollBar::sub-page:vertical { background: transparent; }
 QLabel#hint { color: #b9a9b8; font-size: 11px; }
 QPushButton#tool {
     background: transparent;
@@ -213,7 +222,6 @@ def _clean(text: str) -> str:
 
 
 def _clean_keep_punct(text: str) -> str:
-    """同 _clean 但保留标点。"""
     text = _MD_LINK.sub(r"\1", text)
     text = _MD_CODE.sub(r"\1", text)
     text = _MD_EMPH.sub("", text)
@@ -263,6 +271,7 @@ class SpeechText(QWidget):
         self._paced = paced
         self._queue = [c for c in (_clean(s) for s in chunks) if c]
         if not self._queue:
+            # 去标点后整段空了(纯标点/纯符号那句),退回保留标点版,别让气泡哑掉。
             self._queue = [c for c in (_clean_keep_punct(s) for s in chunks) if c]
         if not self._queue:
             self.hide()
@@ -446,6 +455,8 @@ class SpeechText(QWidget):
             return
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+        painter.setFont(self._font)
         metrics = QFontMetrics(self._font)
         line_h = metrics.height()
         inner = self.width() - 2 * _PAD
@@ -462,9 +473,8 @@ class SpeechText(QWidget):
                 path.addText(x, y, self._font, visible)
                 self._stroke(painter, path, _GLOW, _GLOW_W, fill=False)
                 self._stroke(painter, path, _OUTLINE, _OUTLINE_W, fill=True)
-                painter.setPen(Qt.PenStyle.NoPen)
-                painter.setBrush(_TEXT)
-                painter.drawPath(path)
+                painter.setPen(_TEXT)
+                painter.drawText(QPointF(x, y), visible)
             y += line_h + _LINE_GAP
 
     @staticmethod
@@ -728,7 +738,7 @@ def _encode_b64(img: QImage, fmt: str, quality: int) -> str:
 
 
 def _image_to_data_url(image: QImage) -> str:
-    """QImage 转 data URL。"""
+    """超 1568 边长先缩(省 token)，PNG 编码过 2MB 就退 JPEG 逐档降质。"""
     img = image
     if img.width() > _IMG_MAX_SIDE or img.height() > _IMG_MAX_SIDE:
         img = img.scaled(
@@ -776,9 +786,16 @@ class _Editor(QTextEdit):
         self.setTabChangesFocus(True)
         self.setAcceptDrops(True)
         self.setFixedHeight(self._MIN_H)
-        self.document().contentsChanged.connect(self._adjust_height)
+        # contentsChanged 改高度会再触发 contentsChanged —— 隔一拍(singleShot 0)走,断掉这个递归且合并连打的多次改动。
+        self._resize_timer = QTimer(self)
+        self._resize_timer.setSingleShot(True)
+        self._resize_timer.timeout.connect(self._apply_height)
+        self.document().contentsChanged.connect(self._schedule_resize)
 
-    def _adjust_height(self) -> None:
+    def _schedule_resize(self) -> None:
+        self._resize_timer.start(0)
+
+    def _apply_height(self) -> None:
         doc = self.document()
         doc.setTextWidth(self.viewport().width())
         h = int(doc.size().height()) + 2 * int(self.frameWidth()) + 8
@@ -976,8 +993,8 @@ class InputBox(QWidget):
     def setPlaceholderText(self, text: str) -> None:
         self._editor.setPlaceholderText(text)
 
-    def setFocus(self) -> None:  # type: ignore[override]
-        self._editor.setFocus()
+    def setFocus(self, reason: Qt.FocusReason = Qt.FocusReason.OtherFocusReason) -> None:
+        self._editor.setFocus(reason)
 
     def clear(self) -> None:
         self._editor.clear()
@@ -1011,7 +1028,7 @@ class InputBox(QWidget):
                 image = QImage(str(p))
                 if not image.isNull():
                     data_url = _image_to_data_url(image)
-                    if self._has_image(data_url):
+                    if self._has_image(data_url):  # 同一张图粘一次又拖一次,按 data_url 去重(同内容编码必相同)
                         continue
                     self._attachments.append({
                         "kind": "image", "data_url": data_url,
@@ -1078,6 +1095,7 @@ class InputBox(QWidget):
         text = self._editor.toPlainText().strip()
         if not text and not self._attachments:
             return
+        # thumb 是 QPixmap,只给芯片显示用;往下游(序列化/发模型)传之前必须剔掉。
         payload = [
             {k: v for k, v in item.items() if k != "thumb"}
             for item in self._attachments
@@ -1088,6 +1106,11 @@ class InputBox(QWidget):
         self.submitted.emit(text, payload)
 
     def _sync_geometry(self) -> None:
+        # 隔一拍再量:芯片增删/编辑器变高这一刻 layout 还没跑完,当场 adjustSize 会拿到旧尺寸。
+        QTimer.singleShot(0, self._apply_geometry)
+
+    def _apply_geometry(self) -> None:
+        self.layout().activate()
         self.adjustSize()
         if not self._home.isNull() and not self._hiding:
             self.move(self._home)

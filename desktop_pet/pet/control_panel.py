@@ -202,6 +202,7 @@ class ControlPanel(QDialog):
                  on_preview_voice: Callable[[str, int], None] | None = None,
                  on_new_topic: Callable[[], None] | None = None,
                  intro: "tuple | None" = None) -> None:
+        """所有交互都靠外面注入的回调/provider，面板自己不碰宠物状态。某个 provider 给 None 就把对应页(主页/羁绊)整页隐掉。"""
         super().__init__()
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
@@ -224,7 +225,7 @@ class ControlPanel(QDialog):
 
         card = QFrame(objectName="card")
         card.setStyleSheet(_STYLE)
-        card.setFixedSize(720, 540)
+        card.setFixedSize(800, 600)
         shadow = QGraphicsDropShadowEffect(self)
         shadow.setBlurRadius(52)
         shadow.setColor(QColor(90, 80, 150, 90))
@@ -275,7 +276,7 @@ class ControlPanel(QDialog):
             self._tabs.append(btn)
             self._stack.addWidget(builder())
             if key in ("tab_home", "tab_bond", "tab_about", "tab_docs"):
-                self._footerless.add(index)
+                self._footerless.add(index)  # 这几页没有可保存的表单，切到时把底部"取消/保存"那条藏掉
         side.addStretch(1)
         _lang_short = {"中文": "中", "English": "EN", "日本語": "日"}
         side.addWidget(QLabel(self._t("lbl_ui_lang"), objectName="help"))
@@ -335,6 +336,7 @@ class ControlPanel(QDialog):
         self._intro_overlay: QLabel | None = None
         self._intro_started = False
         if intro is not None:
+            # 从聊天气泡变出来时，把上一帧的截图盖在最上面占位，showEvent 里再淡出 —— 避免面板第一帧"啪"地撑开
             pixmap, geom = intro
             self.setGeometry(geom)
             self._intro_overlay = QLabel(self)
@@ -347,6 +349,7 @@ class ControlPanel(QDialog):
             self._intro_overlay.raise_()
 
     def showEvent(self, event) -> None:
+        # 真正显示出来才启动淡出，且只跑一次 —— showEvent 可能被重复触发(最小化恢复等)
         super().showEvent(event)
         if self._intro_overlay is None or self._intro_started:
             return
@@ -363,13 +366,33 @@ class ControlPanel(QDialog):
         anim.start()
 
     def snapshot_for_transition(self) -> "tuple":
-        """抓当前一帧 + 窗口位置。"""
         return (self.grab(), self.geometry())
 
     def _t(self, key: str) -> str:
         return i18n.t(key, self._lang)
 
+    @staticmethod
+    def _fmt_tok(n: int) -> str:
+        """token 数压成 1.2M / 3.4k 这种短样，连接页用量行才放得下。"""
+        if n >= 1_000_000:
+            return f"{n / 1_000_000:.1f}M"
+        if n >= 1_000:
+            return f"{n / 1_000:.1f}k"
+        return str(n)
+
+    def _refresh_usage(self) -> None:
+        try:
+            from desktop_pet.usage import meter  # 延迟 import：usage 在面板之外才落盘，没用到就别拉起来
+            _session, today = meter.snapshot()
+            self._usage_label.setText(self._t("usage_fmt").format(
+                i=self._fmt_tok(today["input"]), o=self._fmt_tok(today["output"]),
+                c=self._fmt_tok(today["cached"]), n=today["calls"],
+            ))
+        except Exception:
+            self._usage_label.setText("")
+
     def _build_fields(self, settings: Settings) -> None:
+        """所有输入控件先一次性建好(还没摆进页面) —— 各 _build_*_page 只负责往布局里塞，保存时直接从这些控件读。"""
         self._api_key = QLineEdit(settings.api_key)
         self._api_key.setEchoMode(QLineEdit.EchoMode.Password)
         self._base_url = QLineEdit(settings.base_url)
@@ -377,10 +400,16 @@ class ControlPanel(QDialog):
         self._embed_model = QLineEdit(settings.embed_model)
         self._proxy = QLineEdit(settings.proxy)
         self._proxy.setPlaceholderText("http://127.0.0.1:7897")
+        self._history_tokens = QLineEdit(str(settings.history_tokens))
+        self._history_tokens.setPlaceholderText(self._t("ph_ctx"))
+        self._subagent_model = QLineEdit(settings.subagent_model)
+        self._subagent_model.setPlaceholderText(self._t("ph_submodel"))
+        self._usage_label = QLabel("")
+        self._usage_label.setWordWrap(True)
+        self._usage_label.setObjectName("hint")
+        self._refresh_usage()
         self._language = QLineEdit(settings.language)
         self._language.setPlaceholderText(self._t("ph_reply_lang"))
-        self._birthday = QLineEdit(settings.birthday)
-        self._birthday.setPlaceholderText(self._t("ph_birthday"))
         self._allow_web = QCheckBox(self._t("cb_web"))
         self._allow_control = QCheckBox(self._t("cb_control"))
         self._allow_shell = QCheckBox(self._t("cb_shell"))
@@ -437,6 +466,7 @@ class ControlPanel(QDialog):
         self._hk_status_labels: dict = {}
 
     def _scroll_page(self, hint_text: str) -> tuple[QWidget, QVBoxLayout]:
+        """造一页"提示行 + 可滚动内容区"的壳，返回 (页面, 往里塞东西的那个布局)。"""
         page = QWidget()
         col = QVBoxLayout(page)
         col.setContentsMargins(2, 0, 2, 0)
@@ -451,7 +481,7 @@ class ControlPanel(QDialog):
         scroll.setWidget(body)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setFixedHeight(392)
+        scroll.setFixedHeight(452)  # 写死高度卡住卡片内沿，跟 800×600 的卡 + 顶栏/底栏留白对齐，别让内容把窗口顶大
         scroll.viewport().setStyleSheet("background: transparent;")
         col.addWidget(scroll)
         return page, fields
@@ -480,7 +510,7 @@ class ControlPanel(QDialog):
         v.addWidget(checkbox)
         tip = QLabel(self._t(help_key), objectName="help")
         tip.setWordWrap(True)
-        tip.setContentsMargins(27, 0, 0, 0)
+        tip.setContentsMargins(27, 0, 0, 0)  # 左缩 27px，让说明文字跟勾选框后面的文字对齐(避开 indicator+spacing)
         v.addWidget(tip)
         return box
 
@@ -520,10 +550,22 @@ class ControlPanel(QDialog):
         self._toggle_btn.clicked.connect(self._toggle_clicked)
         body.addSpacing(10)
         body.addWidget(self._toggle_btn)
+
+        if self._on_new_topic is not None:
+            self._new_topic_btn = QPushButton(self._t("new_topic_btn"), objectName="cancel")
+            self._new_topic_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            self._new_topic_btn.setMinimumHeight(40)
+            self._new_topic_btn.clicked.connect(self._on_new_topic_clicked)
+            topic_help = QLabel(self._t("help_new_topic"), objectName="help")
+            topic_help.setWordWrap(True)
+            body.addSpacing(8)
+            body.addWidget(self._new_topic_btn)
+            body.addWidget(topic_help)
         body.addStretch(1)
         return page
 
     def _refresh_status(self) -> None:
+        """每 1.5s 拉一次宠物现状刷到主页。provider 抛了就静默跳过这一拍 —— 别让定时器把异常顶到事件循环。"""
         if not self._status_provider:
             return
         try:
@@ -586,6 +628,16 @@ class ControlPanel(QDialog):
         self._bond_exp = QLabel("—")
         body.addWidget(self._section_block(self._t("bond_exp"), self._bond_exp))
         body.addStretch(1)
+
+        if self._on_reset is not None:
+            self._reset_btn = QPushButton(self._t("reset_btn"), objectName="reset")
+            self._reset_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            self._reset_armed = False
+            self._reset_btn.clicked.connect(self._on_reset_clicked)
+            reset_help = QLabel(self._t("help_reset"), objectName="help")
+            reset_help.setWordWrap(True)
+            body.addWidget(self._reset_btn)
+            body.addWidget(reset_help)
         return page
 
     def _refresh_bond(self) -> None:
@@ -647,6 +699,7 @@ class ControlPanel(QDialog):
             self._docs_box.addWidget(row)
 
     def _del_doc(self, source: str, btn: QPushButton) -> None:
+        """删知识库要点两下：第一下把按钮变成"确认"态(armed)，第二下才真删 —— 防手滑。"""
         if not btn.property("armed"):
             btn.setProperty("armed", "true")
             btn.setText(self._t("docs_del_arm"))
@@ -676,22 +729,24 @@ class ControlPanel(QDialog):
             threading.Thread(target=work, daemon=True, name="panel-ingest").start()
         except RuntimeError:
             return
-        QTimer.singleShot(3500, self._refresh_docs)
+        QTimer.singleShot(3500, self._refresh_docs)  # 切块入库慢，先放后台跑，3.5s 后再回来刷列表(估个够用的延时，不做精确回调)
 
     def _build_connect_page(self) -> QWidget:
         page, body = self._scroll_page(self._t("hint_connect"))
         body.addWidget(self._field("lbl_api_key", self._api_key, "help_api_key"))
         body.addWidget(self._field("lbl_base_url", self._base_url, "help_base_url"))
         body.addWidget(self._field("lbl_model", self._model, "help_model"))
+        body.addWidget(self._field("lbl_submodel", self._subagent_model, "help_submodel"))
+        body.addWidget(self._field("lbl_ctx", self._history_tokens, "help_ctx"))
         body.addWidget(self._field("lbl_embed", self._embed_model, "help_embed"))
         body.addWidget(self._field("lbl_proxy", self._proxy, "help_proxy"))
+        body.addWidget(self._usage_label)
         body.addStretch(1)
         return page
 
     def _build_chat_page(self) -> QWidget:
         page, body = self._scroll_page(self._t("hint_chat"))
         body.addWidget(self._field("lbl_reply_lang", self._language, "help_reply_lang"))
-        body.addWidget(self._field("lbl_birthday", self._birthday, "help_birthday"))
         temp_row = QHBoxLayout()
         temp_row.setSpacing(10)
         temp_row.addWidget(self._temperature, 1)
@@ -771,8 +826,52 @@ class ControlPanel(QDialog):
         body.addWidget(self._check_field(self._clip_sampler, "help_clip_sampler"))
         body.addWidget(self._check_field(self._clip_alchemy, "help_clip_alchemy"))
         body.addWidget(self._check_field(self._remote, "help_remote"))
+        body.addWidget(self._build_gui_model_block())
         body.addStretch(1)
         return page
+
+    def _build_gui_model_block(self) -> QWidget:
+        """视觉元素检测器(GUI 增强)的下载/状态卡。已装好就置灰按钮直接显示在跑哪个 provider。"""
+        card = QFrame(objectName="statusCard")
+        v = QVBoxLayout(card)
+        v.setContentsMargins(16, 12, 16, 12)
+        v.setSpacing(8)
+        v.addWidget(QLabel(self._t("gui_model_title"), objectName="fieldLabel"))
+        hint = QLabel(self._t("gui_model_hint"), objectName="help")
+        hint.setWordWrap(True)
+        v.addWidget(hint)
+        self._gui_btn = QPushButton(self._t("gui_model_btn"), objectName="cancel")
+        self._gui_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._gui_btn.clicked.connect(self._on_gui_model)
+        v.addWidget(self._gui_btn)
+        self._gui_status = QLabel("", objectName="help")
+        self._gui_status.setWordWrap(True)
+        v.addWidget(self._gui_status)
+        self._gui_downloading = False
+        self._gui_cancel = threading.Event()  # 下载线程跑在后台，取消靠这个 Event 通知它别再写进度/早点收尾
+        self._gui_model_done.connect(self._render_gui_model)
+        self._gui_progress.connect(self._on_gui_progress)
+        if detect.available():
+            self._gui_status.setText(self._gui_on_text())
+            self._gui_btn.setEnabled(False)
+        return card
+
+    def _on_gui_progress(self, p: int) -> None:
+        # 已点取消就别再覆盖"取消中"的提示，否则进度回调还会把百分比刷回去
+        if self._gui_cancel.is_set():
+            return
+        self._gui_status.setText(self._t("gui_model_downloading") + f" {p}%")
+
+    def _gui_on_text(self) -> str:
+        """已装好时那行状态文案，尾巴拼上实际跑的 provider(DirectML/CUDA/CPU)。"""
+        labels = {
+            "DmlExecutionProvider": "GPU · DirectML",
+            "CUDAExecutionProvider": "GPU · CUDA",
+            "CPUExecutionProvider": "CPU",
+        }
+        tag = labels.get(detect.active_provider(), "")
+        base = self._t("gui_model_on")
+        return f"{base} · {tag}" if tag else base
 
     def _build_about_page(self) -> QWidget:
         def label(text: str, name: str, wrap: bool = False) -> QLabel:
@@ -809,20 +908,6 @@ class ControlPanel(QDialog):
         col.addWidget(label(self._t("about_chips"), "aboutChips"))
         col.addStretch(1)
 
-        self._reset_btn = QPushButton(self._t("reset_btn"), objectName="reset")
-        self._reset_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._reset_armed = False
-        self._reset_btn.clicked.connect(self._on_reset_clicked)
-        self._new_topic_btn = QPushButton(self._t("new_topic_btn"), objectName="cancel")
-        self._new_topic_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._new_topic_btn.clicked.connect(self._on_new_topic_clicked)
-        reset_row = QHBoxLayout()
-        reset_row.addStretch(1)
-        reset_row.addWidget(self._new_topic_btn)
-        reset_row.addWidget(self._reset_btn)
-        reset_row.addStretch(1)
-        col.addLayout(reset_row)
-        col.addSpacing(10)
         col.addLayout(rule("aboutSep", 220, 1))
         col.addSpacing(8)
         col.addWidget(label(self._t("about_made_by"), "aboutAuthor"))
@@ -851,27 +936,6 @@ class ControlPanel(QDialog):
         col.addWidget(self._update_status)
         self._update_checked.connect(self._render_update)
 
-        col.addSpacing(6)
-        self._gui_btn = QPushButton(self._t("gui_model_btn"), objectName="cancel")
-        self._gui_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._gui_btn.clicked.connect(self._on_gui_model)
-        gui_row = QHBoxLayout()
-        gui_row.addStretch(1)
-        gui_row.addWidget(self._gui_btn)
-        gui_row.addStretch(1)
-        col.addLayout(gui_row)
-        self._gui_status = QLabel("", objectName="aboutMeta")
-        self._gui_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._gui_status.setWordWrap(True)
-        col.addWidget(self._gui_status)
-        self._gui_model_done.connect(self._render_gui_model)
-        self._gui_progress.connect(lambda p: self._gui_status.setText(self._t("gui_model_downloading") + f" {p}%"))
-        if detect.available():
-            self._gui_status.setText(self._t("gui_model_on"))
-            self._gui_btn.setEnabled(False)
-        else:
-            self._gui_status.setText(self._t("gui_model_hint"))
-
         scroll = QScrollArea(objectName="scroll")
         scroll.setWidgetResizable(True)
         scroll.setWidget(page)
@@ -881,26 +945,40 @@ class ControlPanel(QDialog):
         return scroll
 
     def _on_gui_model(self) -> None:
+        """同一个按钮三态：已装好(置灰) / 下载中(按一下变取消) / 没装(按一下开下) —— 看当前状态决定这次点击干啥。"""
         if detect.available():
             self._gui_status.setText(self._t("gui_model_on"))
             self._gui_btn.setEnabled(False)
             return
-        self._gui_btn.setEnabled(False)
+        if self._gui_downloading:
+            self._gui_cancel.set()
+            self._gui_btn.setEnabled(False)
+            self._gui_status.setText(self._t("gui_model_cancelling"))
+            return
+        self._gui_downloading = True
+        self._gui_cancel.clear()
+        self._gui_btn.setText(self._t("gui_model_cancel"))
         self._gui_status.setText(self._t("gui_model_downloading"))
 
         def work() -> None:
             res = detect.download(
                 self._settings.proxy,
                 on_progress=lambda d, t: self._gui_progress.emit(int(d * 100 / t) if t else 0),
+                should_cancel=self._gui_cancel.is_set,
             )
             self._gui_model_done.emit(res)
 
         threading.Thread(target=work, daemon=True, name="mochi-gui-model").start()
 
     def _render_gui_model(self, res: str) -> None:
+        self._gui_downloading = False
+        self._gui_btn.setText(self._t("gui_model_btn"))
         if res == "ok" and detect.available():
-            self._gui_status.setText(self._t("gui_model_on"))
+            self._gui_status.setText(self._gui_on_text())
             self._gui_btn.setEnabled(False)
+        elif res == "cancelled":
+            self._gui_btn.setEnabled(True)
+            self._gui_status.setText(self._t("gui_model_cancelled"))
         else:
             self._gui_btn.setEnabled(True)
             self._gui_status.setText(self._t("gui_model_failed") + ("" if res == "ok" else f"  {res}"))
@@ -941,6 +1019,7 @@ class ControlPanel(QDialog):
         self._new_topic_btn.setEnabled(False)
 
     def _on_reset_clicked(self) -> None:
+        """重置羁绊也是按两下确认(同 _del_doc 的 armed 套路) —— 这步抹掉记忆，回不来，得拦一下。"""
         if not self._reset_armed:
             self._reset_armed = True
             self._reset_btn.setText(self._t("reset_arm"))
@@ -955,6 +1034,7 @@ class ControlPanel(QDialog):
         self._reset_armed = False
 
     def _switch(self, index: int) -> None:
+        """切页：换栈 + 高亮导航 + 按页拉对应的实时数据(主页/羁绊/文档/快捷键/用量都是进页才刷)。"""
         prev = self._stack.currentIndex()
         self._stack.setCurrentIndex(index)
         for i, btn in enumerate(self._tabs):
@@ -962,7 +1042,7 @@ class ControlPanel(QDialog):
             btn.style().unpolish(btn)
             btn.style().polish(btn)
         self._footer.setVisible(index not in self._footerless)
-        key = self._page_keys[index] if 0 <= index < len(self._page_keys) else ""
+        key = self._page_keys[index] if 0 <= index < len(self._page_keys) else ""  # 页顺序随有没有主页/羁绊浮动，认 key 别认 index
         if key == "tab_home":
             self._refresh_status()
         elif key == "tab_bond":
@@ -971,6 +1051,8 @@ class ControlPanel(QDialog):
             self._refresh_docs()
         elif key == "tab_chat":
             self._refresh_hotkey_status()
+        elif key == "tab_connect":
+            self._refresh_usage()
         if index != prev:
             self._animate_page(self._stack.currentWidget())
 
@@ -986,14 +1068,20 @@ class ControlPanel(QDialog):
         anim.start()
 
     def _on_save(self) -> None:
+        """把所有控件的值收回 settings 落盘，再回调 on_apply 让运行中的宠物热更。存盘失败就闪个红，不关窗。"""
         s = self._settings
         s.api_key = self._api_key.text().strip()
         s.base_url = self._base_url.text().strip()
         s.model = self._model.text().strip()
+        s.subagent_model = self._subagent_model.text().strip()
         s.embed_model = self._embed_model.text().strip()
         s.proxy = self._proxy.text().strip()
+        try:
+            # 上下文窗口给个 8k 下限：填太小会一开口就丢历史；空着或填了非数字都退回 24k 默认
+            s.history_tokens = max(8_000, int(self._history_tokens.text().strip() or "24000"))
+        except ValueError:
+            s.history_tokens = 24_000
         s.language = self._language.text().strip()
-        s.birthday = self._birthday.text().strip()
         s.temperature = round(self._temperature.value() / 100, 2)
         s.autonomy = self._autonomy.currentData() or "正常"
         s.think_level = self._think_level.currentData() or "medium"
@@ -1002,7 +1090,7 @@ class ControlPanel(QDialog):
         s.proactive_level = self._proactive_level.currentData() or "正常"
         s.tts_enabled = self._tts.isChecked()
         if self._tts_voice.findData(self._tts_voice_orig) < 0:
-            s.tts_voice = self._tts_voice_orig
+            s.tts_voice = self._tts_voice_orig  # 原来选的音色这次列表里没有(edge 没装/掉线)，别覆盖掉用户设置，原样留着
         else:
             s.tts_voice = self._tts_voice.currentData() or ""
         s.tts_rate = int(self._tts_rate.value())
@@ -1013,6 +1101,7 @@ class ControlPanel(QDialog):
         s.clip_sampler = self._clip_sampler.isChecked()
         s.clip_alchemy = self._clip_alchemy.isChecked()
         s.remote_inbox = self._remote.isChecked()
+        # QKeySequenceEdit 可能录进多段(逗号分隔)，只取第一段当全局热键；录空了就保留原值别清掉
         s.hotkey_summon = self._hk_summon.keySequence().toString().split(",")[0].strip() or s.hotkey_summon
         s.hotkey_ask = self._hk_ask.keySequence().toString().split(",")[0].strip() or s.hotkey_ask
         s.hotkey_quick = self._hk_quick.keySequence().toString().split(",")[0].strip() or s.hotkey_quick
@@ -1042,6 +1131,7 @@ class ControlPanel(QDialog):
         self._save_btn.setEnabled(True)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
+        # 无边框窗口没系统标题栏，自己接管拖动：按下时记下光标到窗口左上角的偏移
         if event.button() == Qt.MouseButton.LeftButton:
             self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
             event.accept()

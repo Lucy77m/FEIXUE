@@ -15,6 +15,7 @@ _MAX_RESULT = 4000
 
 
 def _truncate(value: object) -> str:
+    """工具结果可能几十 KB（截图 base64、长网页），落盘前砍到 4000 字符——日志只为复盘，不留全文。"""
     text = value if isinstance(value, str) else str(value)
     if len(text) <= _MAX_RESULT:
         return text
@@ -22,6 +23,7 @@ def _truncate(value: object) -> str:
 
 
 class _Audit:
+    """单例审计器 → 每条事件一行 JSON，按天分文件落到 logs/。"""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -29,10 +31,11 @@ class _Audit:
     def _write(self, event: str, fields: dict) -> None:
         record = {"ts": datetime.now().isoformat(timespec="seconds"), "event": event}
         record.update(fields)
-        line = json.dumps(record, ensure_ascii=False, default=str)
+        line = json.dumps(record, ensure_ascii=False, default=str)  # default=str 兜底：args 里混进 Path/datetime 也不至于抛
+        # 主动回复跑在定时线程、用户交互在 UI 线程——同时写同一文件，整个写动作上锁串起来
         with self._lock:
             _LOG_DIR.mkdir(parents=True, exist_ok=True)
-            path = _LOG_DIR / f"audit-{datetime.now():%Y%m%d}.jsonl"
+            path = _LOG_DIR / f"audit-{datetime.now():%Y%m%d}.jsonl"  # 跨午夜会自然滚到新文件
             with path.open("a", encoding="utf-8") as handle:
                 handle.write(line + "\n")
 

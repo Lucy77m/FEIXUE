@@ -13,6 +13,7 @@ RELEASES_PAGE = f"https://github.com/{REPO}/releases/latest"
 
 
 def _parse(v: str) -> tuple[int, ...]:
+    """剥 v/V 前缀，每段只抠数字再转 int——"1.2.0-beta" → (1,2,0)，空段当 0，免得 tag 带后缀就比挂。"""
     nums: list[int] = []
     for part in (v or "").strip().lstrip("vV").split("."):
         digits = "".join(ch for ch in part if ch.isdigit())
@@ -22,15 +23,14 @@ def _parse(v: str) -> tuple[int, ...]:
 
 def is_newer(latest: str, current: str) -> bool:
     a, b = list(_parse(latest)), list(_parse(current))
-    n = max(len(a), len(b))
+    n = max(len(a), len(b))  # 补 0 对齐再逐位比，"1.2" 不会被当成大于 "1.2.0"
     a += [0] * (n - len(a))
     b += [0] * (n - len(b))
     return a > b
 
 
 def check_latest(proxy: str = "") -> dict:
-    """查 GitHub 最新 release，返回 {status, current, latest, notes, url, error}；
-    status 为 'newer' / 'latest' / 'error'。含网络，调用方务必放后台线程。"""
+    """查 GitHub 最新 release，status 取 newer/latest/error。走网络，调用方务必丢后台线程别卡 UI。"""
     result = {
         "status": "error", "current": __version__, "latest": "",
         "notes": "", "url": RELEASES_PAGE, "error": "",

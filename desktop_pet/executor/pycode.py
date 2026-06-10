@@ -17,18 +17,19 @@ from desktop_pet.executor.safety import check_blocked
 
 _EXEC_TIMEOUT = 60
 _INSTALL_TIMEOUT = 300
-_OUTPUT_CAP = 200_000
+_OUTPUT_CAP = 8_000
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
 def _python_exe() -> str:
-    """返回跑用户代码 / 装库用的 Python 解释器。"""
+    """返回跑用户代码 / 装库用的 Python 解释器。打包后优先用随包带的 pyruntime，没有再退到 sys.executable。"""
     if getattr(sys, "frozen", False):
         runtime = Path(sys.executable).parent / "pyruntime" / "python.exe"
         if runtime.exists():
             return str(runtime)
     return sys.executable
 
+# 打包/隔离环境下 pywin32 的原生 DLL 加载不到——手动把那几个目录塞进 add_dll_directory，否则 import win32api 直接炸。
 _DLL_FIX = (
     "import os, sys\n"
     "if hasattr(os, 'add_dll_directory'):\n"
@@ -40,9 +41,11 @@ _DLL_FIX = (
     "                except OSError: pass\n"
 )
 
+# 子进程跑的常驻 REPL：从 stdin 一行行收 base64 代码 → exec 进同一个 _ns（命名空间跨次保留）→ 用 START/END 框住 base64 结果写回。
+# 走 base64 是因为代码/输出里换行随便有，纯文本分帧会被用户的 print 撞乱。
 _BOOTSTRAP = r'''
 import base64, io, sys, traceback
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 __DLLFIX__
 _in = sys.stdin
 sys.stdin = io.StringIO("")
@@ -60,13 +63,17 @@ while True:
         continue
     _buf = io.StringIO()
     try:
-        with redirect_stdout(_buf):
+        # stderr 也要进缓冲：库的 warning/logging 默认走 stderr，否则这些输出会整段消失
+        with redirect_stdout(_buf), redirect_stderr(_buf):
             exec(_code, _ns)
     except BaseException:
         _buf.write(traceback.format_exc())
     _text = _buf.getvalue()
     if len(_text) > __CAP__:
-        _text = _text[:__CAP__] + "\n...[output too long, truncated]"
+        _omit = len(_text) - 7000
+        _text = (_text[:4500] + "\n...[output too long; omitted " + str(_omit)
+                 + " chars in the middle -- head and tail (where errors usually are) kept]...\n"
+                 + _text[-2500:])
     _payload = base64.b64encode(_text.encode("utf-8")).decode("ascii")
     _out.write(_START + "\n" + _payload + "\n" + _END + "\n")
     _out.flush()
@@ -74,6 +81,7 @@ while True:
 
 
 class PythonRunner:
+    """常驻一个子进程跑代码——一次开起来，后续 run 复用同一命名空间，变量/import 都留着。run 串行加锁。"""
 
     def __init__(self) -> None:
         self._proc: subprocess.Popen | None = None
@@ -83,6 +91,7 @@ class PythonRunner:
         self._lock = threading.Lock()
 
     def run(self, code: str, timeout: float = _EXEC_TIMEOUT) -> str:
+        """跑一段代码拿文本输出（含 traceback）。串行——同一时刻只有一段在跑。"""
         blocked = check_blocked(code)
         if blocked is not None:
             return f"[blocked: {blocked}. This is an irreversible high-risk operation and was prevented.]"
@@ -99,7 +108,7 @@ class PythonRunner:
             return self._collect(output, timeout)
 
     def refresh_native_dlls(self) -> None:
-
+        """子进程里重跑一遍 DLL 修复——刚装完 pywin32 这种带原生库的包后调一下，省得重启会话。"""
         try:
             self.run(_DLL_FIX)
         except Exception:
@@ -108,6 +117,7 @@ class PythonRunner:
     def _ensure(self) -> None:
         if self._proc is not None and self._proc.poll() is None:
             return
+        # 分帧标记每次会话随机生成——固定串会被用户代码 print 出同样内容时撞到，随机 uuid 基本不可能重。
         self._start = f"<<S{uuid.uuid4().hex}>>"
         self._end = f"<<E{uuid.uuid4().hex}>>"
         self._out = queue.Queue()
@@ -131,15 +141,17 @@ class PythonRunner:
         threading.Thread(target=self._pump, args=(self._proc, self._out), daemon=True).start()
 
     def _pump(self, proc: subprocess.Popen, output: queue.Queue) -> None:
+        """后台线程死读 stdout 灌进队列——这样 _collect 那边才能带 timeout 取，不会被阻塞读卡死。"""
         try:
             for line in proc.stdout:
                 output.put(line)
         except (OSError, ValueError):
             pass
         finally:
-            output.put(None)
+            output.put(None)  # 哨兵：管道关了通知 _collect 子进程没了
 
     def _collect(self, output: queue.Queue, timeout: float) -> str:
+        """从队列攒到 END 标记为止拼本次输出，超时就放弃。"""
         deadline = time.time() + timeout
         seen_start = False
         captured: list[str] = []
@@ -158,6 +170,7 @@ class PythonRunner:
                 return "[Python subprocess exited unexpectedly (the code may have crashed or force-exited it); session reset.]"
             stripped = line.strip()
             if not seen_start:
+                # START 之前的行全丢——子进程启动期的杂音（DLL fix 的 warning 之类）不该混进结果。
                 if stripped == self._start:
                     seen_start = True
                 continue
@@ -181,6 +194,7 @@ class PythonRunner:
 
 
 def _kill_proc(proc: subprocess.Popen) -> None:
+    """杀进程 + 关管道，然后扔后台线程去 wait 收尸——主线程不能在这等，否则调用方（含 UI 线程）会被卡住。"""
     try:
         proc.kill()
     except Exception:
@@ -206,6 +220,7 @@ def new_runner() -> PythonRunner:
 
 
 def install_package(name: str) -> str:
+    """pip 装一个包，回头一段尾巴日志。装完带原生库的包记得 refresh_native_dlls 让常驻会话能 import。"""
     try:
         proc = subprocess.run(
             [_python_exe(), "-m", "pip", "install", name],
@@ -217,6 +232,6 @@ def install_package(name: str) -> str:
         )
     except subprocess.TimeoutExpired:
         return f"[install timed out (>{_INSTALL_TIMEOUT}s): {name}]"
-    tail = ((proc.stdout or "") + (proc.stderr or "")).strip()[-1500:]
+    tail = ((proc.stdout or "") + (proc.stderr or "")).strip()[-1500:]  # 只留尾巴——pip 的真正报错基本都在最后几行
     head = f"Installed {name}" if proc.returncode == 0 else f"[install failed, exit {proc.returncode}]"
     return f"{head}\n{tail}".strip()

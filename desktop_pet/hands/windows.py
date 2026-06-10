@@ -14,19 +14,31 @@ def list_windows() -> str:
     return "\n".join(titles) if titles else "(no visible windows)"
 
 
+def _find_windows(title: str) -> list:
+    """按标题模糊找窗口——子串不区分大小写，比 gw.getWindowsWithTitle 的精确匹配宽，模型给个大概标题就能命中。"""
+    needle = (title or "").strip().lower()
+    if not needle:
+        return []
+    try:
+        return [w for w in gw.getAllWindows() if needle in (w.title or "").lower()]
+    except Exception:
+        return []
+
+
 def focus_window(title: str) -> str:
-    matches = gw.getWindowsWithTitle(title)
+    """把窗口拉到前台——失败/没拉成不当致命错，提示走 screen_elements / act_element 照样能操作。"""
+    matches = _find_windows(title)
     if not matches:
         return f"Window not found: {title}"
     window = matches[0]
-    if window.isMinimized:
+    if window.isMinimized:  # 最小化的得先还原，不然 activate 没东西可激活
         window.restore()
     try:
         window.activate()
     except Exception as exc:
         return (f"激活「{window.title}」失败({type(exc).__name__})——Windows 常拦后台程序抢前台；"
                 f"要操作它直接 screen_elements / act_element 即可，不一定非得它在最前")
-    time.sleep(0.12)
+    time.sleep(0.12)  # 给系统点时间真正切前台，立刻读 getActiveWindow 常还是旧的
     active = gw.getActiveWindow()
     if active is not None and (active.title or "") == window.title:
         return f"Activated window: {window.title}"
@@ -42,10 +54,11 @@ def manage_window(
     x: int | None = None, y: int | None = None,
     width: int | None = None, height: int | None = None,
 ) -> str:
+    """对窗口做 minimize/maximize/restore/close/move/resize——move 要 x+y，resize 要 width+height，缺了直接拒。"""
     action = (action or "").strip().lower()
     if action not in _WINDOW_ACTIONS:
         return f"Unknown action \"{action}\"; available: {' / '.join(_WINDOW_ACTIONS)}"
-    matches = gw.getWindowsWithTitle(title)
+    matches = _find_windows(title)
     if not matches:
         return f"Window not found: {title}"
     window = matches[0]
@@ -58,8 +71,8 @@ def manage_window(
             window.restore()
         elif action == "close":
             window.close()
-            time.sleep(0.15)
-            if gw.getWindowsWithTitle(title):
+            time.sleep(0.15)  # close 是发请求不是同步关，等一下再回查窗口还在不在
+            if _find_windows(title):
                 return f"对「{title}」发了关闭，但它好像还在(可能弹了保存提示，或被程序拦下了)——截图确认一下"
             return f"Closed window: {title}"
         elif action == "move":

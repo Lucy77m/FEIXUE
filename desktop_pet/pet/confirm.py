@@ -39,8 +39,6 @@ QPushButton#no:hover { background: #e7e0d6; color: #5a5a66; }
 
 
 class ConfirmBox(QWidget):
-    """操作前弹出的「执行 / 不执行」确认小面板。"""
-
     answered = Signal(bool)
 
     def __init__(self) -> None:
@@ -84,6 +82,8 @@ class ConfirmBox(QWidget):
         outer.addWidget(card)
 
     def ask(self, action: str, pet: QWidget, screen) -> None:
+        """贴宠物右边弹出来问一句，用户点完发 answered 信号。"""
+        # 截到 240 字防止一长串塞爆面板；模型偶尔吐空动作 → 兜底文案别让用户对着空白点
         self._msg.setText((action or "").strip()[:240] or "(没说要做什么)")
         self.adjustSize()
         place_beside_pet(self, pet, screen, prefer="right")
@@ -94,6 +94,7 @@ class ConfirmBox(QWidget):
         return self.isVisible()
 
     def follow(self, pet: QWidget, screen) -> None:
+        """宠物被拖走时跟着重新贴边 —— 没显示就别白算位置。"""
         if self.isVisible():
             place_beside_pet(self, pet, screen, prefer="right")
 

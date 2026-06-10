@@ -8,6 +8,8 @@ from desktop_pet import i18n
 
 PLAN_ICON = {"todo": "○", "doing": "→", "done": "●"}
 
+# 工具名 → (i18n 文案键, 取细节的 lambda)；lambda 为 None 表示这步没细节、只显标签。
+# [:24]/[:30]/[:40] 截短：进度条一行塞不下整条 url/pattern/正文，不截会撑爆。
 _STEPS: dict[str, tuple[str, "object"]] = {
     "run_shell": ("s_run_shell", None),
     "run_python": ("s_run_python", None),
@@ -69,16 +71,20 @@ _STEPS: dict[str, tuple[str, "object"]] = {
 
 
 def describe_step(name: str, args: dict) -> str:
+    """工具调用 → 一行进度文案。这是给 UI 看的，绝不能抛——出岔子就退回原始 name。"""
     try:
+        # args 偶尔不是 dict（半截的流式 JSON），兜成 {} 免得 lambda 取键炸了
         return _describe_step(name, args if isinstance(args, dict) else {})
     except Exception:
         return name
 
 
 def _describe_step(name: str, args: dict) -> str:
+    # plan / mcp__ 是动态名，进不了 _STEPS 表，得在查表前先单独认出来。
     if name == "plan":
         return f"{i18n.t('s_plan')} · {len(args.get('steps', []))} {i18n.t('step_unit')}"
     if name.startswith("mcp__"):
+        # 名字长这样：mcp__<server>__<tool>
         parts = name.split("__")
         return f"{i18n.t('s_mcp')} · {parts[1] if len(parts) > 1 else ''}/{parts[-1]}"
     entry = _STEPS.get(name)
@@ -93,5 +99,7 @@ def _describe_step(name: str, args: dict) -> str:
 
 
 def render_plan(steps: list[dict]) -> str:
+    """计划清单 → markdown。"""
+    # 行尾留俩空格是 markdown 的硬换行——不留的话整张清单会被并成一段。
     rows = [f"{PLAN_ICON.get(step['status'], '○')} {step['text']}  " for step in steps]
     return f"**{i18n.t('plan_title')}**\n\n" + "\n".join(rows)

@@ -19,14 +19,15 @@ _DB_PATH = _MEMORY_DIR / "memory.db"
 _PROFILE_JSON = _MEMORY_DIR / "profile.json"
 _EXPERIENCES_JSON = _MEMORY_DIR / "experiences.json"
 
-_INJECT = 6
+_INJECT = 6          # 一次往上下文塞几条经验，多了挤占预算、稀释当前话题
 _ENV_INJECT = 4
-_DEDUP_COSINE = 0.92
-_DEDUP_RATIO = 0.86
-_DEDUP_SCAN = 600
+_DEDUP_COSINE = 0.92  # 向量这条线收得紧——0.92 以上才算重复，怕把"相近但不同"的经验误删
+_DEDUP_RATIO = 0.86   # 没向量时退回字面相似度，阈值放低一点，纯文本噪声多
+_DEDUP_SCAN = 600     # 去重只回扫最近 600 条，老记忆不再参与比对，省得每次插入全表扫
 
 
 def _read_json(path: Path, default):
+    """读旧版 JSON，文件不在或半截损坏(写到一半崩过)都退 default，不抛。"""
     if not path.exists():
         return default
     try:
@@ -43,6 +44,7 @@ class MemoryStore:
     def __init__(self) -> None:
         _MEMORY_DIR.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
+        # check_same_thread=False：后台反思线程和主线程都要写，连接跨线程共享，靠下面的 RLock 串行化
         self._conn = sqlite3.connect(_DB_PATH, check_same_thread=False)
         self._create_schema()
         self._migrate_legacy_json()
@@ -75,6 +77,7 @@ class MemoryStore:
             self._conn.commit()
 
     def _migrate_legacy_json(self) -> None:
+        """老版本把记忆存在 profile.json/experiences.json，迁进 SQLite——只在对应表为空时搬一次，跑过就不会重复导入。"""
         with self._lock:
             legacy_profile = _read_json(_PROFILE_JSON, {})
             if self._count("profile") == 0 and isinstance(legacy_profile, dict):
@@ -100,6 +103,7 @@ class MemoryStore:
             self._conn.commit()
 
     def _count(self, table: str) -> int:
+        # table 拼进 SQL 是裸字符串——只许内部传字面表名，绝不能接外部输入
         return self._conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
 
     def wipe(self) -> None:
@@ -109,6 +113,7 @@ class MemoryStore:
             self._conn.commit()
 
     def forget(self, query: str) -> str:
+        """关键词命中就删——经验/画像/环境三张表全扫，回一句人话总结删了啥。"""
         needle = (query or "").strip().lower()
         if not needle:
             return "(give a keyword for the memory to forget)"
@@ -143,11 +148,12 @@ class MemoryStore:
         return f"Saved preference: {key} = {value}"
 
     def remember(self, content: str) -> str:
+        """存一条经验。先算 embedding 再插——撞到相似的不新增，改成更新原条目(见 _insert_experience)。"""
         content = content.strip()
         if not content:
             return "(nothing to remember)"
         vectors = embed_texts([content])
-        vector = vectors[0] if vectors else None
+        vector = vectors[0] if vectors else None  # 嵌入模型没起来就退成纯文本去重
         with self._lock:
             added = self._insert_experience(
                 content, ts=_now(), confidence=1.0, source="reflection", vector=vector
@@ -156,6 +162,7 @@ class MemoryStore:
         return f"Remembered: {content}" if added else f"(similar memory already exists; updated instead of duplicating: {content})"
 
     def note_env(self, key: str, value: str) -> str:
+        """记一条环境事实(如某窗口标题、某路径)，同 key 覆盖并刷新时间戳，置信度拉回 1.0。"""
         key, value = key.strip(), value.strip()
         if not key:
             return "(env key can't be empty)"
@@ -171,6 +178,7 @@ class MemoryStore:
     def _insert_experience(
         self, content: str, *, ts: str, confidence: float, source: str, vector: list[float] | None
     ) -> bool:
+        """插一条经验，返回 True=新增 / False=撞重复改为原地更新。调用方据此区分提示语。"""
         duplicate_id = self._find_duplicate(content, vector)
         blob = pack(vector) if vector else None
         if duplicate_id is not None:
@@ -186,14 +194,17 @@ class MemoryStore:
         return True
 
     def _find_duplicate(self, content: str, vector: list[float] | None) -> int | None:
+        """找已存在的近似条目，命中返回其 id。先走向量(语义)，再退字面相似度兜底。"""
         rows = self._conn.execute(
             "SELECT id, content, embedding FROM experiences ORDER BY id DESC LIMIT ?", (_DEDUP_SCAN,)
         ).fetchall()
         if vector is not None:
             for row_id, _text, blob in rows:
                 existing = unpack(blob)
+                # 维度对不上(换过嵌入模型、老数据没向量)直接跳过，否则 cosine 会算错
                 if existing is not None and len(existing) == len(vector) and cosine(vector, existing) >= _DEDUP_COSINE:
                     return row_id
+        # 字面兜底只扫前 400——SequenceMatcher 是 O(n·m)，全扫 600 条逐对比对太慢
         for row_id, text, _blob in rows[:400]:
             if SequenceMatcher(None, content, text).ratio() >= _DEDUP_RATIO:
                 return row_id
@@ -204,19 +215,17 @@ class MemoryStore:
             return int(self._conn.execute("SELECT COUNT(*) FROM experiences").fetchone()[0])
 
     def profile_items(self) -> list[tuple[str, str]]:
-        """返回全部偏好画像 (key, value)。"""
         with self._lock:
             return [(str(k), str(v)) for k, v in
                     self._conn.execute("SELECT key, value FROM profile ORDER BY key").fetchall()]
 
     def env_items(self) -> list[tuple[str, str]]:
-        """全部环境事实 (key, value)，最新在前。"""
+        # ts 倒序，新观察到的覆盖在前
         with self._lock:
             return [(str(k), str(v)) for k, v in
                     self._conn.execute("SELECT key, value FROM env ORDER BY ts DESC").fetchall()]
 
     def recent_experiences(self, n: int = 10) -> list[str]:
-        """最近 n 条它学到的经验/关于你的事，最新在前。"""
         with self._lock:
             rows = self._conn.execute(
                 "SELECT content FROM experiences ORDER BY id DESC LIMIT ?", (int(n),)
@@ -224,22 +233,25 @@ class MemoryStore:
         return [str(r[0]) for r in rows]
 
     def recall_relevant(self, query: str, k: int = _INJECT) -> list[str]:
+        """挑跟 query 最相关的 k 条经验。向量排序 → 关键词命中 → 都没有就退最近 k 条，逐级兜底。"""
         with self._lock:
             rows = self._conn.execute("SELECT content, embedding FROM experiences ORDER BY id").fetchall()
         if not rows:
             return []
         if len(rows) <= k:
-            return [content for content, _ in rows]
+            return [content for content, _ in rows]  # 总共没几条，排序没意义，全给
         query_vec = self._query_vector(query)
         if query_vec is not None:
             idxs = rank_by_cosine(query_vec, [blob for _, blob in rows], k)
             if idxs:
                 return [rows[i][0] for i in idxs]
+        # 向量这条路没走通(模型没起来/全是无向量旧数据)，退到子串匹配
         needle = query.lower()
         hits = [content for content, _ in rows if needle in content.lower()]
         return hits[:k] if hits else [content for content, _ in rows[-k:]]
 
     def recall_env(self, query: str, k: int = _ENV_INJECT) -> list[str]:
+        """召回环境事实：query 命中就给命中的，没命中(或空 query)退最近 k 条。环境靠新鲜度，按 ts 倒序。"""
         with self._lock:
             rows = self._conn.execute("SELECT key, value FROM env ORDER BY ts DESC").fetchall()
         if not rows:
@@ -256,6 +268,7 @@ class MemoryStore:
         return [f"{key} = {value}" for key, value in rows[:k]]
 
     def recall(self, query: str) -> str:
+        """给 recall 工具的人读版：相关经验 + 命中的画像/环境，拼成多行文本，dict.fromkeys 去重保序。"""
         hits = self.recall_relevant(query)
         needle = query.lower()
         with self._lock:
@@ -275,6 +288,7 @@ class MemoryStore:
         return "\n".join(unique) if unique else "(no relevant memories)"
 
     def as_context(self, query: str | None = None) -> str:
+        """拼成塞进系统提示的那段长期记忆。有 query 走相关召回，没 query 给最近几条；三块全空就返回空串、不占位。"""
         with self._lock:
             prefs = self._conn.execute("SELECT key, value FROM profile").fetchall()
         if query:
@@ -285,7 +299,7 @@ class MemoryStore:
                 recent = self._conn.execute(
                     "SELECT content FROM experiences ORDER BY id DESC LIMIT ?", (_INJECT,)
                 ).fetchall()
-            experiences = [content for (content,) in recent][::-1]
+            experiences = [content for (content,) in recent][::-1]  # 取最新几条后翻正序，读起来时间顺
             label = "Recent experiences:"
         env_facts = self.recall_env(query or "")
         if not prefs and not experiences and not env_facts:

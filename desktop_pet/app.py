@@ -196,7 +196,7 @@ class AgentWorker(QObject):
                 audit.reply(f"{reply}\n{traceback.format_exc()}")
             if self._agent.was_cancelled(reply) or self._agent.is_cancelled:
                 self.busy_changed.emit(False)
-                return
+                return   # 中途被取消：丢掉这条回复，别再往 UI 推半截/作废的答案
             self.reply_ready.emit(reply)
             self.busy_changed.emit(False)
             self.task_finished.emit(ok and not self._agent.hit_step_limit)
@@ -263,6 +263,8 @@ class AgentWorker(QObject):
 
     @Slot(str)
     def explore(self, topic: str) -> None:
+        # 自己再开一条 daemon 线程：联网探索是慢活，别占住 worker 线程的事件循环，
+        # 不然这期间 handle/取消等信号都排不上队。下面 peek/analyze/rewrite/alchemy 同理。
         def work() -> None:
             try:
                 reply = self._agent.explore_topic(topic)
@@ -337,6 +339,7 @@ class PetApp(QObject):
     request_explore = Signal(str)
     request_peek = Signal(str)
     request_analyze = Signal(str)
+    request_message = Signal(str)
     _remote_action = Signal(str, str)
     request_confirm = Signal(str)
     request_rewrite = Signal(str)
@@ -429,6 +432,11 @@ class PetApp(QObject):
         self._tray = Tray(
             on_open_panel=self._open_panel,
             on_quit=self._quit,
+            on_talk=self._summon,
+            on_peek=self._peek_now,
+            on_new_topic=self._new_topic,
+            on_toggle_show=self._toggle_power,
+            is_shown=lambda: self._shown,
         )
         self._hotkeys = GlobalHotkeys({
             "summon": self._settings.hotkey_summon,
@@ -444,8 +452,11 @@ class PetApp(QObject):
         self._pet.grabbed.connect(self._wake)
         self._pet.hid.connect(self._on_hide)
         self._pet.wants_travel.connect(self._on_wants_travel)
+        self._pet.context_requested.connect(self._show_quick_menu)
         self._speech.talking.connect(self._on_speech_talking)
         self._speech.finished.connect(self._on_speech_finished)
+        # 藏边时整只露出的判据：气泡整段说话态(跨多句不断) 或 正在讲课(黑板逐段)。被打断时 is_speaking 立刻转 False。
+        self._pet.bind_speaking(lambda: self._speech.is_speaking or self._lecturing)
         self._speech.chunk_shown.connect(self._on_chunk_shown)
         self._voice_chunk_done.connect(self._on_voice_chunk_done)
         self._voice_chunk_start.connect(self._on_voice_chunk_start)
@@ -469,6 +480,7 @@ class PetApp(QObject):
         self.request_explore.connect(self._worker.explore)
         self.request_peek.connect(self._worker.peek_screen)
         self.request_analyze.connect(self._worker.analyze_screen)
+        self.request_message.connect(self._worker.handle)
         self._worker.analysis_ready.connect(self._on_analysis)
         self._remote_action.connect(self._on_remote_action)
         self.request_confirm.connect(self._on_confirm_requested)
@@ -518,6 +530,24 @@ class PetApp(QObject):
             self._input.popup(self._pet)
 
     @Slot()
+    def _peek_now(self) -> None:
+        """主动让它瞄一眼屏幕说点什么——托盘/右键菜单手动触发，绕过 _maybe_peek 那套
+        亲密度/冷却闸门(那是自动偷看用的，手动点了就别再卡)。正忙时直接吞掉，别打断手头任务。"""
+        if self._worker.is_running or self._busy:
+            return
+        if not self._shown:
+            self._power_on()
+        if not self._pet.isVisible():
+            self._pet.setVisible(True)
+        self._pet.wake()
+        self.request_message.emit(i18n.t("peek_request"))
+
+    @Slot(QPoint)
+    def _show_quick_menu(self, pos: QPoint) -> None:
+        # 右键宠物直接复用托盘那份菜单——同一套动作，省得两边各维护一份。
+        self._tray.context_menu().popup(pos)
+
+    @Slot()
     def _summon(self) -> None:
         if not self._shown:
             self._power_on()
@@ -544,9 +574,11 @@ class PetApp(QObject):
     def _ask_selection(self) -> None:
         if not self._shown:
             self._power_on()
-        self._saved_clip = self._app.clipboard().text()
+        self._saved_clip = self._app.clipboard().text()   # 先存原剪贴板，复制完选区后还回去，别覆盖用户内容
         try:
             import pyautogui
+            # 触发快捷键时用户多半还按着热键的修饰键，先松开 alt/ctrl/shift，
+            # 不然下面模拟的 Ctrl+C 会跟残留修饰键串成别的组合键。
             for mod in ("alt", "ctrl", "shift"):
                 pyautogui.keyUp(mod)
         except Exception:
@@ -567,9 +599,9 @@ class PetApp(QObject):
         text = self._app.clipboard().text().strip()
         saved = getattr(self, "_saved_clip", "")
         self._summon()
-        if not text or text == saved.strip():
+        if not text or text == saved.strip():   # 没选中东西/Ctrl+C 没改变剪贴板 → 当作无选区，别拿旧内容当问题
             return
-        self._app.clipboard().setText(saved)
+        self._app.clipboard().setText(saved)     # 拿到选区文本了，把剪贴板原样还回去
         snippet = text if len(text) <= 500 else text[:500] + "…"
         self._input.setText(f"关于这个：{snippet}")
         self._input.setFocus()
@@ -678,8 +710,9 @@ class PetApp(QObject):
         self._speech.interrupt()
         voice.flush()
         segments = parse_segments(text)
-        self._speak_gen += 1
+        self._speak_gen += 1   # 步进发言代次，作废上一轮还在飞的 TTS 异步回调(见 _on_voice_chunk_start)
         if any(kind == "board" for kind, _ in segments):
+            # 带黑板：板子内容走"讲课"逐段流，TTS 只念非黑板的口语段(板上长文不适合念)。
             voice.speak(" ".join(body for kind, body in segments if kind != "board"))
             self._start_lecture(segments)
         else:
@@ -770,6 +803,7 @@ class PetApp(QObject):
 
     @Slot(int)
     def _on_voice_chunk_start(self, gen: int) -> None:
+        # gen 对不上 = 这段语音是上一轮发言的残留(已经打断/换了新回复)，TTS 异步回调晚到，丢掉。
         if gen != self._speak_gen:
             return
         self._speech.begin_chunk()
@@ -825,6 +859,8 @@ class PetApp(QObject):
         self._pet.perform(name)
 
     def _confirm(self, action: str) -> bool:
+        # 工人线程里被调用：发信号让 GUI 线程弹确认框，然后阻塞等回答。
+        # 跨线程拿不到答复就死等会卡住整个 Agent，留 300s 兜底超时(超时按"否"处理)。
         self._confirm_result = False
         self._confirm_event.clear()
         self._confirm_pending = True
@@ -865,7 +901,7 @@ class PetApp(QObject):
             self._think.stop()
             self._todo.dismiss()
             self._timed_inflight = False
-            if not self._cancelling:
+            if not self._cancelling:   # 取消态下别清 _inflight_timed —— _requeue_timed 还要靠它把那条任务塞回去
                 self._inflight_timed = None
             self._drain_pending_bg()
             self._drain_timed()
@@ -948,11 +984,11 @@ class PetApp(QObject):
                 return False
             cls = win32gui.GetClassName(hwnd)
             if cls in ("Progman", "WorkerW", "Shell_TrayWnd", "Button"):
-                return False
+                return False   # 桌面/任务栏本身铺满屏，但那不算"全屏应用"，别因此闭嘴
             left, top, right, bottom = win32gui.GetWindowRect(hwnd)
             sw = win32api.GetSystemMetrics(0)
             sh = win32api.GetSystemMetrics(1)
-            return (right - left) >= sw - 2 and (bottom - top) >= sh - 2
+            return (right - left) >= sw - 2 and (bottom - top) >= sh - 2   # 留 2px 容差：有的全屏窗口会差一两像素
         except Exception:
             return False
 
@@ -961,6 +997,7 @@ class PetApp(QObject):
                 and not self._pet.is_asleep and not self._foreground_is_fullscreen())
 
     def _drain_reminders(self) -> None:
+        # 不在场(隐藏/睡着/前台全屏)时只取"提醒"，"do"类任务先压着——等真在场了再领，免得没人看时空跑一趟。
         in_scene = self._in_scene()
         due = reminders.due(datetime.now(), take_do=in_scene)
         if not due:
@@ -990,9 +1027,10 @@ class PetApp(QObject):
         self.request_timed_task.emit(task)
 
     def _requeue_timed(self) -> None:
+        """取消/关机时把还没跑完的定时任务塞回 reminders，别丢了——下次在场再领。"""
         now = datetime.now()
         pending = list(self._timed_queue)
-        if self._inflight_timed:
+        if self._inflight_timed:   # 正在跑的那条排最前，回来优先补上
             pending.insert(0, self._inflight_timed)
         for task in pending:
             try:
@@ -1085,16 +1123,13 @@ class PetApp(QObject):
             return False
         if presence.idle_seconds() >= _AWAY_S:
             return False
-        key = occasions.today_key(datetime.now(), self._settings.birthday)
+        key = occasions.today_key(datetime.now())
         if not key or key in self._fired_occasions:
             return False
         self._fired_occasions.add(key)
         ctx = (f"（{occasions.describe(key)}，用你自己的口吻、温暖自然地道一句应景的话，"
                "别太正式、也别照念。）")
-        if key == "birthday":
-            self._pet.celebrate()
-        else:
-            self._pet.perform("cheer")
+        self._pet.perform("cheer")
         self.request_proactive.emit("share_day", ctx)
         return True
 
@@ -1189,7 +1224,7 @@ class PetApp(QObject):
             self._confirm_box.follow(self._pet, screen)
 
     def _status_snapshot(self) -> dict:
-        """给控制面板主页用的状态机快照。"""
+        """控制面板主页要的状态快照。"""
         _val, _aro, rapport = emotion.snapshot()
         if self._worker.is_running or self._busy:
             state = "busy"
@@ -1434,6 +1469,8 @@ class PetApp(QObject):
         self._thread.quit()
         self._thread.wait(3000)
         self._app.quit()
+        # 兜底硬杀：MCP 子进程 / pywin32 钩子 / 残留 daemon 线程偶尔会赖着不退，
+        # 正常 quit 卡死时直接 TerminateProcess + os._exit 强制收尸，别留僵尸进程。
         try:
             import ctypes
             ctypes.windll.kernel32.TerminateProcess(ctypes.windll.kernel32.GetCurrentProcess(), 0)

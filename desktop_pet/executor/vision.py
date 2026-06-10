@@ -7,6 +7,8 @@ from __future__ import annotations
 import threading
 
 _MAX_HITS = 60
+_OCR_MAX_SIDE = 3200
+_MIN_OCR_SCORE = 0.5
 _ocr_engine = None
 _ocr_lock = threading.Lock()
 
@@ -21,11 +23,17 @@ def _get_engine():
         return None
     with _ocr_lock:
         if _ocr_engine is None:
-            _ocr_engine = RapidOCR()
+            # 三个子模型(det/cls/rec)都走 DirectML(显卡)；起不来时 onnxruntime 自己回落 CPU。
+            # max_side_len 限长边——4K 屏整屏不缩会撑爆显存/巨慢。
+            _ocr_engine = RapidOCR(
+                max_side_len=_OCR_MAX_SIDE,
+                det_use_dml=True, cls_use_dml=True, rec_use_dml=True,
+            )
     return _ocr_engine
 
 
 def prewarm() -> None:
+    """后台线程先把 OCR 引擎(含模型加载/DML 初始化)热起来，免得第一次调用卡几秒。"""
     def _build() -> None:
         try:
             _get_engine()
@@ -35,24 +43,36 @@ def prewarm() -> None:
     threading.Thread(target=_build, daemon=True, name="ocr-prewarm").start()
 
 
+def _score_of(value) -> float:
+    # 不同 rapidocr 版本 score 字段可能缺/是字符串——转不动就当 1.0 放行，宁可多留别误删。
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 1.0
+
+
 def _screen_array():
     import numpy as np
 
-    from desktop_pet.eyes.capture import grab_active
+    from desktop_pet.eyes.capture import grab_active_geom
 
-    rgb = np.array(grab_active())
-    return rgb[:, :, ::-1].copy()
+    img, geom = grab_active_geom()
+    rgb = np.array(img)
+    # 一起把抓帧时的 geom 带出去——后面坐标换算要拿同一帧的几何，别再 current_geom() 二次抓(会错位)。
+    return rgb[:, :, ::-1].copy(), geom  # RGB→BGR，rapidocr 吃 BGR
 
 
 def ocr_screen(region: str = "") -> str:
+    """OCR 当前活动窗口/屏，连同每段文字的可点中心坐标一起返回；region 可选裁一块再认。"""
     engine = _get_engine()
     if engine is None:
         return "[OCR unavailable: rapidocr-onnxruntime not installed]"
 
-    img = _screen_array()
-    from desktop_pet.eyes.capture import _scale, current_geom, screen_to_image
+    img, geom = _screen_array()
+    from desktop_pet.eyes.capture import _scale, screen_to_image
 
-    mox, moy, mw, mh = current_geom()
+    mox, moy, mw, mh = geom
+    # region 是按"图像像素"给的，但抓到的 img 是缩放过的原始分辨率——先除 s 换回 img 坐标系再裁。
     s = _scale(mw, mh) or 1.0
     ox, oy = 0, 0
     if region.strip():
@@ -68,21 +88,25 @@ def ocr_screen(region: str = "") -> str:
             return "[region 超出屏幕、裁出来是空的——核对 left,top,width,height(图像像素)]"
 
     result, _ = engine(img)
+    # 滤掉低置信的：0.5 以下基本是把噪点/图标边当字认出来的，留着只会污染坐标列表。
+    result = [r for r in (result or []) if _score_of(r[2]) >= _MIN_OCR_SCORE]
     if not result:
         return "(no text recognized)"
     lines = []
     for box, text, score in result[:_MAX_HITS]:
         xs = [p[0] for p in box]
         ys = [p[1] for p in box]
+        # box 是四点多边形(可能倾斜)，取四点均值当中心；ox/oy 把 region 裁剪的偏移补回去。
         nx = ox + sum(xs) / len(xs)
         ny = oy + sum(ys) / len(ys)
-        cx, cy = screen_to_image(mox + nx, moy + ny)
+        cx, cy = screen_to_image(mox + nx, moy + ny, geom)
         lines.append(f'"{text}"  @({cx}, {cy})')
     tail = f"\n…({len(result)} total, showing first {_MAX_HITS})" if len(result) > _MAX_HITS else ""
     return "On-screen text (with clickable center coordinates):\n" + "\n".join(lines) + tail
 
 
 def ocr_boxes(bgr, ox: int, oy: int) -> list[dict]:
+    """给元素检测用：对一块 BGR 图跑 OCR，返回带绝对坐标(ox/oy 偏移)的矩形+中心点列表。"""
     engine = _get_engine()
     if engine is None:
         return []
@@ -93,7 +117,7 @@ def ocr_boxes(bgr, ox: int, oy: int) -> list[dict]:
     boxes: list[dict] = []
     for box, text, score in result or []:
         text = (text or "").strip()
-        if not text:
+        if not text or _score_of(score) < _MIN_OCR_SCORE:
             continue
         xs = [p[0] for p in box]
         ys = [p[1] for p in box]
@@ -106,14 +130,49 @@ def ocr_boxes(bgr, ox: int, oy: int) -> list[dict]:
     return boxes
 
 
-def _to_gray(img) -> "object":
+# 模板匹配前先把整屏缩到长边 1366 再算 FFT——4K 原图直接 NCC 慢到没法用，精度损失换得起。
+_WORK_LONG_EDGE = 1366
+# 模板可能跟屏上目标差一档大小(DPI 缩放/截图来源不同)，按这几档缩放各试一遍取最高。
+_FIND_SCALES = (0.7, 0.85, 1.0, 1.18, 1.4)
+_MIN_TMPL_SIDE = 24       # 缩完模板短边再小于这个，纹理就糊没了——触发下面的提分逻辑。
+_WORK_BOOST_MAX = 2400    # 提分时工作图长边的天花板，别为了救小模板把整屏放太大又拖慢。
+
+
+def _gray_pil(img, size=None):
+    import numpy as np
+    from PIL import Image
+
+    im = img.convert("L")
+    if size is not None:
+        im = im.resize(size, Image.Resampling.BILINEAR)
+    return np.asarray(im, dtype=np.float64)
+
+
+def _grad_mag(arr):
+    """梯度幅值(边缘图)。配合灰度一起匹配——抗整体亮度/主题色差异，认的是形状轮廓。"""
     import numpy as np
 
-    return np.asarray(img.convert("L"), dtype=np.float64)
+    gx = np.zeros_like(arr)
+    gy = np.zeros_like(arr)
+    # 中央差分，边缘一圈留 0 不算——省去 padding，对匹配峰值影响可忽略。
+    gx[:, 1:-1] = arr[:, 2:] - arr[:, :-2]
+    gy[1:-1, :] = arr[2:, :] - arr[:-2, :]
+    return np.sqrt(gx * gx + gy * gy)
 
 
-def _match_template_ncc(image, template) -> tuple[float, int, int]:
-    """纯 numpy 归一化互相关，返回 (峰值相关度, 峰值左上角 x, 峰值左上角 y)。"""
+def _combine_ncc(a, b):
+    # 灰度图和边缘图各自的 NCC 逐点取大——哪条路在该位置更像就信哪条，任一为空就用另一条。
+    if a is None:
+        return b
+    if b is None:
+        return a
+    import numpy as np
+
+    return np.maximum(a, b)
+
+
+def _ncc_map(image, template):
+    """纯 numpy + FFT 算归一化互相关，返回整张相关度图(每点=模板贴这放的相似度)，没纹理就 None。"""
     import numpy as np
 
     ih, iw = image.shape
@@ -121,59 +180,127 @@ def _match_template_ncc(image, template) -> tuple[float, int, int]:
     n = th * tw
     t0 = template - template.mean()
     t_ss = float(np.sum(t0 * t0))
-    if t_ss <= 1e-9:
-        return 0.0, 0, 0
+    if t_ss <= 1e-9:   # 模板纯色/全平，方差为 0，归一化会除零——直接放弃这一路。
+        return None
 
+    # 线性卷积尺寸，避免 FFT 循环卷积绕回污染边缘。
     fh, fw = ih + th - 1, iw + tw - 1
     ones = np.ones((th, tw))
     f_img = np.fft.rfft2(image, s=(fh, fw))
-    f_img2 = np.fft.rfft2(image * image, s=(fh, fw))
-    f_t0 = np.fft.rfft2(t0[::-1, ::-1], s=(fh, fw))
-    f_ones = np.fft.rfft2(ones, s=(fh, fw))
+    f_img2 = np.fft.rfft2(image * image, s=(fh, fw))   # 给下面算每个窗口的局部方差用
+    f_t0 = np.fft.rfft2(t0[::-1, ::-1], s=(fh, fw))     # 模板翻转 → 卷积退化成互相关
+    f_ones = np.fft.rfft2(ones, s=(fh, fw))             # 全 1 核：对图做盒式求和，拿窗口内 Σ 和 Σ²
     num_full = np.fft.irfft2(f_img * f_t0, s=(fh, fw))
     sum_full = np.fft.irfft2(f_img * f_ones, s=(fh, fw))
     sqsum_full = np.fft.irfft2(f_img2 * f_ones, s=(fh, fw))
 
+    # 卷积结果带 th-1/tw-1 的前导偏移，切回"模板完整覆盖"的那块才是有效相关位置。
     ys, xs = slice(th - 1, ih), slice(tw - 1, iw)
     num = num_full[ys, xs]
     local_sum = sum_full[ys, xs]
     local_sqsum = sqsum_full[ys, xs]
 
+    # 浮点误差能让方差算出极小负数，clip 到 0 免得 sqrt 出 nan。
     var = np.maximum(local_sqsum - local_sum * local_sum / n, 0.0)
     denom = np.sqrt(var * t_ss)
     ncc = np.zeros_like(num)
-    nz = denom > 1e-9
+    nz = denom > 1e-9          # 分母≈0(局部纯色窗)的点不算，留 0，否则除出来是噪声尖峰
     ncc[nz] = num[nz] / denom[nz]
+    return ncc
 
-    idx = int(np.argmax(ncc))
-    py, px = divmod(idx, ncc.shape[1])
-    return float(ncc[py, px]), int(px), int(py)
+
+def _peaks(ncc, thresh: float, tw: int, th: int, max_hits: int = 12):
+    """从相关度图里反复挑最高峰，每挑一个就把它周围半个模板大小压掉——非极大抑制，避免同一目标连出一片。"""
+    import numpy as np
+
+    work = ncc.copy()   # 要就地涂掉峰区，别动传进来的原图
+    out = []
+    while len(out) < max_hits:
+        idx = int(np.argmax(work))
+        py, px = divmod(idx, work.shape[1])
+        score = float(work[py, px])
+        if score < thresh:
+            break
+        out.append((score, px, py))
+        # 把这个峰周围 ±半模板涂成 -1，下一轮 argmax 就不会再落在同一目标上。
+        work[max(0, py - th // 2): py + th // 2 + 1, max(0, px - tw // 2): px + tw // 2 + 1] = -1.0
+    return out
 
 
 def find_on_screen(template_path: str, confidence: float = 0.8) -> str:
+    """拿一张模板图在当前屏上找(多尺度+灰度/边缘双路 NCC)，命中就回可点中心坐标，可能返回多个。"""
     import os
 
     if not os.path.isfile(template_path):
         return f"[template image not found: {template_path}]"
-    try:
-        import numpy  # noqa: F401
-        from PIL import Image
-    except ImportError:
+    import importlib.util
+    # 只查 spec 不真 import——探测可选依赖在不在，别为了判断顺手把模块加载进来。
+    if importlib.util.find_spec("numpy") is None or importlib.util.find_spec("PIL") is None:
         return "[find-on-screen unavailable: numpy / Pillow not installed]"
-    from desktop_pet.eyes.capture import current_geom, grab_active, screen_to_image
+    from PIL import Image
+
+    from desktop_pet.eyes.capture import grab_active_geom, screen_to_image
 
     try:
-        template = _to_gray(Image.open(template_path))
+        tmpl_pil = Image.open(template_path)
+        tw0, th0 = tmpl_pil.size
     except Exception:
         return f"[couldn't read the template image (unsupported format?): {template_path}]"
-    screen = _to_gray(grab_active())
-    th, tw = template.shape
-    if th > screen.shape[0] or tw > screen.shape[1]:
+    screen_pil, geom = grab_active_geom()
+    sw0, sh0 = screen_pil.size
+    if th0 > sh0 or tw0 > sw0:
         return "[template is larger than the screen — can't match]"
 
-    score, px, py = _match_template_ncc(screen, template)
-    if score < float(confidence):
-        return f"[not found on screen (best match {score:.2f} < threshold {confidence}) — use a clearer template or lower confidence]"
-    mox, moy, _mw, _mh = current_geom()
-    cx, cy = screen_to_image(mox + px + tw / 2, moy + py + th / 2)
-    return f"Found it, match {score:.2f}, center @({cx}, {cy}) — click it directly."
+    conf = float(confidence)
+    # wf=工作缩放比：默认把整屏压到长边 1366 提速。
+    wf = min(1.0, _WORK_LONG_EDGE / max(sw0, sh0))
+    # 但若模板本来就小，按这个比例缩完短边不足 24px，纹理糊光没法匹配——
+    # 适当放大工作图(封顶 2400)把模板撑回最小可用尺寸，宁慢勿丢。
+    if min(tw0, th0) * wf < _MIN_TMPL_SIDE:
+        wf = min(1.0, _WORK_BOOST_MAX / max(sw0, sh0), _MIN_TMPL_SIDE / min(tw0, th0))
+    screen = _gray_pil(screen_pil, (max(1, round(sw0 * wf)), max(1, round(sh0 * wf))))
+    screen_g = _grad_mag(screen)
+    sh, sw = screen.shape
+    mox, moy, _mw, _mh = geom
+
+    raw: list[tuple[float, float, float]] = []
+    best_seen = 0.0
+    textured = False
+    for sc in _FIND_SCALES:
+        tw, th = int(round(tw0 * wf * sc)), int(round(th0 * wf * sc))
+        if tw < 8 or th < 8 or th > sh or tw > sw:   # 太小没纹理/比屏还大，这一档跳过
+            continue
+        tmpl_gray = _gray_pil(tmpl_pil, (tw, th))
+        ncc = _combine_ncc(_ncc_map(screen, tmpl_gray), _ncc_map(screen_g, _grad_mag(tmpl_gray)))
+        if ncc is None:
+            continue
+        textured = True   # 至少有一档算出过有效相关图，说明模板不是纯色
+        best_seen = max(best_seen, float(ncc.max()))
+        # px/py 是工作图坐标系：÷wf 还原到屏幕原始像素，+半模板得中心，再加屏幕原点 mox/moy。
+        for score, px, py in _peaks(ncc, conf, tw, th):
+            raw.append((score, mox + (px + tw / 2) / wf, moy + (py + th / 2) / wf))
+    # 所有尺度都没产出有效相关图 → 模板纯色/无对比度，别让用户以为是"没找到"。
+    if not textured:
+        return "[template has no texture/contrast to match against — use a more distinctive image]"
+
+    # 跨尺度去重：高分优先，新点离已留点小于 0.4 倍模板边长就当同一目标的重复命中丢掉。
+    raw.sort(key=lambda r: -r[0])
+    radius2 = (0.4 * min(tw0, th0)) ** 2   # 比距离平方，省一次开方
+    kept: list[tuple[float, float, float]] = []
+    for score, ax, ay in raw:
+        if any((ax - kx) ** 2 + (ay - ky) ** 2 < radius2 for _, kx, ky in kept):
+            continue
+        kept.append((score, ax, ay))
+        if len(kept) >= 8:   # 最多回 8 个，再多对调用方没意义、输出也吵
+            break
+
+    if not kept:
+        return (f"[not found on screen (best match {best_seen:.2f} < threshold {conf}) "
+                "— use a clearer template or lower confidence]")
+    # screen_to_image 把屏幕绝对坐标换回截图/逻辑像素，对齐工具其它环节用的坐标系。
+    coords = [(s, *screen_to_image(ax, ay, geom)) for s, ax, ay in kept]
+    if len(coords) == 1:
+        s, cx, cy = coords[0]
+        return f"Found it, match {s:.2f}, center @({cx}, {cy}) — click it directly."
+    body = "\n".join(f"· match {s:.2f} @({cx}, {cy})" for s, cx, cy in coords)
+    return f"Found {len(coords)} matches (best first; click the one you want):\n" + body

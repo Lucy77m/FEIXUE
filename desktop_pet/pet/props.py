@@ -14,6 +14,7 @@ from desktop_pet.pet.behaviors.easing import ease_in, ease_out
 
 
 def draw_note(painter: QPainter, at: QPointF, bw: float, bh: float, col: QColor, double: bool) -> None:
+    """画一个音符：单符带符尾，double 时再接一个并用横梁连成八分音符。"""
     head_r = bh * 0.05
     stem_h = bh * 0.17
     pen = QPen(col)
@@ -44,8 +45,9 @@ def draw_note(painter: QPainter, at: QPointF, bw: float, bh: float, col: QColor,
 
 
 def draw_spark(painter: QPainter, at: QPointF, bw: float, bh: float, p: float) -> None:
+    """四角闪光：尺寸跟 p 走 sin 半周，先涨后缩。复用于「看书有所得/赢了」的高光。"""
     s = (math.sin(p * math.pi)) * bh * 0.16
-    if s <= 0.5:
+    if s <= 0.5:  # 太小就别画了——单像素闪光反而像噪点
         return
     painter.setPen(Qt.PenStyle.NoPen)
     painter.setBrush(QColor(255, 210, 90))
@@ -58,6 +60,7 @@ def draw_spark(painter: QPainter, at: QPointF, bw: float, bh: float, p: float) -
 
 
 def draw_coffee(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
+    """咖啡：pour 阶段水壶往杯里倒、液面随 p 涨；sip/lift 杯子端起来喝，液面保持满。"""
     p = stage_p
     pen = QPen(palette.OUTLINE)
     pen.setWidthF(max(2.0, bw * 0.02))
@@ -66,13 +69,13 @@ def draw_coffee(painter: QPainter, bw: float, bh: float, t: float, stage: str, s
 
 
     if stage == "sip":
-        sip_lift = (math.sin(p * math.pi * 3) * 0.5 + 0.5)
+        sip_lift = (math.sin(p * math.pi * 3) * 0.5 + 0.5)  # 抿三口——sin 跑三个半周
         mug_y = bh * 0.30 - sip_lift * bh * 0.20
         fill = 0.85
     elif stage == "lift":
         mug_y = bh * 0.30 - ease_out(p) * bh * 0.06
         fill = 0.85
-    else:
+    else:  # pour：液面从 0.15 灌到 0.85
         mug_y = bh * 0.34
         fill = 0.15 + 0.7 * p
     cup = QRectF(-cw / 2, mug_y, cw, ch)
@@ -99,6 +102,7 @@ def draw_coffee(painter: QPainter, bw: float, bh: float, t: float, stage: str, s
 
 
 def _draw_kettle(painter: QPainter, bw: float, bh: float, cup: QRectF, p: float) -> None:
+    """倒水的壶：前 25% 滑入并倾斜，中段悬停出水流，后 20% 滑出画面。"""
     enter = ease_out(min(p / 0.25, 1.0))
     leave = max(0.0, (p - 0.8) / 0.2)
     kx = bw * 0.30 + (1 - enter) * bw * 0.5 + leave * bw * 0.5
@@ -122,7 +126,7 @@ def _draw_kettle(painter: QPainter, bw: float, bh: float, cup: QRectF, p: float)
     painter.drawPolygon(spout)
     painter.restore()
 
-    if 0.2 < p < 0.85:
+    if 0.2 < p < 0.85:  # 只有壶稳住、还没开始撤的这段才挂水流，否则水线会甩在半空
         stream = QPen(QColor(120, 80, 50))
         stream.setWidthF(max(1.5, bw * 0.016))
         stream.setCapStyle(Qt.PenCapStyle.RoundCap)
@@ -135,6 +139,7 @@ def _draw_kettle(painter: QPainter, bw: float, bh: float, cup: QRectF, p: float)
 
 
 def draw_book(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
+    """翻书：open 阶段从合到摊（opened 0→1 驱动书脊/外缘张开），其余阶段随时间偶尔翻页。"""
     p = stage_p
 
     opened = ease_out(p) if stage == "open" else 1.0
@@ -160,6 +165,7 @@ def draw_book(painter: QPainter, bw: float, bh: float, t: float, stage: str, sta
     ]))
 
     def page(x_in: float, x_out: float, lift: float = 0.0) -> None:
+        """画一页：x_in 贴书脊、x_out 是外缘；lift 是翻页时这页被掀起的高度。"""
         poly = QPolygonF([
             QPointF(x_in, top + spine - lift), QPointF(x_out, top - lift),
             QPointF(x_out, top - lift + ph), QPointF(x_in, top + spine + ph),
@@ -180,7 +186,7 @@ def draw_book(painter: QPainter, bw: float, bh: float, t: float, stage: str, sta
     page(0.0, outer)
     if stage != "open":
         turn = (math.sin(t * 0.7) + 1) * 0.5
-        if turn > 0.6:
+        if turn > 0.6:  # 只在 sin 后段才掀一页，省得一直翻——大半时间书是静的
             page(0.0, outer * (1 - (turn - 0.6) / 0.4 * 1.6), lift=bh * 0.05 * (turn - 0.6) / 0.4)
     painter.setPen(pen)
     painter.setBrush(palette.SKIN)
@@ -193,6 +199,7 @@ def draw_book(painter: QPainter, bw: float, bh: float, t: float, stage: str, sta
 
 
 def draw_headphones(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
+    """耳机：on 阶段从头顶滑下戴上；vibe 阶段耳罩随拍子缩放、亮起频谱条并飘音符。"""
     p = stage_p
     slide = -(1.0 - ease_out(p)) * bh * 0.55 if stage == "on" else 0.0
     beat = math.sin(t * 6.2)
@@ -209,6 +216,7 @@ def draw_headphones(painter: QPainter, bw: float, bh: float, t: float, stage: st
 
     for side in (-1, 1):
         cw, chh = bw * 0.17 * cup_s, bh * 0.34 * cup_s
+        # 右耳罩缩放时往内补偏移，让两侧外缘钉死不动——不然 vibe 一抖整个耳机就变宽
         cx = (-bw * 0.52 if side < 0 else bw * 0.35) + (bw * 0.17 - cw) * (0.0 if side < 0 else 1.0)
         cup = QRectF(cx, -chh * 0.5 + bh * 0.05, cw, chh)
         painter.setPen(pen)
@@ -229,6 +237,7 @@ def draw_headphones(painter: QPainter, bw: float, bh: float, t: float, stage: st
 
 
 def _draw_music_notes(painter: QPainter, bw: float, bh: float, t: float) -> None:
+    """三枚音符左右交替往上飘，phase 走 sin 控透明度——飘到顶自然淡出。"""
     for k in range(3):
         phase = (t * 0.45 + k / 3.0) % 1.0
         side = 1 if k % 2 == 0 else -1
@@ -241,6 +250,7 @@ def _draw_music_notes(painter: QPainter, bw: float, bh: float, t: float) -> None
 
 
 def draw_fishing(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
+    """钓鱼：抛竿→等待浮漂晃→咬钩下沉→收线→拉出鱼。fish 不为 None 表示已上钩、改画鱼。"""
     p = stage_p
     _draw_fisher_hat(painter, bw, bh)
 
@@ -267,7 +277,7 @@ def draw_fishing(painter: QPainter, bw: float, bh: float, t: float, stage: str, 
 
 
     bite_dip = 0.0
-    fish = None
+    fish = None  # None=浮漂还在水里；非 None=鱼出水的进度(0→1)，下面据此切两套画法
     if stage in ("wait", "cast"):
         bob_y = water_y + bh * 0.02 + math.sin(t * 1.3) * bh * 0.02
     elif stage == "bite":
@@ -341,6 +351,7 @@ def _draw_fish(painter: QPainter, bw: float, bh: float, at: QPointF) -> None:
 
 
 def draw_gaming(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
+    """打游戏：掌机屏上一颗球来回弹(spd 控速)；tense 时机身微抖，win 时屏幕闪绿放烟花。"""
     p = stage_p
     if stage == "tense":
         dx, dy, spd = math.sin(t * 9) * bw * 0.015, -bh * 0.05, 7.5
@@ -391,6 +402,7 @@ def draw_gaming(painter: QPainter, bw: float, bh: float, t: float, stage: str, s
 
 
 def draw_telescope(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
+    """望远镜：满天闪烁星点 + 镜身。aim 抬向天空，wow 时手抖兴奋并划过一颗流星。"""
     p = stage_p
     if stage == "aim":
         angle = -32 + (1 - ease_out(p)) * 40
@@ -446,6 +458,7 @@ def _draw_shooting_star(painter: QPainter, bw: float, bh: float, p: float) -> No
 
 
 def draw_sherlock(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
+    """侦探：猎鹿帽 + 地上一串猫爪印 + 放大镜。closer 凑近放大、aha 举起恍然，镜里裁出放大的爪印。"""
     p = stage_p
     hat, hat_dark = QColor(126, 99, 64), QColor(72, 54, 32)
     top = -bh * 0.5
@@ -494,7 +507,7 @@ def draw_sherlock(painter: QPainter, bw: float, bh: float, t: float, stage: str,
         painter.save()
         clip = QPainterPath()
         clip.addEllipse(QPointF(mx, my), r, r)
-        painter.setClipPath(clip)
+        painter.setClipPath(clip)  # 裁到镜片圆内，放大的爪印才不会溢出镜框
         _draw_pawprint(painter, QPointF(mx, my + r * 0.1), bw, bh, -1, scale=2.1)
         painter.restore()
     ring = QPen(QColor(60, 60, 70))
@@ -598,6 +611,7 @@ def draw_sweat(painter: QPainter, bw: float, bh: float, t: float, stage: str, st
 
 
 def _star_poly(cx: float, cy: float, r: float) -> QPolygonF:
+    """五角星轮廓，从正上方那个尖起。内半径 0.42r——再小尖太瘦、再大就钝得不像星。"""
     pts = []
     for i in range(10):
         ang = -math.pi / 2 + i * math.pi / 5
@@ -658,6 +672,7 @@ def draw_void(painter: QPainter, bw: float, bh: float, t: float, stage: str, sta
 
 
 def _ghost_body(painter: QPainter, bw: float, bh: float, gx: float, gy: float, alpha: int) -> None:
+    """半透明分身：照本体的圆角方块轮廓 + 两眼，alpha 控整体淡入淡出。给 clone 用。"""
     painter.save()
     painter.translate(gx, gy)
     pen = QPen(QColor(120, 110, 220, alpha))
@@ -800,6 +815,8 @@ def draw_sprout(painter: QPainter, bw: float, bh: float, t: float, stage: str, s
     painter.restore()
 
 
+# 装扮注册表：每项 = (worn 画法, ambient 画法)。worn 是「穿在身上」的(画在身体那层)，
+# ambient 是「环境氛围」的(撒在身体周围，如彩纸/雨云/虚空)，二者互斥——一个槽只填一个。
 COSTUME_LAYERS = {
     "sherlock": (draw_sherlock, None),
     "coffee": (draw_coffee, None),

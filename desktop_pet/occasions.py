@@ -1,10 +1,9 @@
 # author: bdth
 # email: 2074055628@qq.com
-# 时刻/节日感知:公历节日 + 生日,命中时返回一句给模型的应景"由头"。
+# 时刻/节日感知:公历节日命中时返回一句给模型的应景"由头"。
 
 from __future__ import annotations
 
-import re
 from datetime import datetime
 
 _FESTIVALS = {
@@ -19,34 +18,16 @@ _FESTIVALS = {
 }
 
 
-def _norm_md(raw: str) -> str:
-    """把用户填的生日规范成 'MM-DD'。"""
-    nums = re.findall(r"\d+", raw or "")
-    if len(nums) < 2:
-        return ""
-    try:
-        month, day = int(nums[-2]), int(nums[-1])
-    except ValueError:
-        return ""
-    if 1 <= month <= 12 and 1 <= day <= 31:
-        return f"{month:02d}-{day:02d}"
-    return ""
-
-
-def today_key(now: datetime, birthday: str = "") -> str | None:
-    """今天是特别的日子则返回稳定 key,否则 None。"""
+def today_key(now: datetime) -> str | None:
+    """只认公历固定日,农历(春节/中秋)会浮动不在这管。key 稳定,好让上层按 key 缓存/去重。"""
     md = now.strftime("%m-%d")
-    if _norm_md(birthday) == md:
-        return "birthday"
     if md in _FESTIVALS:
         return "festival:" + md
     return None
 
 
 def describe(key: str) -> str:
-    """把 key 翻成给模型的中文"由头"。"""
-    if key == "birthday":
-        return "今天是 ta 的生日"
+    """喂给模型当聊天由头,认不出的 key 返回空串,调用方拿空就当今天没事。"""
     if key.startswith("festival:"):
         return "今天是" + _FESTIVALS.get(key.split(":", 1)[1], "一个特别的日子")
     return ""

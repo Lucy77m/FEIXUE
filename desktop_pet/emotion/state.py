@@ -51,10 +51,11 @@ _CUE_LOOKBACK = 4
 
 
 def _cue_hit(low: str, cues: tuple[str, ...]) -> bool:
-    """判断某类线索词是否命中（忽略被否定或指向用户自己的出现）。"""
+    """命中夸/骂线索词；被否定的、用户自指的那次不算。"""
     for cue in cues:
         start = low.find(cue)
         while start != -1:
+            # 往前看 4 个字符就够：「你不笨」算不上骂、「我真没用」是用户自嘲不该扣分。
             pre = low[max(0, start - _CUE_LOOKBACK):start]
             if not any(n in pre for n in _NEGATORS) and not any(r in pre for r in _SELF_REF):
                 return True
@@ -63,11 +64,13 @@ def _cue_hit(low: str, cues: tuple[str, ...]) -> bool:
 
 
 def appraise_user_message(text: str) -> str | None:
+    """从一句话粗判夸/骂，返回对应事件名给 apply 用；判不准就 None。"""
     if not text:
         return None
     low = text.lower()
     scolded = _cue_hit(low, _SCOLD_CUES)
     praised = _cue_hit(low, _PRAISE_CUES)
+    # 既夸又骂、或两边都没命中——暧昧就不瞎猜，交回 None。
     if scolded == praised:
         return None
     return "scolded" if scolded else "praised"
@@ -107,12 +110,14 @@ class EmotionEngine:
             self._save()
 
     def apply(self, event: str) -> None:
+        """按 _APPRAISALS 把一次事件叠进情绪；未知事件名 → 全 0 即无变化。"""
         dv, da, dr = _APPRAISALS.get(event, (0.0, 0.0, 0.0))
         with self._lock:
-            self._settle_decay()
+            self._settle_decay()  # 先把上次到现在的衰减结清，再叠新增量，否则旧值会被双算
             state = self._state
             state.valence = _clamp(state.valence + dv * _REACTIVITY, -1.0, 1.0)
             state.arousal = _clamp(state.arousal + da * _REACTIVITY, 0.0, 1.0)
+            # 亲密度涨幅随当前值递减（越熟越难再涨）；掉的时候是硬扣，不打折。
             gain = dr * (1.0 - state.rapport) if dr > 0 else dr
             state.rapport = _clamp(state.rapport + gain, _RAPPORT_FLOOR, 1.0)
             state.updated_at = self._now()
@@ -128,13 +133,14 @@ class EmotionEngine:
         return _state_name(valence, arousal)
 
     def tone_hint(self) -> str:
+        # 延迟 import：prompts 那边会回头引情绪，模块级 import 会循环依赖。
         from desktop_pet.agent.prompts import tone_hint as _tone_hint
 
         valence, arousal, rapport = self.snapshot()
         return _tone_hint(_state_name(valence, arousal), rapport)
 
     def _decayed(self) -> _State:
-        """返回一份从 updated_at 向基线恢复到当前时刻的状态副本。"""
+        """算到此刻的衰减值，返回副本——不动存储里的原状态。"""
         s = _State(self._state.valence, self._state.arousal, self._state.rapport, self._state.updated_at)
         if not s.updated_at:
             return s
@@ -143,11 +149,11 @@ class EmotionEngine:
         except ValueError:
             return s
         if last.tzinfo is None:
-            last = last.replace(tzinfo=timezone.utc)
+            last = last.replace(tzinfo=timezone.utc)  # 老存档没带时区，按 UTC 当裸时间补上
         hours = (datetime.now(timezone.utc) - last).total_seconds() / 3600
-        if hours <= 0:
+        if hours <= 0:  # 时钟回拨/跨时区导致负值，别往反方向衰减，原样返回
             return s
-        fraction = min(1.0, _RECOVERY_PER_HOUR * hours)
+        fraction = min(1.0, _RECOVERY_PER_HOUR * hours)  # 封顶到 1，停机几天也只是恰好回到基线不过冲
         s.valence += (_BASELINE_VALENCE - s.valence) * fraction
         s.arousal += (_BASELINE_AROUSAL - s.arousal) * fraction
         days = hours / 24.0
@@ -155,7 +161,7 @@ class EmotionEngine:
         return s
 
     def _settle_decay(self) -> None:
-        """把衰减后的值结算进存储状态，并把 updated_at 锚定到当前时刻。"""
+        """衰减结清、updated_at 归零到此刻——叠新增量前先调，否则旧值会被重复衰减。"""
         self._state = self._decayed()
         self._state.updated_at = self._now()
 
@@ -164,6 +170,7 @@ class EmotionEngine:
         return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
     def _load(self) -> _State:
+        """读盘还原状态；文件缺失/损坏/字段对不上一律退回默认 _State，不让坏档崩掉启动。"""
         if not _STATE_PATH.exists():
             return _State()
         try:
@@ -174,6 +181,7 @@ class EmotionEngine:
             return _State()
         fields = _State.__dataclass_fields__
         try:
+            # 只挑认识的键灌进去：旧版本多出来的字段直接丢，免得 _State() 报未知参数。
             return _State(**{k: v for k, v in data.items() if k in fields})
         except (TypeError, ValueError):
             return _State()

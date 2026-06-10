@@ -43,6 +43,7 @@ class PetWindow(QWidget):
     grabbed = Signal()
     hid = Signal()
     wants_travel = Signal()
+    context_requested = Signal(QPoint)
 
     def __init__(self) -> None:
         super().__init__()
@@ -71,18 +72,27 @@ class PetWindow(QWidget):
         self._hideout: Hideout | None = None
         self._wormhole: Wormhole | None = None
         self._wormhole_t = 0.0
+        # 上层注入：查询「整段话是否还在说」。藏边时据此整只露出——不能用 is_talking(逐句开合的嘴部标志，
+        # 句间会反复 False)，否则每句之间都缩一下又被下一句拽出来，来回弹。默认 False。
+        self._is_speaking = lambda: False
 
     def below_blob(self) -> QPoint:
+        """blob 正下方的全局坐标——气泡/特效往下挂时的锚点。"""
         geo = self.frameGeometry()
         return QPoint(geo.center().x(), geo.top() + self.height() // 2 + int(BLOB_HALF_H))
 
     def head_anchor(self) -> QPoint:
+        """头顶偏右的锚点——帽子/感叹号这类道具往这儿贴；0.6 是偏右量，贴正中会挡脸。"""
         geo = self.frameGeometry()
         return QPoint(geo.center().x() + int(BLOB_HALF_W * 0.6), geo.center().y() - int(BLOB_HALF_H))
 
     def head_top(self) -> QPoint:
         geo = self.frameGeometry()
         return QPoint(geo.center().x(), geo.center().y() - int(BLOB_HALF_H))
+
+    def bind_speaking(self, fn) -> None:
+        """注入「是否正在说话」的查询函数(藏边时整只露出用)。上层用气泡的整段说话态，跨多句不间断。"""
+        self._is_speaking = fn
 
     def set_state(self, state: str) -> None:
         if state == "speaking":
@@ -97,9 +107,10 @@ class PetWindow(QWidget):
         self._blob.set_lecturing(on)
 
     def note_think_step(self, label: str) -> None:
+        """从思考步骤的标签反推它是哪类，喂给 blob 调节抖动节奏。"""
         if label == i18n.thinking_label():
             kind = "new_turn"
-        elif " · " in label or i18n.is_noarg_tool_label(label):
+        elif " · " in label or i18n.is_noarg_tool_label(label):  # 带「·」的是「工具 · 参数」，无参工具另走 i18n 判定
             kind = "tool"
         else:
             kind = "inner"
@@ -123,6 +134,7 @@ class PetWindow(QWidget):
         return self._blob.is_catnapping
 
     def summon_front(self) -> None:
+        """召回到眼前：先把藏边/传送动画掐掉拉回 rest，再叫醒、置顶。顺序别反——没收尾就置顶会卡在动画半路。"""
         self._end_hide()
         self._end_travel()
         self._blob.wake()
@@ -145,11 +157,13 @@ class PetWindow(QWidget):
         self._blob.clear_pending()
 
     def express(self, tag: str) -> None:
+        """把一个情绪 tag 落成表情 + 配套反应小品 + 偶尔换装。表情按 VA 选反应，强度也跟 tag 走。"""
         self._blob.set_expression(_TAG_EXPRESSION.get(tag, "neutral"))
         name = selector.select(Category.REACTION, mood=_TAG_VA.get(tag))
         if name:
             self._blob.react(name, _TAG_INTENSITY.get(tag, 1.0))
         costume = _TAG_COSTUME.get(tag)
+        # 换装只有 25% 概率触发——每个情绪都换会太闹腾，当彩蛋用；没抽中就清掉旧装。
         self._blob.set_costume(
             costume if costume and random.random() < _COSTUME_CHANCE else None
         )
@@ -164,7 +178,7 @@ class PetWindow(QWidget):
 
     def start_wormhole(self) -> bool:
         """跳虫洞传送到当前屏幕对侧的随机落点。仅在空闲(无入场/藏边/拖拽/小品/反应)时启动。
-        去哪、能不能动完全由窗口自己定——上层只负责决定"该不该现在传送"。"""
+        去哪自己挑——上层只管"该不该现在传"。"""
         if (self._entrance is not None or self._hideout is not None or self._wormhole is not None
                 or self._is_dragging or self._blob.in_activity or self._blob.is_reacting):
             return False
@@ -202,18 +216,21 @@ class PetWindow(QWidget):
             self.move(self._rest_pos)
 
     def _tick(self) -> None:
+        """每帧驱动：dt 用 perf_counter 真实差值，blob 先推进，再按入场/虫洞/藏边三选一接管窗口位置。"""
         now = time.perf_counter()
         dt = now - self._last
         self._last = now
         self._blob.advance(dt)
         if self._blob.take_travel_request():
             self.wants_travel.emit()
+        # 三种位移动画互斥，同一时刻只有一个在搬窗口——入场优先级最高，藏边最低。
         if self._entrance is not None:
             self._advance_entrance(dt)
         elif self._wormhole is not None:
             self._advance_wormhole(dt)
         elif self._hideout is not None:
-            self._hideout.hold_out(self._blob.is_talking)
+            # 整段话期间一直露出，说完(或被打断)才缩回去接着潜伏——不按逐句的 is_talking 弹。
+            self._hideout.hold_out(self._is_speaking())
             pos, glance = self._hideout.advance(dt)
             self.move(pos)
             self.moved.emit()
@@ -222,6 +239,7 @@ class PetWindow(QWidget):
         self.update()
 
     def _advance_entrance(self, dt: float) -> None:
+        """推进入场动画。到时长就收尾：清状态、透明度拉满、硬拍到 rest_pos——别留半透明或差几像素的尾巴。"""
         self._entrance_t += dt
         if self._entrance_t >= self._entrance.duration:
             self._entrance = None
@@ -234,6 +252,7 @@ class PetWindow(QWidget):
         self.moved.emit()
 
     def _advance_wormhole(self, dt: float) -> None:
+        """推进虫洞传送，到点把窗口硬拍到落点 rest_pos——progress 是浮点，永远落不到精确终点。"""
         self._wormhole_t += dt
         if self._wormhole_t >= self._wormhole.duration:
             self._wormhole = None
@@ -245,13 +264,14 @@ class PetWindow(QWidget):
         self.moved.emit()
 
     def paintEvent(self, event: QPaintEvent) -> None:
+        # 三态画法：虫洞/入场各自带道具+形变，普通态直接画 blob。形变都是绕窗口中心 translate→rotate→scale→translate 还原。
         painter = QPainter(self)
         if self._wormhole is not None:
             w, h = self.width(), self.height()
             p = min(self._wormhole_t / self._wormhole.duration, 1.0)
             self._wormhole.draw_props(painter, w, h, p)
             sx, sy, oy, rot = self._wormhole.blob_transform(p)
-            if sx > 0.001 and sy > 0.001:
+            if sx > 0.001 and sy > 0.001:  # 缩到接近 0 就别画了——scale(0) 会让 painter 退化报错
                 painter.save()
                 painter.translate(w / 2, h / 2 + oy)
                 painter.rotate(rot)
@@ -267,7 +287,7 @@ class PetWindow(QWidget):
         p = min(self._entrance_t / self._entrance.duration, 1.0)
         self._entrance.draw_props(painter, w, h, p)
         sx, sy, oy, rot = self._entrance.blob_transform(p)
-        if sx > 0.001 and sy > 0.001:
+        if sx > 0.001 and sy > 0.001:  # 同上：入场早期 blob 缩成一点，跳过避免退化
             painter.save()
             painter.translate(w / 2, h / 2 + oy)
             painter.rotate(rot)
@@ -278,6 +298,7 @@ class PetWindow(QWidget):
         self._entrance.draw_overlay(painter, w, h, p)
 
     def enterEvent(self, event: QEnterEvent) -> None:
+        # 鼠标进来逗一下(perk_up)，但拖拽/睡着/藏边时不打扰；4 秒冷却——光标蹭来蹭去会狂刷反应。
         if not self._is_dragging and not self._blob.is_asleep and self._hideout is None:
             now = time.perf_counter()
             if now - self._last_hover >= _HOVER_COOLDOWN:
@@ -291,10 +312,14 @@ class PetWindow(QWidget):
             self._drag_offset = self._press_pos - self.frameGeometry().topLeft()
             self._is_dragging = False
             event.accept()
+        elif event.button() == Qt.MouseButton.RightButton:
+            self.context_requested.emit(event.globalPosition().toPoint())
+            event.accept()
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         if event.buttons() & Qt.MouseButton.LeftButton:
             pos = event.globalPosition().toPoint()
+            # 按住超过 _CLICK_SLOP(5px)才算拖拽——否则手抖的几像素会把点击误判成拖动，进了拖拽就掐掉藏边/传送。
             if not self._is_dragging and (pos - self._press_pos).manhattanLength() >= _CLICK_SLOP:
                 self._is_dragging = True
                 self.grabbed.emit()
@@ -312,6 +337,7 @@ class PetWindow(QWidget):
         self._blob.look_at((pos.x() - cx) / (BLOB_HALF_W * 1.6))
 
     def _maybe_hide(self) -> None:
+        """松手后若贴到了屏幕边，就缩进去躲起来——边由 Hideout 判定，没贴边返回 None 就不躲。"""
         screen = self.screen()
         if screen is None:
             return
@@ -328,6 +354,7 @@ class PetWindow(QWidget):
             self._blob.set_hidden(False)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        # 松手三分支：拖完了落地弹一下并试着贴边躲；藏着的话戳一下露头；都不是且没超 slop 才当真点击。
         if event.button() == Qt.MouseButton.LeftButton:
             if self._is_dragging:
                 self._is_dragging = False
@@ -338,6 +365,7 @@ class PetWindow(QWidget):
                 self._hideout.poke()
             elif (event.globalPosition().toPoint() - self._press_pos).manhattanLength() < _CLICK_SLOP:
                 now = time.perf_counter()
+                # 反应有冷却也躲着睡觉时不演，但 clicked 信号照发——业务逻辑不该被表演冷却挡住。
                 if now - self._last_click >= _CLICK_COOLDOWN and not self._blob.is_asleep:
                     self._last_click = now
                     name = selector.select(Category.REACTION, candidates=_CLICK_REACTIONS)

@@ -307,6 +307,7 @@ def _lerp(a: QPointF, b: QPointF, t: float) -> QPointF:
 
 
 def _weighted_pick(weights: dict[int, float], exclude: int | None = None) -> int:
+    """按权重抽一个 pose，排掉 exclude(通常是当前 pose) 避免原地重复。空了就回 HOME。"""
     items = [(k, w) for k, w in weights.items() if k != exclude]
     if not items:
         return _THINK_HOME
@@ -320,6 +321,8 @@ def _weighted_pick(weights: dict[int, float], exclude: int | None = None) -> int
 
 
 class BlobPet:
+    """桌宠形象本体：纯状态机+绘制，不碰窗口/线程。外部每帧喂 dt 调 advance，再调 paint 出图。"""
+
     def __init__(self) -> None:
         self._t = 0.0
         self._expr = "neutral"
@@ -390,6 +393,7 @@ class BlobPet:
         return self._talking
 
     def set_busy(self, busy: bool) -> None:
+        # busy = Agent 真在干活；强制思考脸并清掉发呆/反应那套，免得它一边干活一边发白日梦。
         self._busy = busy
         if busy:
             self._expr = "thinking"
@@ -416,6 +420,7 @@ class BlobPet:
         self._think_energy = max(0.0, min(1.0, arousal))
 
     def on_think_step(self, kind: str) -> None:
+        """Agent 每出一步(新轮/调工具/内省)给个暗示 pose，让思考动作跟着实际进展走，而不是纯随机。"""
         pose = _THINK_STEP_POSE.get(kind)
         if pose is not None:
             self._think_cue_pose = pose
@@ -442,7 +447,6 @@ class BlobPet:
 
     @property
     def is_catnapping(self) -> bool:
-        """是否打盹中(自发短睡)。"""
         return self._catnap_left > 0.0
 
     def set_dragging(self, on: bool) -> None:
@@ -501,10 +505,10 @@ class BlobPet:
         return False
 
     def clear_pending(self) -> None:
-        """丢弃排队中的表演动作。"""
         self._pending_perform = None
 
     def perform(self, name: str) -> bool:
+        """外部点名要小品/反应：只入队不立刻播，等 advance 里确认空闲了再真正触发(见 _do_perform)。"""
         if name in _ACTIVITIES or (
             (spec := registry.get(name)) is not None and spec.category == Category.REACTION
         ):
@@ -521,6 +525,7 @@ class BlobPet:
 
 
     def advance(self, dt: float) -> None:
+        """每帧推进一次状态机。dt 是真实秒数(可能跳秒/卡顿)，全程拿它积分而不是数帧。"""
         self._t += dt
         if self._pending_perform is not None and not (
             self._busy or self._pondering or self._talking or self._asleep
@@ -556,12 +561,12 @@ class BlobPet:
                 self._react = None
                 self._settle = _SETTLE_DUR
                 self._fidget_timer = max(self._fidget_timer, random.uniform(9.0, 16.0))
-                if self._falling_asleep:
+                if self._falling_asleep:        # 打哈欠这个反应一放完，才正式进入睡着
                     self._asleep = True
                     self._falling_asleep = False
             else:
                 self._react = (name, elapsed, dur)
-            return
+            return                              # 正在播反应就独占——别让 fidget 在上面叠动作
         if self._settle > 0:
             self._settle = max(0.0, self._settle - dt)
         self._fidget_timer -= dt
@@ -574,6 +579,7 @@ class BlobPet:
             self._fidget_timer = random.uniform(14.0, 28.0)
 
     def _advance_catnap(self, dt: float) -> None:
+        # 自发打盹：空闲久了有一定概率自己眯一会儿。任何"有事"立刻打断并重置计时。
         if self._catnap_left > 0.0:
             if (self._busy or self._pondering or self._talking or self._lecturing
                     or self._dragging or self._activity):
@@ -618,10 +624,11 @@ class BlobPet:
                     self._dream_spawn = 0.0
                 self._daydream_timer = random.uniform(*_DAYDREAM_GAP)
         for bubble in self._dream_bubbles:
-            bubble[2] += dt
+            bubble[2] += dt                     # bubble[2]=age, bubble[3]=life，age 超寿命就剔掉
         self._dream_bubbles = [b for b in self._dream_bubbles if b[2] < b[3]]
 
     def _advance_activity(self, dt: float) -> None:
+        # 小品的逐阶段推进：按 _ACTIVITIES 里的 (stage, 时长, glyph) 顺序走，走完最后一阶播收尾反应。
         idle = not (self._pondering or self._asleep or self._dragging or self._hidden or self._react
                     or self._talking or self._lecturing or self._busy)
         if self._activity is not None:
@@ -651,7 +658,7 @@ class BlobPet:
             if self._activity_timer <= 0.0:
                 self._activity_timer = random.uniform(*_ACTIVITY_GAP)
                 if idle:
-                    name = random.choice(list(_ACTIVITIES) + [_TRAVEL])
+                    name = random.choice(list(_ACTIVITIES) + [_TRAVEL])  # 虫洞穿越混进抽签池，抽中就发穿越请求
                     if name == _TRAVEL:
                         self._wants_travel = True
                     else:
@@ -696,7 +703,7 @@ class BlobPet:
         font.setPixelSize(max(11, int(bw * 0.26)))
         painter.setFont(font)
         for glyph, x_frac, age, life, color in self._dream_bubbles:
-            frac = age / life
+            frac = age / life                   # 前 18% 淡入、后 40% 淡出，中间满透明，整段一边升一边飘
             if frac < 0.18:
                 alpha = frac / 0.18
             elif frac > 0.6:
@@ -723,6 +730,7 @@ class BlobPet:
                 self._blink_e = 0.0
 
     def _advance_look(self, dt: float) -> None:
+        # 视线目标按优先级定：被点名看(look_hold) > 小品朝向 > 反应回正 > 思考时游移 > 平时随机张望。
         if self._look_hold > 0.0:
             self._look_hold -= dt
             self._turn += (self._turn_target - self._turn) * min(1.0, dt * 6.0)
@@ -737,7 +745,7 @@ class BlobPet:
             return
         if self._pondering:
             wander = math.sin(self._t * _THINK_GLANCE_HZ)
-            if abs(wander) > _THINK_GLANCE_GATE:
+            if abs(wander) > _THINK_GLANCE_GATE:    # 过门限才偏头看一眼，平时正视——不然一直左右转太鬼祟
                 reach = (abs(wander) - _THINK_GLANCE_GATE) / (1.0 - _THINK_GLANCE_GATE)
                 self._turn_target = math.copysign(reach, wander) * _THINK_GLANCE_AMT
             else:
@@ -752,12 +760,13 @@ class BlobPet:
 
 
     def paint(self, painter: QPainter, w: int, h: int) -> None:
+        """画一帧。各状态(呼吸/说话/思考/反应/睡眠/小品)各自往 ox/oy/rot/缩放上叠增量，最后一次性变换出图。"""
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         self._win_h = float(h)
         bw, bh = _BLOB_BASE * 0.62, _BLOB_BASE * 0.44
         cx, cy = w / 2, h / 2
 
-        breath = math.sin(self._t * 2.0)
+        breath = math.sin(self._t * 2.0)       # 永远在呼吸——这是静止时也不显得是张死图的底子
         ox = 0.0
         oy = breath * (bh * 0.032)
         rot = math.sin(self._t * 0.8) * 1.5
@@ -777,6 +786,7 @@ class BlobPet:
 
 
         think_gate = ease_out(min(self._think_e / _THINK_SETTLE, 1.0))
+        # 穿着戏服(worn)时不叠思考姿势也不画思考手——会跟戏服打架。
         if think_gate > 0.0 and not self._react and not self._worn_costume:
             d_ox, d_oy, d_rot, d_sx, d_sy = self._think_transform(bw, bh, think_gate)
             ox += d_ox
@@ -796,7 +806,7 @@ class BlobPet:
             sym *= 1 + (my - 1) * k
         elif self._settle > 0:
             te = _SETTLE_DUR - self._settle
-            damp = math.exp(-te * 9) * math.sin(te * 38)
+            damp = math.exp(-te * 9) * math.sin(te * 38)    # 反应收尾后的回弹：衰减正弦，Q 弹一下归位
             sym *= 1 + 0.09 * damp
             sxm *= 1 - 0.09 * damp
 
@@ -859,6 +869,7 @@ class BlobPet:
 
     def _draw_react_fx(self, painter: QPainter, name: str, p: float, cx: float, cy: float,
                        bw: float, bh: float) -> None:
+        """按反应名分发到对应特效(音符/彩纸/拖影/震线/光环/阴云)。没登记特效的反应直接跳过。"""
         if name not in (self._FX_NOTES | self._FX_CONFETTI | self._FX_SWOOSH | self._FX_SHOCK
                         | self._FX_RING | self._FX_GLOOM):
             return
@@ -963,6 +974,8 @@ class BlobPet:
         self._think_dwell_left = random.uniform(0.6, 1.4)
 
     def _advance_think(self, dt: float) -> None:
+        # 思考姿势的换位调度：cue(来自 on_think_step) 优先于随机轮换，但要先把当前姿势停够 MIN_DWELL 再换，
+        # 不然刚摆好就被打断、看着抽。cue 攒太久(超 TTL)没机会用就作废。
         if self._think_xfade < 1.0:
             self._think_xfade = min(1.0, self._think_xfade + dt / _THINK_XFADE_DUR)
         self._think_held += dt
@@ -982,6 +995,7 @@ class BlobPet:
         return _weighted_pick(_THINK_POSE_WEIGHTS, exclude=self._think_pose)
 
     def _roll_dwell(self, pose: int) -> float:
+        # 每个姿势停留时长随机抽；energy 越高(越焦灼)越往短缩，换姿势越勤。
         lo, hi = _THINK_DWELL[pose]
         scale = _THINK_DWELL_SCALE_CALM + (_THINK_DWELL_SCALE_HOT - _THINK_DWELL_SCALE_CALM) * self._think_energy
         return random.uniform(lo, hi) * scale
@@ -997,7 +1011,7 @@ class BlobPet:
         self, bw: float, bh: float, s: float
     ) -> tuple[float, float, float, float, float]:
         cur = self._pose_motion(self._think_pose, bw, bh, s)
-        if self._think_xfade >= 1.0:
+        if self._think_xfade >= 1.0:            # 没在过渡就省掉上一姿势那次计算
             return cur
         prev = self._pose_motion(self._think_pose_prev, bw, bh, s)
         e = ease_out(self._think_xfade)
@@ -1006,6 +1020,7 @@ class BlobPet:
     def _pose_motion(
         self, idx: int, bw: float, bh: float, g: float
     ) -> tuple[float, float, float, float, float]:
+        # 第 idx 号思考姿势的身体位姿(ox,oy,rot,sx,sy)，g 是淡入门控(0→1)，每项都乘 g 才能从中性平滑长出来。
         t = self._t
         if idx == 0:
             rot = _THINK_TILT_DEG * g + math.sin(t * _THINK_SWAY_HZ) * _THINK_SWAY_DEG * g
@@ -1057,6 +1072,7 @@ class BlobPet:
         return pen
 
     def _hand_point(self, idx: int, bw: float, bh: float) -> QPointF:
+        # 各思考姿势对应的手落点(身体本地坐标)，跟 _pose_motion 一一对号——挠头/托腮/戳点都靠这个定位。
         t = self._t
         if idx == 0:
             return QPointF(bw * 0.26, bh * 0.40)
@@ -1096,7 +1112,7 @@ class BlobPet:
             target = _lerp(
                 self._hand_point(self._think_pose_prev, bw, bh), target, ease_out(self._think_xfade)
             )
-        emerge = QPointF(bw * 0.16, bh * 0.30)
+        emerge = QPointF(bw * 0.16, bh * 0.30)  # 手从身体里(偏下)钻出来的起点，s 控制冒出程度——别让它凭空闪现
         hand = _lerp(emerge, target, s)
         painter.setPen(self._think_hand_pen(bw))
         painter.setBrush(_SKIN)
@@ -1107,7 +1123,7 @@ class BlobPet:
         painter.translate(cx + bw * 0.28, head_y - bh * 0.42)
         painter.setBrush(Qt.BrushStyle.NoBrush)
         for i in range(3):
-            ph = ((self._t / _ZZZ_CYCLE) - i * _ZZZ_STAGGER) % 1.0
+            ph = ((self._t / _ZZZ_CYCLE) - i * _ZZZ_STAGGER) % 1.0  # 三个 Z 错相位飘，像接连冒出来的
             a = math.sin(ph * math.pi)
             if a <= 0.0:
                 continue
@@ -1135,11 +1151,12 @@ class BlobPet:
         painter.drawRoundedRect(QRectF(-bw / 2, -bh / 2, bw, bh), bh * 0.48, bh * 0.48)
 
     def _draw_eyes(self, painter: QPainter, bw: float, bh: float) -> None:
+        # 按表情画眼：happy 弯弧、sad 半眯、thinking 上抬、surprised 瞪大，其余走默认椭圆+眨眼。
         if self._sleep_e > 0.0:
             self._draw_sleeping_eyes(painter, bw, bh, self._sleep_e)
             return
         dx, ey, ew, eh = bw * 0.24, bh * 0.05, bw * 0.15, bh * 0.26
-        shift = self._turn * bw * 0.1
+        shift = self._turn * bw * 0.1           # 朝向偏移眼珠 + 远侧眼压扁，凑出一点转头的透视
         scale_l = 1 - max(self._turn, 0.0) * 0.55
         scale_r = 1 - max(-self._turn, 0.0) * 0.55
         expr = self._expr
@@ -1252,6 +1269,7 @@ class BlobPet:
         )
 
     def _blink_open(self) -> float:
+        # 眼睛睁开度 0~1。眨眼期间走 V 形：中点闭到 0 再睁回，凑出"快速合上又弹开"的眨眼感。
         if not self._blinking:
             return 1.0
         return abs(self._blink_e / _BLINK_DUR - 0.5) * 2

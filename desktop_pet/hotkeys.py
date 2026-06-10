@@ -23,7 +23,7 @@ _MODS = {
 
 
 def parse_combo(combo: str) -> tuple[int, int] | None:
-    """把组合键字符串解析为 (mods, vk)。"""
+    """解析 "ctrl+alt+s" 这种串；非法/纯修饰键返回 None，给上层当"这条没配好"。"""
     parts = [p.strip().lower() for p in (combo or "").split("+") if p.strip()]
     mods = 0
     vk: int | None = None
@@ -33,15 +33,17 @@ def parse_combo(combo: str) -> tuple[int, int] | None:
         elif len(p) == 1 and ("a" <= p <= "z" or "0" <= p <= "9"):
             vk = ord(p.upper())
         elif p.startswith("f") and p[1:].isdigit() and 1 <= int(p[1:]) <= 24:
-            vk = 0x70 + int(p[1:]) - 1
+            vk = 0x70 + int(p[1:]) - 1  # F1..F24 连续映射，VK_F1=0x70
         else:
             return None
     if vk is None or mods == 0:
-        return None
+        return None  # 纯修饰键 / 没主键的组合不接受 —— RegisterHotKey 也注册不了
     return (mods, vk)
 
 
 class GlobalHotkeys(QObject):
+    """全局热键 → Qt 信号。注册/消息循环都跑在独立线程，信号跨线程回主线程。"""
+
     summon = Signal()
     ask_selection = Signal()
     quick_rewrite = Signal()
@@ -65,6 +67,7 @@ class GlobalHotkeys(QObject):
     def stop(self) -> None:
         if self._tid:
             try:
+                # 往那条线程塞 WM_QUIT 让 GetMessageW 返回 0 退出 —— 别在别处 join 死等
                 ctypes.windll.user32.PostThreadMessageW(self._tid, _WM_QUIT, 0, 0)
             except (AttributeError, OSError):
                 pass
@@ -75,7 +78,7 @@ class GlobalHotkeys(QObject):
         self._tid = 0
 
     def restart(self, keys: dict) -> None:
-        """用新键重新注册热键。"""
+        """键没变就别瞎重启那条线程，省一次注册/反注册的来回。"""
         new = dict(keys)
         if new == self._keys and self._thread is not None:
             return
@@ -84,21 +87,23 @@ class GlobalHotkeys(QObject):
         self.start()
 
     def _run(self) -> None:
+        """工作线程：注册热键 → 死循环抽消息 → 退出时全部 Unregister。"""
         user32 = kernel32 = None
-        id_map: dict[int, str] = {}
+        id_map: dict[int, str] = {}  # 注册成功的 id → action；停的时候照这个反注册
         try:
             user32 = ctypes.windll.user32
             kernel32 = ctypes.windll.kernel32
             user32.RegisterHotKey.argtypes = [wintypes.HWND, ctypes.c_int, wintypes.UINT, wintypes.UINT]
             user32.GetMessageW.argtypes = [ctypes.POINTER(wintypes.MSG), wintypes.HWND, wintypes.UINT, wintypes.UINT]
-            self._tid = kernel32.GetCurrentThreadId()
+            self._tid = kernel32.GetCurrentThreadId()  # 留着给 stop() 投 WM_QUIT
             status: dict[str, bool] = {}
-            for index, action in enumerate(self._ACTIONS, start=1):
+            for index, action in enumerate(self._ACTIONS, start=1):  # id 从 1 起，0 被系统占
                 parsed = parse_combo(self._keys.get(action, ""))
                 if parsed is None:
                     status[action] = False
                     continue
                 mods, vk = parsed
+                # NOREPEAT：长按只触发一次，不刷一串信号。失败多半是热键被别家占了
                 ok = bool(user32.RegisterHotKey(None, index, mods | _MOD_NOREPEAT, vk))
                 status[action] = ok
                 if ok:
@@ -112,7 +117,7 @@ class GlobalHotkeys(QObject):
             while True:
                 ret = user32.GetMessageW(ctypes.byref(msg), None, 0, 0)
                 if ret in (0, -1):
-                    break
+                    break  # 0=收到 WM_QUIT 正常退；-1=出错，都不再循环
                 if msg.message == _WM_HOTKEY:
                     action = id_map.get(msg.wParam)
                     if action:

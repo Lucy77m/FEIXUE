@@ -1,6 +1,7 @@
 # author: bdth
 # email: 2074055628@qq.com
-# 系统托盘图标与右键菜单（打开面板 / 退出）
+# 系统托盘图标与右键菜单（对话 / 看看屏幕 / 新话题 / 显示·收起 / 控制面板 / 退出）。
+# 同一个菜单也被宠物右键复用（app 通过 context_menu() 取用），保证两处快捷功能一致。
 
 from __future__ import annotations
 
@@ -18,17 +19,44 @@ class Tray(QSystemTrayIcon):
         self,
         on_open_panel: Callable[[], None],
         on_quit: Callable[[], None],
+        on_talk: Callable[[], None] | None = None,
+        on_peek: Callable[[], None] | None = None,
+        on_new_topic: Callable[[], None] | None = None,
+        on_toggle_show: Callable[[], None] | None = None,
+        is_shown: Callable[[], bool] | None = None,
     ) -> None:
         super().__init__(mochi_icon())
         self.setToolTip(i18n.t("tray_tooltip"))
         self._on_open_panel = on_open_panel
+        self._is_shown = is_shown
 
         menu = QMenu()
-        self._act_open = self._add(menu, i18n.t("tray_open_panel"), on_open_panel)
+        self._act_talk = self._add(menu, "tray_talk", on_talk)
+        self._act_peek = self._add(menu, "tray_peek", on_peek)
+        self._act_new_topic = self._add(menu, "tray_new_topic", on_new_topic)
+        self._act_toggle = self._add(menu, "tray_hide", on_toggle_show)
+        # 上面几项一个都没建时别画分隔线，否则菜单顶上多一道空线。
+        if any((self._act_talk, self._act_peek, self._act_new_topic, self._act_toggle)):
+            menu.addSeparator()
+        self._act_open = self._add(menu, "tray_open_panel", on_open_panel)
         menu.addSeparator()
-        self._act_quit = self._add(menu, i18n.t("tray_quit"), on_quit)
+        self._act_quit = self._add(menu, "tray_quit", on_quit)
+        menu.aboutToShow.connect(self._sync_toggle_label)
         self.setContextMenu(menu)
+        self._menu = menu
         self.activated.connect(self._on_activated)
+
+    def context_menu(self) -> QMenu:
+        """给宠物右键复用的同一份菜单 —— 取之前先刷一下显示/收起的文案。"""
+        self._sync_toggle_label()
+        return self._menu
+
+    def _sync_toggle_label(self) -> None:
+        # 现查 is_shown() 不缓存：窗口也可能从面板/快捷键那边收起，缓存会和真实态错位。
+        if self._act_toggle is None:
+            return
+        shown = True if self._is_shown is None else bool(self._is_shown())
+        self._act_toggle.setText(i18n.t("tray_hide") if shown else i18n.t("tray_show"))
 
     def _on_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
         if reason in (
@@ -38,7 +66,7 @@ class Tray(QSystemTrayIcon):
             self._on_open_panel()
 
     def notify(self, title: str, body: str, msecs: int = 8000) -> None:
-        """弹出系统托盘气泡通知。"""
+        """托盘气泡通知；某些环境(精简版 Win/某些桌面)不支持就静默吞掉。"""
         try:
             if QSystemTrayIcon.supportsMessages():
                 self.showMessage(title, body, mochi_icon(), msecs)
@@ -47,12 +75,22 @@ class Tray(QSystemTrayIcon):
 
     def retranslate(self) -> None:
         self.setToolTip(i18n.t("tray_tooltip"))
-        self._act_open.setText(i18n.t("tray_open_panel"))
-        self._act_quit.setText(i18n.t("tray_quit"))
+        for act, key in (
+            (self._act_talk, "tray_talk"),
+            (self._act_peek, "tray_peek"),
+            (self._act_new_topic, "tray_new_topic"),
+            (self._act_open, "tray_open_panel"),
+            (self._act_quit, "tray_quit"),
+        ):
+            if act is not None:
+                act.setText(i18n.t(key))
+        self._sync_toggle_label()
 
-    @staticmethod
-    def _add(menu: QMenu, text: str, slot: Callable[[], None]) -> QAction:
-        action = QAction(text, menu)
+    def _add(self, menu: QMenu, key: str, slot: Callable[[], None] | None) -> QAction | None:
+        # slot 没给就不建这一项，返回 None —— 上层据此判断要不要加分隔线、retranslate 时也跳过。
+        if slot is None:
+            return None
+        action = QAction(i18n.t(key), menu)
         action.triggered.connect(slot)
         menu.addAction(action)
         return action

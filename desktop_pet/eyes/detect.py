@@ -1,6 +1,8 @@
 # author: bdth
 # email: 2074055628@qq.com
-# 基于 ONNX 模型检测截图中的 UI 元素，返回边界框列表
+# 基于 ONNX 模型检测截图中的 UI 元素，返回边界框列表。
+# 高分屏走"全图一遍 + 分块细看"两级推理：模型输入只有 640，全屏直接缩进去小图标就没了，
+# 切块后块内目标占比大才检得出来——这是自绘窗口/游戏画面上找小按钮的关键。
 
 from __future__ import annotations
 
@@ -25,12 +27,14 @@ def _model_path():
     return None
 
 
-def download(proxy: str = "", on_progress=None) -> str:
+def download(proxy: str = "", on_progress=None, should_cancel=None) -> str:
     """可选增强：下载 UI 元素检测模型到数据目录(可写)，下完检测器自动启用。
-    返回 'ok' 或 '[失败:…]'。含网络，调用方放后台线程。on_progress(done,total) 报进度。"""
+    返回 'ok' / 'cancelled' / '[失败:…]'。含网络，调用方放后台线程。
+    on_progress(done,total) 报进度，should_cancel() 真则中途停下删半成品。"""
     from desktop_pet.settings import build_http_client
 
     target = _data_model()
+    tmp = target.with_name("ui_detect.onnx.part")
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
         client = build_http_client(proxy)
@@ -38,18 +42,25 @@ def download(proxy: str = "", on_progress=None) -> str:
             with client.stream("GET", _MODEL_URL, follow_redirects=True) as r:
                 r.raise_for_status()
                 total = int(r.headers.get("content-length", 0) or 0)
-                tmp = target.with_name("ui_detect.onnx.part")
                 done = 0
+                cancelled = False
                 with open(tmp, "wb") as f:
                     for chunk in r.iter_bytes(65536):
+                        if should_cancel is not None and should_cancel():
+                            cancelled = True
+                            break
                         f.write(chunk)
                         done += len(chunk)
                         if on_progress:
                             on_progress(done, total)
+                if cancelled:
+                    tmp.unlink(missing_ok=True)
+                    return "cancelled"
                 tmp.replace(target)
         finally:
             client.close()
     except Exception as exc:
+        tmp.unlink(missing_ok=True)
         return f"[失败: {str(exc)[:120]}]"
     global _session, _disabled
     _session, _disabled = None, False   # 重置缓存，让 _load 用新模型
@@ -64,7 +75,12 @@ _session = None
 _input_name = ""
 _imgsz = 640
 _disabled = False
+_active_provider = ""
 _lock = threading.Lock()
+
+
+def active_provider() -> str:
+    return _active_provider
 
 
 def available() -> bool:
@@ -72,7 +88,7 @@ def available() -> bool:
 
 
 def _load():
-    global _session, _input_name, _imgsz, _disabled
+    global _session, _input_name, _imgsz, _disabled, _active_provider
     if _session is not None:
         return _session
     path = _model_path()
@@ -84,7 +100,9 @@ def _load():
         try:
             import onnxruntime as ort
 
-            sess = ort.InferenceSession(str(path), providers=["CPUExecutionProvider"])
+            # DirectML(显卡)跑检测；CPU 仅作 DML 起不来时(RDP/虚拟显示等)的兜底，onnxruntime 按序自动选。
+            sess = ort.InferenceSession(str(path), providers=["DmlExecutionProvider", "CPUExecutionProvider"])
+            _active_provider = (sess.get_providers() or [""])[0]   # 实际命中的那个 —— detect 里据此调切块数
             inp = sess.get_inputs()[0]
             _input_name = inp.name
             shape = inp.shape
@@ -93,52 +111,103 @@ def _load():
             _session = sess
             return _session
         except Exception:
-            _disabled = True
+            _disabled = True   # 起不来就彻底关掉，别每帧重试拖垮主流程(下载新模型时会重置)
             return None
 
 
+_TILE_LONG = 1280
+_TILE_OVERLAP = 96
+_MAX_TILES = 8
+
+
+def _tiles(w: int, h: int, max_tiles: int = _MAX_TILES) -> list[tuple[int, int, int, int]]:
+    """把全屏切成带重叠的块(l,t,w,h)，单块够大就不切返回空。
+    重叠 96px 兜住骑在切缝上的按钮，块数封顶免得 4K 屏推理炸时间。"""
+    import math
+
+    nx, ny = math.ceil(w / _TILE_LONG), math.ceil(h / _TILE_LONG)
+    if nx * ny <= 1:
+        return []
+    # 超额就从长边方向砍一刀，尽量保持块接近方形 —— 别让某一维被切得过碎。
+    while nx * ny > max_tiles:
+        if nx >= ny:
+            nx -= 1
+        else:
+            ny -= 1
+    if nx * ny <= 1:
+        return []
+    tw, th = math.ceil(w / nx), math.ceil(h / ny)
+    out: list[tuple[int, int, int, int]] = []
+    for j in range(ny):
+        for i in range(nx):
+            l = max(0, i * tw - _TILE_OVERLAP)
+            t = max(0, j * th - _TILE_OVERLAP)
+            r = min(w, (i + 1) * tw + _TILE_OVERLAP)
+            b = min(h, (j + 1) * th + _TILE_OVERLAP)
+            out.append((l, t, r - l, b - t))
+    return out
+
+
+def _infer(sess, pil_img, off_x: int, off_y: int) -> tuple[list[tuple[float, float, float, float]], list[float]]:
+    """对一张图(整屏或一个块)跑一遍模型 → (boxes 绝对坐标, scores)。
+    letterbox 缩到 640 灰边填充，出框再按 off_x/off_y 平移回全屏坐标，留给上层统一 NMS。"""
+    import numpy as np
+    from PIL import Image
+
+    orig_w, orig_h = pil_img.width, pil_img.height
+    scale = min(_imgsz / orig_w, _imgsz / orig_h)
+    nw, nh = max(1, int(round(orig_w * scale))), max(1, int(round(orig_h * scale)))
+    resized = pil_img.convert("RGB").resize((nw, nh), Image.Resampling.BILINEAR)
+    canvas = np.full((_imgsz, _imgsz, 3), 114, dtype=np.uint8)
+    px, py = (_imgsz - nw) // 2, (_imgsz - nh) // 2
+    canvas[py : py + nh, px : px + nw] = np.array(resized)
+    blob = canvas.astype(np.float32)[None].transpose(0, 3, 1, 2) / 255.0
+
+    out = sess.run(None, {_input_name: blob})[0]
+    pred = np.squeeze(out, 0)
+    if pred.shape[0] < pred.shape[1]:
+        pred = pred.T   # 不同导出 YOLO 输出可能是 (通道,框) 转置过的 —— 统一成每行一个框
+    if pred.shape[1] < 5:
+        return [], []
+    scores = pred[:, 4:].max(axis=1)
+    keep = scores >= _CONF
+    pred, scores = pred[keep], scores[keep]
+    boxes: list[tuple[float, float, float, float]] = []
+    for cx, cy, bw, bh in pred[:, :4]:
+        l = max(0.0, (cx - bw / 2 - px) / scale) + off_x
+        t = max(0.0, (cy - bh / 2 - py) / scale) + off_y
+        r = min(float(orig_w), (cx + bw / 2 - px) / scale) + off_x
+        b = min(float(orig_h), (cy + bh / 2 - py) / scale) + off_y
+        boxes.append((l, t, r, b))
+    return boxes, [float(s) for s in scores]
+
+
 def detect(pil_image) -> list[tuple[int, int, int, int]]:
+    """检测截图里的可点元素 → [(l,t,r,b), …]。模型没就绪/出错都返回空列表，不抛。"""
     sess = _load()
     if sess is None:
         return []
     try:
         import numpy as np
 
-        orig_w, orig_h = pil_image.width, pil_image.height
-        scale = min(_imgsz / orig_w, _imgsz / orig_h)
-        nw, nh = int(round(orig_w * scale)), int(round(orig_h * scale))
-        resized = pil_image.convert("RGB").resize((nw, nh))
-        canvas = np.full((_imgsz, _imgsz, 3), 114, dtype=np.uint8)
-        px, py = (_imgsz - nw) // 2, (_imgsz - nh) // 2
-        canvas[py : py + nh, px : px + nw] = np.array(resized)
-        blob = canvas.astype(np.float32)[None].transpose(0, 3, 1, 2) / 255.0
-
-        out = sess.run(None, {_input_name: blob})[0]
-        pred = np.squeeze(out, 0)
-        if pred.shape[0] < pred.shape[1]:
-            pred = pred.T
-        if pred.shape[1] < 5:
+        w, h = pil_image.width, pil_image.height
+        boxes, scores = _infer(sess, pil_image, 0, 0)   # 先全图一遍，抓大件
+        # 再切块细看小图标；CPU 兜底时块数砍到 4，不然一次检测拖到几秒没法用
+        max_tiles = _MAX_TILES if "Dml" in _active_provider else 4
+        for tl, tt, tw, th in _tiles(w, h, max_tiles):
+            tile_boxes, tile_scores = _infer(sess, pil_image.crop((tl, tt, tl + tw, tt + th)), tl, tt)
+            boxes += tile_boxes
+            scores += tile_scores
+        if not boxes:
             return []
-        scores = pred[:, 4:].max(axis=1)
-        keep = scores >= _CONF
-        pred, scores = pred[keep], scores[keep]
-        if len(pred) == 0:
-            return []
-        cx, cy, w, h = pred[:, 0], pred[:, 1], pred[:, 2], pred[:, 3]
-        boxes = np.stack([cx - w / 2, cy - h / 2, w, h], axis=1)
-        idxs = _nms(boxes, scores, _IOU)[:_MAX_DET]
-
+        # 全图框和各块框堆一起，统一 NMS 去掉重叠/切缝处的重复检测
+        arr = np.array([[l, t, r - l, b - t] for l, t, r, b in boxes])
+        idxs = _nms(arr, np.array(scores), _IOU)[:_MAX_DET]
         out_boxes: list[tuple[int, int, int, int]] = []
         for i in idxs:
-            bx, by, bw, bh = boxes[i]
-            l = (bx - px) / scale
-            t = (by - py) / scale
-            r = (bx + bw - px) / scale
-            b = (by + bh - py) / scale
-            l, t = max(0, int(l)), max(0, int(t))
-            r, b = min(orig_w, int(r)), min(orig_h, int(b))
-            if r - l >= 6 and b - t >= 6:
-                out_boxes.append((l, t, r, b))
+            l, t, r, b = boxes[i]
+            if r - l >= 6 and b - t >= 6:   # <6px 的当噪声丢掉，点不准也没意义
+                out_boxes.append((int(l), int(t), int(r), int(b)))
         return out_boxes
     except Exception:
         return []

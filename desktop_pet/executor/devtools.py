@@ -8,6 +8,8 @@ import os
 import subprocess
 import sys
 
+from desktop_pet.executor.safety import check_blocked
+
 _NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
 _DIFF_CAP = 20_000
 _TEST_CAP = 8_000
@@ -16,6 +18,7 @@ _TEST_TIMEOUT = 300
 
 
 def _repo_cwd(path: str) -> str:
+    """把 path 归一成给 git 跑的工作目录——传文件就取它所在目录，空/相对都兜回 "."。"""
     p = (path or ".").strip() or "."
     if os.path.isdir(p):
         return p
@@ -31,6 +34,7 @@ def _run(cmd: list[str], cwd: str, timeout: int) -> subprocess.CompletedProcess:
 
 
 def _kill_tree(pid: int) -> None:
+    # /T 连子进程一起杀——pytest 常 fork 出一堆子进程，光杀父的会留下孤儿继续占资源。
     try:
         subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)],
                        capture_output=True, timeout=10, creationflags=_NO_WINDOW)
@@ -62,23 +66,39 @@ def review_diff(path: str = ".", staged: bool = False) -> str:
     if not out:
         st = _run(["git", "--no-pager", "status", "--porcelain", "-b"], cwd, 10).stdout.strip()
         tail = f"\n{st}" if st else ""
-        return ("(没有未暂存的改动)" if staged else "(工作区没有未提交的改动)") + tail
+        return ("(暂存区没有已暂存的改动)" if staged else "(工作区没有未提交的改动)") + tail
     if len(out) > _DIFF_CAP:
         out = out[:_DIFF_CAP] + f"\n…[diff 太长，截断 {len(out) - _DIFF_CAP} 字符；给 path 限定某文件再看]"
+    if not staged:
+        # git diff 天生看不见未跟踪的新文件——单独补一行提示，不然新加的文件会被以为没动过。
+        try:
+            st = _run(["git", "status", "--porcelain"], cwd, 10).stdout
+            untracked = [ln[3:] for ln in st.splitlines() if ln.startswith("?? ")]
+            if untracked:
+                shown = ", ".join(untracked[:20]) + ("…" if len(untracked) > 20 else "")
+                out += f"\n[另有 {len(untracked)} 个未跟踪的新文件不在 diff 里: {shown}]"
+        except Exception:
+            pass
     return out
 
 
 def run_tests(command: str = "", path: str = ".") -> str:
-    """跑项目测试并返回结果摘要（不给 command 就自动探测）。"""
+    """跑项目测试，不给 command 就按 pyproject/pytest.ini/package.json 自动探测。"""
     cwd = _repo_cwd(path)
     cmd = (command or "").strip()
     if not cmd:
         if any(os.path.exists(os.path.join(cwd, f)) for f in ("pyproject.toml", "pytest.ini", "setup.cfg", "tox.ini")):
-            cmd = "python -m pytest -q"
+            # 优先走仓库自己的 .venv——全局 python 多半没装 pytest，或装的是另一套依赖。
+            venv_py = os.path.join(cwd, ".venv", "Scripts", "python.exe")
+            cmd = f'"{venv_py}" -m pytest -q' if os.path.exists(venv_py) else "python -m pytest -q"
         elif os.path.exists(os.path.join(cwd, "package.json")):
             cmd = "npm test"
         else:
             return "[没探测到测试配置(pyproject/pytest.ini/package.json)——用 command 参数给我测试命令]"
+    # command 是模型自由填的——shell=True 直执行，先过黑名单拦掉 rm -rf / 改文件这类伪装成测试的命令。
+    blocked = check_blocked(cmd)
+    if blocked is not None:
+        return f"[blocked: {blocked}. 这不是测试命令——高危操作已拦截。]"
     try:
         proc = subprocess.Popen(
             cmd, cwd=cwd or None, shell=True,
