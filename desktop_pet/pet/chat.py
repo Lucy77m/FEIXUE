@@ -233,7 +233,6 @@ class SpeechText(QWidget):
 
     talking = Signal(bool)
     finished = Signal()
-    chunk_shown = Signal(str)
 
     def __init__(self) -> None:
         super().__init__()
@@ -250,11 +249,6 @@ class SpeechText(QWidget):
         self._lines: list[str] = []
         self._queue: list[str] = []
         self._phase = ""
-        self._paced = False
-        self._awaiting_advance = False
-        self._advance_pending = False
-        self._awaiting_start = False
-        self._synced = False
 
         self._type_timer = QTimer(self)
         self._type_timer.timeout.connect(self._reveal)
@@ -266,9 +260,8 @@ class SpeechText(QWidget):
         self._anchor = pet
         self._reposition()
 
-    def speak(self, chunks: list[str], paced: bool = False) -> None:
+    def speak(self, chunks: list[str]) -> None:
         self._stop()
-        self._paced = paced
         self._queue = [c for c in (_clean(s) for s in chunks) if c]
         if not self._queue:
             # 去标点后空了退回保留标点版
@@ -282,8 +275,7 @@ class SpeechText(QWidget):
     @property
     def is_speaking(self) -> bool:
         return (bool(self._queue) or self._type_timer.isActive()
-                or self._phase_timer.isActive() or self._awaiting_advance
-                or self._awaiting_start or self._synced)
+                or self._phase_timer.isActive())
 
     def interrupt(self) -> None:
         self._stop()
@@ -294,41 +286,7 @@ class SpeechText(QWidget):
         self._type_timer.stop()
         self._phase_timer.stop()
         self._phase = ""
-        self._paced = False
-        self._awaiting_advance = False
-        self._advance_pending = False
-        self._awaiting_start = False
-        self._synced = False
         self.talking.emit(False)
-
-    def advance(self) -> None:
-        """翻到下一句"""
-        if not self._paced:
-            return
-        if self._awaiting_advance:
-            self._awaiting_advance = False
-            self._do_advance()
-        else:
-            self._advance_pending = True
-            # 音频端已收声而这句还没显示完 打字机也没在跑 重启打字机把它走完
-            if (not self._awaiting_start and not self._type_timer.isActive()
-                    and self._shown < len(self._full)):
-                self._synced = False
-                self._type_timer.start(_TYPE_MS)
-
-    def _do_advance(self) -> None:
-        self._type_timer.stop()
-        self._synced = False
-        self._awaiting_start = False
-        if self._queue:
-            self._shown = 0
-            self._phase = "blank"
-            self._phase_timer.start(_BLANK_MS)
-            self.update()
-        else:
-            self.talking.emit(False)
-            self._phase = "linger"
-            self._phase_timer.start(_LINGER_MS)
 
     def _next(self) -> None:
         self._set_text(self._queue.pop(0))
@@ -336,58 +294,14 @@ class SpeechText(QWidget):
         self.show()
         self.raise_()
         self.talking.emit(True)
-        if self._paced:
-            self._awaiting_start = True
-            self._synced = False
-            self.update()
-            self.chunk_shown.emit(self._full)
-        else:
-            self._type_timer.start(_TYPE_MS)
-            self.update()
-
-    def begin_chunk(self) -> None:
-        """音频开始出声 进入音频驱动 文字只跟进度回调走
-        打字机不抢跑(比音频快会领先) 音频死了由advance兜底"""
-        if not self._paced or not self._awaiting_start:
-            return
-        self._awaiting_start = False
-        self._synced = True
-
-    def set_progress(self, shown: int) -> None:
-        """按音频播放进度显示文字 只进不退 免得和打字机打架闪字"""
-        if not self._paced:
-            return
-        self._awaiting_start = False
-        self._synced = True
-        self._type_timer.stop()
-        target = max(self._shown, min(int(shown), len(self._full)))
-        if target == self._shown and target < len(self._full):
-            return
-        self._shown = target
+        self._type_timer.start(_TYPE_MS)
         self.update()
-        if self._shown >= len(self._full):
-            self._on_display_complete()
-
-    def _on_display_complete(self) -> None:
-        """一句显示完成后的推进"""
-        self._type_timer.stop()
-        if self._awaiting_advance:
-            return
-        if self._advance_pending:
-            self._advance_pending = False
-            self._do_advance()
-        else:
-            self._awaiting_advance = True
 
     def _reveal(self) -> None:
         step = 1 if len(self._full) < _LONG_CHUNK else 2
         self._shown = min(self._shown + step, len(self._full))
         if self._shown >= len(self._full):
             self._type_timer.stop()
-            if self._paced:
-                self._on_display_complete()
-                self.update()
-                return
             self.talking.emit(False)
             if self._queue:
                 self._phase = "hold"
@@ -407,10 +321,6 @@ class SpeechText(QWidget):
             self._next()
         elif self._phase == "linger":
             self._phase = ""
-            self._paced = False
-            self._awaiting_advance = False
-            self._awaiting_start = False
-            self._synced = False
             self.hide()
             self.finished.emit()
 

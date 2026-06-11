@@ -198,7 +198,6 @@ class ControlPanel(QDialog):
                  bond_provider: Callable[[], dict] | None = None,
                  on_set_language: Callable[[str], None] | None = None,
                  hotkey_status_provider: Callable[[], dict] | None = None,
-                 on_preview_voice: Callable[[int], None] | None = None,
                  on_new_topic: Callable[[], None] | None = None,
                  intro: "tuple | None" = None) -> None:
         """设置面板 交互全靠注入的回调和provider"""
@@ -216,7 +215,6 @@ class ControlPanel(QDialog):
         self._has_bond = bond_provider is not None
         self._on_set_language = on_set_language
         self._hotkey_status_provider = hotkey_status_provider
-        self._on_preview_voice = on_preview_voice
         self._drag_offset = QPoint()
         self._lang = settings.ui_language if settings.ui_language in UI_LANGUAGES else "中文"
         self.setWindowTitle(self._t("panel_title"))
@@ -440,29 +438,9 @@ class ControlPanel(QDialog):
         self._proactive_enabled = QCheckBox(self._t("cb_proactive"))
         self._proactive_enabled.setChecked(settings.proactive_enabled)
         self._proactive_enabled.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._tts = QCheckBox(self._t("cb_tts"))
-        self._tts.setChecked(settings.tts_enabled)
-        self._tts.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._sfx = QCheckBox(self._t("cb_sfx"))
-        self._sfx.setChecked(settings.sfx_enabled)
-        self._sfx.setCursor(Qt.CursorShape.PointingHandCursor)
         self._weather_cb = QCheckBox(self._t("cb_weather"))
         self._weather_cb.setChecked(settings.weather_enabled)
         self._weather_cb.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._tts_rate = QSlider(Qt.Orientation.Horizontal)
-        self._tts_rate.setRange(-50, 50)
-        self._tts_rate.setValue(int(settings.tts_rate))
-        self._tts_rate_label = QLabel(self._fmt_rate(settings.tts_rate))
-        self._tts_rate.valueChanged.connect(lambda v: self._tts_rate_label.setText(self._fmt_rate(v)))
-        # 声音模型下载区 状态轮询
-        self._voice_dl_label = QLabel("")
-        self._voice_dl_btn = QPushButton(self._t("btn_voice_dl"), objectName="cancel")
-        self._voice_dl_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._voice_dl_btn.clicked.connect(self._on_voice_download)
-        self._voice_dl_timer = QTimer(self)
-        self._voice_dl_timer.timeout.connect(self._refresh_voice_status)
-        self._voice_dl_timer.start(600)
-        self._refresh_voice_status()
         self._proactive_level = _Segmented([(value, self._t(label_key)) for value, label_key in i18n.PROACTIVE_LABEL_KEYS])
         self._proactive_level.setCurrentData(settings.proactive_level)
         self._hk_summon = QKeySequenceEdit(QKeySequence(settings.hotkey_summon))
@@ -602,40 +580,6 @@ class ControlPanel(QDialog):
     def _on_lang_clicked(self, lang: str) -> None:
         if self._on_set_language is not None:
             self._on_set_language(lang)
-
-    @staticmethod
-    def _fmt_rate(v) -> str:
-        v = int(v)
-        return f"+{v}%" if v >= 0 else f"{v}%"
-
-    def _on_preview(self) -> None:
-        if self._on_preview_voice is not None:
-            self._on_preview_voice(int(self._tts_rate.value()))
-
-    def _on_voice_download(self) -> None:
-        from desktop_pet import voice
-        voice.start_download(self._settings.proxy)
-        self._refresh_voice_status()
-
-    def _refresh_voice_status(self) -> None:
-        """轮询声音模型状态 更新标签和按钮"""
-        from desktop_pet import voice
-        st = voice.download_status()
-        if st["state"] == "ready":
-            self._voice_dl_label.setText(self._t("voice_dl_ready"))
-            self._voice_dl_btn.hide()
-        elif st["state"] == "downloading":
-            self._voice_dl_label.setText(self._t("voice_dl_ing").format(pct=int(st["pct"] * 100)))
-            self._voice_dl_btn.setEnabled(False)
-        elif st["state"] == "error":
-            self._voice_dl_label.setText(self._t("voice_dl_err").format(msg=st["msg"]))
-            self._voice_dl_btn.setEnabled(True)
-            self._voice_dl_btn.setText(self._t("btn_voice_retry"))
-            self._voice_dl_btn.show()
-        else:
-            self._voice_dl_label.setText(self._t("voice_dl_none"))
-            self._voice_dl_btn.setEnabled(True)
-            self._voice_dl_btn.show()
 
     def _section_block(self, title: str, value: QLabel) -> QFrame:
         card = QFrame(objectName="statusCard")
@@ -799,23 +743,7 @@ class ControlPanel(QDialog):
         body.addWidget(self._field("lbl_think_level", self._think_level, "help_think_level"))
         body.addWidget(self._check_field(self._proactive_enabled, "help_proactive"))
         body.addWidget(self._field("lbl_proactive_freq", self._proactive_level, "help_proactive_freq"))
-        body.addWidget(self._check_field(self._tts, "help_tts"))
-        body.addWidget(self._check_field(self._sfx, "help_sfx"))
         body.addWidget(self._check_field(self._weather_cb, "help_weather"))
-        dl_row = QHBoxLayout()
-        dl_row.setSpacing(8)
-        dl_row.addWidget(self._voice_dl_label, 1)
-        dl_row.addWidget(self._voice_dl_btn)
-        body.addWidget(self._field("lbl_voice_model", dl_row, "help_voice_model"))
-        rate_row = QHBoxLayout()
-        rate_row.setSpacing(10)
-        rate_row.addWidget(self._tts_rate, 1)
-        rate_row.addWidget(self._tts_rate_label)
-        preview_btn = QPushButton(self._t("tts_preview"), objectName="cancel")
-        preview_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        preview_btn.clicked.connect(self._on_preview)
-        rate_row.addWidget(preview_btn)
-        body.addWidget(self._field("lbl_tts_rate", rate_row, "help_tts_rate"))
         body.addWidget(self._build_hotkeys_block())
         body.addStretch(1)
         return page
@@ -1135,10 +1063,7 @@ class ControlPanel(QDialog):
         s.enable_thinking, s.max_tokens = THINK_PRESETS[s.think_level]
         s.proactive_enabled = self._proactive_enabled.isChecked()
         s.proactive_level = self._proactive_level.currentData() or "正常"
-        s.tts_enabled = self._tts.isChecked()
-        s.sfx_enabled = self._sfx.isChecked()
         s.weather_enabled = self._weather_cb.isChecked()
-        s.tts_rate = int(self._tts_rate.value())
         s.allow_web = self._allow_web.isChecked()
         s.allow_control = self._allow_control.isChecked()
         s.allow_shell = self._allow_shell.isChecked()

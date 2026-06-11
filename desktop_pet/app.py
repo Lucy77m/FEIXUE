@@ -17,7 +17,7 @@ from PySide6.QtCore import QObject, QPoint, QThread, QTimer, Signal, Slot, qInst
 from PySide6.QtGui import QColor, QCursor, QFont, QPalette
 from PySide6.QtWidgets import QApplication
 
-from desktop_pet import i18n, journal, occasions, persona, presence, stats, voice, voice_sfx
+from desktop_pet import i18n, journal, occasions, persona, presence, stats
 from desktop_pet.audit import audit
 from desktop_pet.companions.feeding_ctrl import FeedingCtrl
 from desktop_pet.companions.playtime import Playtime
@@ -370,9 +370,6 @@ class PetApp(QObject):
     request_confirm = Signal(str)
     request_rewrite = Signal(str)
     request_clip_alchemy = Signal(str, str)
-    _voice_chunk_done = Signal(int)
-    _voice_chunk_start = Signal(int)
-    _voice_chunk_progress = Signal(int, int)
 
     def __init__(self) -> None:
         _install_qt_message_filter()
@@ -391,7 +388,6 @@ class PetApp(QObject):
         self._panel = None
         self._relang = False
         self._relang_intro = None
-        self._speak_gen = 0
         self._fired_occasions: set[str] = set()
         self._last_peek: datetime | None = None
         self._watch_inflight = False
@@ -503,10 +499,6 @@ class PetApp(QObject):
         self._speech.finished.connect(self._on_speech_finished)
         # 藏边时整只露出的判据 说话中或讲课中
         self._pet.bind_speaking(lambda: self._speech.is_speaking or self._lecturing)
-        self._speech.chunk_shown.connect(self._on_chunk_shown)
-        self._voice_chunk_done.connect(self._on_voice_chunk_done)
-        self._voice_chunk_start.connect(self._on_voice_chunk_start)
-        self._voice_chunk_progress.connect(self._on_voice_chunk_progress)
         self._input.submitted.connect(self._worker.handle)
         self._input.submitted.connect(self._on_submit)
         self._worker.reply_ready.connect(self._on_reply)
@@ -557,7 +549,6 @@ class PetApp(QObject):
         self._confirm_box.close_box()
         self._on_busy(False)
         self._speech.interrupt()
-        voice.flush()
         self._reset_lecture()
         self._todo.dismiss()
         self._requeue_timed()
@@ -765,17 +756,14 @@ class PetApp(QObject):
         self._pet.express(tag)
         self._reset_lecture()
         self._speech.interrupt()
-        voice.flush()
         segments = parse_segments(text)
-        self._speak_gen += 1   # 步进发言代次 作废上一轮tts回调
         if any(kind == "board" for kind, _ in segments):
-            # 黑板走讲课逐段流 tts只念口语段
-            voice.speak(" ".join(body for kind, body in segments if kind != "board"))
+            # 黑板走讲课逐段流
             self._start_lecture(segments)
         else:
             self._speech.place_below(self._pet)
             sents = _split_sentences(text)
-            self._speech.speak(sents, paced=voice.is_enabled())
+            self._speech.speak(sents)
 
     @Slot(str, str)
     def _on_background_done(self, task: str, result: str) -> None:
@@ -849,35 +837,6 @@ class PetApp(QObject):
         self._pet.set_state("speaking" if on else "rest")
 
     @Slot(str)
-    def _on_chunk_shown(self, chunk: str) -> None:
-        gen = self._speak_gen
-        voice.speak_one(
-            chunk,
-            on_start=lambda g=gen: self._voice_chunk_start.emit(g),
-            on_progress=lambda n, g=gen: self._voice_chunk_progress.emit(g, n),
-            on_done=lambda g=gen: self._voice_chunk_done.emit(g),
-        )
-
-    @Slot(int)
-    def _on_voice_chunk_start(self, gen: int) -> None:
-        # gen对不上是上一轮残留回调 丢掉
-        if gen != self._speak_gen:
-            return
-        self._speech.begin_chunk()
-
-    @Slot(int, int)
-    def _on_voice_chunk_progress(self, gen: int, shown: int) -> None:
-        if gen != self._speak_gen:
-            return
-        self._speech.set_progress(shown)
-
-    @Slot(int)
-    def _on_voice_chunk_done(self, gen: int) -> None:
-        if gen != self._speak_gen or not self._speech.is_speaking:
-            return
-        self._speech.advance()
-
-    @Slot(str)
     def _on_step(self, label: str) -> None:
         if self._cancelling:
             return
@@ -914,8 +873,6 @@ class PetApp(QObject):
             return
         self._wake()
         self._pet.perform(name)
-        if not self._speech.is_speaking:
-            voice_sfx.play(voice_sfx.cue_for(name))  # 配个情绪音(默认关)
 
     @Slot(bool, str)
     def _on_control(self, active: bool, label: str) -> None:
@@ -968,7 +925,6 @@ class PetApp(QObject):
         if self._meeting_mode or not self._shown or self._engaged():
             return
         self._pet.react(name)
-        voice_sfx.play(voice_sfx.cue_for(name))  # 配个情绪音(默认关)
 
     def _feed_perform(self, name: str) -> None:
         """伴生的自发表演 —— 同上，忙时不打断"""
@@ -1299,7 +1255,6 @@ class PetApp(QObject):
         self._cancel_active_task(notify=False)
         self._input.fade_out()
         self._speech.interrupt()
-        voice.flush()
         self._reset_lecture()
         self._think.stop()
         self._media.dismiss()
@@ -1435,7 +1390,6 @@ class PetApp(QObject):
         self._confirm_event.set()
         self._confirm_box.close_box()
         self._speech.interrupt()
-        voice.flush()
         self._reset_lecture()
         self._media.dismiss()
         self._todo.dismiss()
@@ -1464,7 +1418,6 @@ class PetApp(QObject):
             bond_provider=self._bond_snapshot,
             on_set_language=self._set_language,
             hotkey_status_provider=self._hotkey_status_snapshot,
-            on_preview_voice=self._preview_voice,
             on_new_topic=self._new_topic,
             intro=self._relang_intro,
         )
@@ -1494,15 +1447,9 @@ class PetApp(QObject):
             self._relang_intro = self._panel.snapshot_for_transition()
             self._panel.accept()
 
-    def _preview_voice(self, rate: int) -> None:
-        voice.preview(i18n.t("tts_sample"), rate)
-
     def _apply_settings_live(self) -> None:
         i18n.set_language(self._settings.ui_language)
         self._tray.retranslate()
-        voice.set_rate(self._settings.tts_rate)
-        voice.set_enabled(self._settings.tts_enabled)
-        voice_sfx.set_enabled(self._settings.sfx_enabled)
         sampler.set_enabled(self._settings.clip_sampler or self._settings.clip_alchemy)
         try:
             self._sensors._check_weather()  # 天气开关切换后立即生效(关→收伞 开→即查) 不必等2小时
@@ -1568,10 +1515,6 @@ class PetApp(QObject):
             except Exception:
                 pass
         self._hotkeys.stop()
-        try:
-            voice.shutdown()
-        except Exception:
-            pass
         if self._worker.is_running:
             self._worker.cancel()
         self._confirm_event.set()
@@ -1599,9 +1542,6 @@ class PetApp(QObject):
 
     def run(self) -> int:
         stats.mark_first_seen()
-        voice.set_rate(self._settings.tts_rate)
-        voice.set_enabled(self._settings.tts_enabled)
-        voice_sfx.set_enabled(self._settings.sfx_enabled)
         self._pet.express("neutral")
         self._thread.start()
         self._tray.show()
