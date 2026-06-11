@@ -373,6 +373,7 @@ class PetApp(QObject):
     _hear_partial = Signal(str)
     _hear_final = Signal(str)
     _hear_state = Signal(str)
+    _hear_submit = Signal(str, object)  # 语音定稿走信号进worker线程 直调会把llm请求卡在ui线程
 
     def __init__(self) -> None:
         _install_qt_message_filter()
@@ -519,6 +520,8 @@ class PetApp(QObject):
         self._hear_partial.connect(self._on_hear_partial)
         self._hear_final.connect(self._on_hear_final)
         self._hear_state.connect(self._on_hear_state)
+        self._hear_submit.connect(self._worker.handle)
+        self._hear_submit.connect(self._on_submit)
         self._worker.reply_ready.connect(self._on_reply)
         self._worker.proactive_reply.connect(self._on_proactive_reply)
         self._worker.busy_changed.connect(self._on_busy)
@@ -788,8 +791,7 @@ class PetApp(QObject):
         self._hear_got_final = True
         self._hearbar.finish(text)
         self._wake()
-        self._worker.handle(text, None)
-        self._on_submit(text)
+        self._hear_submit.emit(text, None)
 
     def _on_submit(self, _text: str, _attachments: object = None) -> None:
         try:
