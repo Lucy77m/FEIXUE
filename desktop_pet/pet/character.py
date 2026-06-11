@@ -336,6 +336,30 @@ _ACTIVITIES = {
     "sheep": ("sheep", 0.0, "happy_wiggle", [
         ("count", 6.0, "～"),
     ]),
+    "bouquet": ("bouquet", 0.0, "happy_wiggle", [
+        ("hold", 2.0, ""),
+        ("sniff", 5.0, "♥"),
+    ]),
+    "sweetpotato": ("sweetpotato", 0.0, "puff_up", [
+        ("hold", 1.4, ""),
+        ("eat", 5.0, "～"),
+    ]),
+    "trumpet": ("trumpet", 0.0, "happy_wiggle", [
+        ("hold", 1.4, ""),
+        ("play", 6.0, "✦"),
+    ]),
+    "frisbee": ("frisbee", 0.0, "jump_spin", [
+        ("throw", 2.0, "!"),
+        ("watch", 4.0, "✦"),
+    ]),
+    "cupcake": ("cupcake", 0.0, "celebrate", [
+        ("hold", 2.0, ""),
+        ("blow", 3.0, "✦"),
+    ]),
+    "snowglobe": ("snowglobe", 0.0, "happy_wiggle", [
+        ("hold", 1.6, ""),
+        ("shake", 5.5, "✦"),
+    ]),
 }
 _ACTIVITY_GAP = (150.0, 300.0)
 _TRAVEL = "__travel__"
