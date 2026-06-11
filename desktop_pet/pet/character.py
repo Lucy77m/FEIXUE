@@ -289,6 +289,30 @@ _ACTIVITIES = {
         ("hold", 1.4, ""),
         ("roast", 5.5, "✦"),
     ]),
+    "calligraphy": ("calligraphy", 0.0, "happy_wiggle", [
+        ("hold", 1.4, ""),
+        ("write", 6.0, "✦"),
+    ]),
+    "darts": ("darts", 0.0, "celebrate", [
+        ("aim", 2.0, "?"),
+        ("throw", 4.0, "!"),
+    ]),
+    "paperboat": ("paperboat", 0.0, "happy_wiggle", [
+        ("set", 1.6, ""),
+        ("float", 6.0, "～"),
+    ]),
+    "pizza": ("pizza", 0.0, "puff_up", [
+        ("hold", 1.4, ""),
+        ("munch", 5.0, "～"),
+    ]),
+    "spintop": ("spintop", 0.0, "jump_spin", [
+        ("hold", 1.4, ""),
+        ("spin", 6.0, "✦"),
+    ]),
+    "crane": ("crane", 0.0, "happy_wiggle", [
+        ("fold", 6.0, "～"),
+        ("done", 1.5, "✦"),
+    ]),
 }
 _ACTIVITY_GAP = (150.0, 300.0)
 _TRAVEL = "__travel__"

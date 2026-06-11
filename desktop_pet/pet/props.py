@@ -1786,6 +1786,132 @@ def draw_marshmallow(painter: QPainter, bw: float, bh: float, t: float, stage: s
     painter.drawRoundedRect(QRectF(tip.x() - bw * 0.04, tip.y() - bh * 0.05, bw * 0.08, bh * 0.10), bw * 0.02, bw * 0.02)
 
 
+def draw_calligraphy(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
+    """写书法 宣纸+毛笔 一笔笔落墨"""
+    px = bw * 0.34
+    painter.setPen(QPen(QColor(210, 200, 180), max(0.8, bw * 0.005)))
+    painter.setBrush(QColor(250, 248, 240))
+    painter.drawRect(QRectF(px - bw * 0.12, -bh * 0.12, bw * 0.24, bh * 0.40))
+    prog = stage_p if stage == "write" else 1.0
+    painter.setPen(QPen(QColor(40, 40, 45), max(2.0, bw * 0.02)))
+    painter.drawLine(QPointF(px, -bh * 0.06), QPointF(px, -bh * 0.06 + bh * 0.24 * min(1.0, prog * 2)))
+    if prog > 0.5:
+        painter.drawLine(QPointF(px - bw * 0.08, bh * 0.04),
+                         QPointF(px - bw * 0.08 + bw * 0.16 * ((prog - 0.5) * 2), bh * 0.04))
+    bxp = px + (math.sin(t * 2) * bw * 0.02 if stage == "write" else 0.0)
+    painter.setPen(QPen(QColor(150, 110, 70), max(1.4, bw * 0.012)))
+    painter.drawLine(QPointF(bxp + bw * 0.06, -bh * 0.30), QPointF(bxp, bh * 0.06))
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor(40, 40, 45))
+    painter.drawEllipse(QPointF(bxp, bh * 0.06), bw * 0.016, bw * 0.03)
+
+
+def draw_darts(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
+    """玩飞镖 镖飞向靶心"""
+    bx, by = bw * 0.40, -bh * 0.05
+    painter.setPen(Qt.PenStyle.NoPen)
+    for r, c in ((bw * 0.15, QColor(60, 70, 60)), (bw * 0.11, QColor(240, 235, 225)),
+                 (bw * 0.07, QColor(60, 70, 60)), (bw * 0.035, QColor(232, 90, 90))):
+        painter.setBrush(c)
+        painter.drawEllipse(QPointF(bx, by), r, r)
+    if stage == "throw":
+        ph = (t * 1.5) % 1.0
+        dx, dy = bw * 0.1 + (bx - bw * 0.1) * ph, bh * 0.05 - (bh * 0.05 - by) * ph
+    else:
+        dx, dy = bx + bw * 0.03, by - bw * 0.03
+    painter.setPen(QPen(QColor(80, 80, 90), max(1.4, bw * 0.012)))
+    painter.drawLine(QPointF(dx - bw * 0.06, dy + bw * 0.06), QPointF(dx, dy))
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor(232, 120, 90))
+    painter.drawPolygon(QPolygonF([QPointF(dx - bw * 0.06, dy + bw * 0.06), QPointF(dx - bw * 0.095, dy + bw * 0.04),
+                                   QPointF(dx - bw * 0.04, dy + bw * 0.095)]))
+
+
+def draw_paperboat(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
+    """放纸船 在水波上漂"""
+    cx, cy = bw * 0.32, bh * 0.14
+    bob = math.sin(t * 1.6) * bh * 0.02
+    painter.setPen(QPen(QColor(150, 195, 225, 180), max(1.0, bw * 0.008)))
+    for k in range(2):
+        painter.drawArc(QRectF(cx - bw * 0.22, cy + bh * 0.08 + k * bh * 0.05, bw * 0.18, bh * 0.04), 0, 180 * 16)
+        painter.drawArc(QRectF(cx + bw * 0.04, cy + bh * 0.08 + k * bh * 0.05, bw * 0.18, bh * 0.04), 0, 180 * 16)
+    painter.save()
+    painter.translate(0, bob)
+    painter.setPen(QPen(QColor(150, 155, 170), max(1.0, bw * 0.008)))
+    painter.setBrush(QColor(248, 250, 255))
+    painter.drawPolygon(QPolygonF([QPointF(cx - bw * 0.15, cy + bh * 0.04), QPointF(cx + bw * 0.15, cy + bh * 0.04),
+                                   QPointF(cx + bw * 0.10, cy + bh * 0.12), QPointF(cx - bw * 0.10, cy + bh * 0.12)]))
+    painter.setBrush(QColor(236, 238, 245))
+    painter.drawPolygon(QPolygonF([QPointF(cx, cy - bh * 0.12), QPointF(cx, cy + bh * 0.04), QPointF(cx - bw * 0.12, cy + bh * 0.04)]))
+    painter.setBrush(QColor(224, 228, 238))
+    painter.drawPolygon(QPolygonF([QPointF(cx, cy - bh * 0.12), QPointF(cx, cy + bh * 0.04), QPointF(cx + bw * 0.12, cy + bh * 0.04)]))
+    painter.restore()
+
+
+def draw_pizza(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
+    """吃披萨 一角 啃掉里头"""
+    cx, cy = bw * 0.30, bh * 0.04
+    if stage == "munch":
+        cy += math.sin(t * 5) * bh * 0.015
+    apex = QPointF(cx - bw * 0.02, bh * 0.26)
+    L, R = QPointF(cx - bw * 0.16, -bh * 0.10), QPointF(cx + bw * 0.16, -bh * 0.06)
+    painter.setPen(QPen(QColor(210, 170, 110), max(1.0, bw * 0.008)))
+    painter.setBrush(QColor(240, 205, 130))
+    painter.drawPolygon(QPolygonF([apex, L, R]))
+    bite = ease_out(stage_p) * 0.55 if stage == "munch" else 0.0
+    mL = QPointF(L.x() + (apex.x() - L.x()) * (0.18 + bite), L.y() + (apex.y() - L.y()) * (0.18 + bite))
+    mR = QPointF(R.x() + (apex.x() - R.x()) * (0.18 + bite), R.y() + (apex.y() - R.y()) * (0.18 + bite))
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor(248, 222, 140))
+    painter.drawPolygon(QPolygonF([apex, mL, mR]))
+    painter.setBrush(QColor(214, 80, 72))
+    for fx in (0.4, 0.62, 0.46):
+        c = QPointF(apex.x() + ((mL.x() + mR.x()) / 2 - apex.x()) * fx,
+                    apex.y() + (((L.y() + R.y()) / 2) - apex.y()) * fx)
+        painter.drawEllipse(QPointF(c.x() + (fx - 0.5) * bw * 0.1, c.y()), bw * 0.02, bw * 0.02)
+
+
+def draw_spintop(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
+    """玩陀螺 嗡嗡转"""
+    cx, cy = bw * 0.32, bh * 0.18
+    wob = math.sin(t * 3) * bw * 0.02 if stage == "spin" else 0.0
+    painter.save()
+    painter.translate(cx + wob, cy)
+    painter.rotate(math.sin(t * 1.5) * 8 if stage == "spin" else 12)
+    painter.setPen(QPen(QColor(150, 90, 60), max(1.0, bw * 0.008)))
+    painter.setBrush(QColor(222, 152, 92))
+    painter.drawChord(QRectF(-bw * 0.10, -bh * 0.12, bw * 0.20, bh * 0.18), 0, 180 * 16)
+    painter.setBrush(QColor(202, 132, 82))
+    painter.drawPolygon(QPolygonF([QPointF(-bw * 0.10, -bh * 0.03), QPointF(bw * 0.10, -bh * 0.03), QPointF(0, bh * 0.10)]))
+    if stage == "spin":
+        painter.setPen(QPen(QColor(120, 180, 230, 180), max(1.0, bw * 0.008)))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawArc(QRectF(-bw * 0.12, -bh * 0.10, bw * 0.24, bh * 0.06), 200 * 16, 80 * 16)
+    painter.restore()
+    if stage == "spin":
+        painter.setPen(QPen(QColor(180, 180, 195, 160), max(0.8, bw * 0.005)))
+        for s in (-1, 1):
+            painter.drawArc(QRectF(cx - bw * 0.16, cy - bh * 0.08, bw * 0.32, bh * 0.16), (90 + s * 40) * 16, 30 * 16)
+
+
+def draw_crane(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
+    """折纸鹤 棱角分明的小纸鹤"""
+    cx, cy = bw * 0.30, bh * 0.02
+    bob = math.sin(t * 2) * bh * 0.02 if stage == "fold" else 0.0
+    painter.save()
+    painter.translate(cx, cy + bob)
+    painter.setPen(QPen(QColor(200, 120, 150), max(0.9, bw * 0.006)))
+    painter.setBrush(QColor(245, 202, 216))
+    painter.drawPolygon(QPolygonF([QPointF(0, -bh * 0.06), QPointF(bw * 0.08, 0), QPointF(0, bh * 0.08), QPointF(-bw * 0.08, 0)]))
+    painter.setBrush(QColor(249, 217, 228))
+    painter.drawPolygon(QPolygonF([QPointF(0, 0), QPointF(-bw * 0.16, -bh * 0.10), QPointF(-bw * 0.02, -bh * 0.02)]))
+    painter.drawPolygon(QPolygonF([QPointF(0, 0), QPointF(bw * 0.16, -bh * 0.10), QPointF(bw * 0.02, -bh * 0.02)]))
+    painter.setPen(QPen(QColor(200, 120, 150), max(1.4, bw * 0.012)))
+    painter.drawLine(QPointF(-bw * 0.06, bh * 0.02), QPointF(-bw * 0.14, -bh * 0.05))
+    painter.drawLine(QPointF(bw * 0.06, bh * 0.02), QPointF(bw * 0.13, bh * 0.07))
+    painter.restore()
+
+
 # 装扮注册表 worn 穿身上 ambient 撒周围 二者互斥
 COSTUME_LAYERS = {
     "sherlock": (draw_sherlock, None),
@@ -1841,6 +1967,12 @@ COSTUME_LAYERS = {
     "noodles": (None, draw_noodles),
     "tea": (None, draw_tea),
     "marshmallow": (None, draw_marshmallow),
+    "calligraphy": (None, draw_calligraphy),
+    "darts": (None, draw_darts),
+    "paperboat": (None, draw_paperboat),
+    "pizza": (None, draw_pizza),
+    "spintop": (None, draw_spintop),
+    "crane": (None, draw_crane),
 }
 COSTUMES = frozenset(COSTUME_LAYERS)
 WORN_COSTUMES = frozenset(name for name, (worn, _ambient) in COSTUME_LAYERS.items() if worn)
