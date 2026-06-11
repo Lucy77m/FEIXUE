@@ -41,6 +41,7 @@ from desktop_pet.pet.control_panel import ControlPanel
 from desktop_pet.pet.media import MediaFrame
 from desktop_pet.pet import feeding
 from desktop_pet.pet.confirm import ConfirmBox
+from desktop_pet.pet.control_hint import ControlHint
 from desktop_pet.pet.entrance import next_entrance_kind
 from desktop_pet.pet.tray import Tray
 from desktop_pet.pet.window import PetWindow
@@ -172,6 +173,7 @@ class AgentWorker(QObject):
     plan_changed = Signal(str)
     media_requested = Signal(str, str, str)
     perform_requested = Signal(str)
+    control_active = Signal(bool, str)
     background_done = Signal(str, str)
     rewrite_ready = Signal(str)
     analysis_ready = Signal(str)
@@ -197,7 +199,7 @@ class AgentWorker(QObject):
                     text, attachments=attachments,
                     on_step=self.step.emit, on_think=self.think_text.emit,
                     on_plan=self.plan_changed.emit, on_media=self.media_requested.emit,
-                    on_perform=self.perform_requested.emit,
+                    on_perform=self.perform_requested.emit, on_control=self.control_active.emit,
                 )
             except Exception as exc:
                 reply = _friendly_error(exc)
@@ -251,7 +253,7 @@ class AgentWorker(QObject):
                 reply = self._agent.run_timed_task(
                     task, on_step=self.step.emit, on_think=self.think_text.emit,
                     on_plan=self.plan_changed.emit, on_media=self.media_requested.emit,
-                    on_perform=self.perform_requested.emit,
+                    on_perform=self.perform_requested.emit, on_control=self.control_active.emit,
                 )
             except Exception as exc:
                 reply = _friendly_error(exc)
@@ -404,9 +406,15 @@ class PetApp(QObject):
         self._confirm_box = ConfirmBox()
         self._thought = ThoughtBubble()
         self._think = ThoughtBubbles()
+        self._control_hint = ControlHint()
+        # 操作浮层延迟收起：连续操作不闪、单次操作也留够时间让你看见
+        self._control_hide_timer = QTimer(self)
+        self._control_hide_timer.setSingleShot(True)
+        self._control_hide_timer.timeout.connect(self._control_hint.hide_hint)
 
         from desktop_pet.eyes import capture
-        for _w in (self._pet, self._speech, self._input, self._board, self._todo, self._media, self._confirm_box, self._thought, self._think):
+        for _w in (self._pet, self._speech, self._input, self._board, self._todo, self._media,
+                   self._confirm_box, self._thought, self._think, self._control_hint):
             capture.register_own_window(int(_w.winId()))
 
         self._lecturing = False
@@ -493,6 +501,7 @@ class PetApp(QObject):
         self._worker.plan_changed.connect(self._on_plan)
         self._worker.media_requested.connect(self._on_media)
         self._worker.perform_requested.connect(self._on_perform)
+        self._worker.control_active.connect(self._on_control)
         self._worker.background_done.connect(self._on_background_done)
         self.request_reminder.connect(self._worker.deliver_reminder)
         self.request_task.connect(self._worker.run_task)
@@ -887,6 +896,19 @@ class PetApp(QObject):
         self._wake()
         self._pet.perform(name)
 
+    @Slot(bool, str)
+    def _on_control(self, active: bool, label: str) -> None:
+        """agent 借用鼠标/键盘时 顶部弹"正在帮你操作"浮层 让你心里有数"""
+        if active:
+            if not self._shown:
+                return  # 关机隐藏时不弹
+            self._control_hide_timer.stop()
+            screen = (self._app.screenAt(QCursor.pos()) or self._app.primaryScreen()).availableGeometry()
+            self._control_hint.show_hint(label, screen)
+        else:
+            # 留~0.9s 让你看清；紧接着的下一次操作会取消这次收起 不闪
+            self._control_hide_timer.start(900)
+
     def _confirm(self, action: str) -> bool:
         # 工人线程里发信号让gui弹确认框 阻塞等回答 超时按否
         self._confirm_result = False
@@ -933,6 +955,8 @@ class PetApp(QObject):
         else:
             self._think.stop()
             self._todo.dismiss()
+            self._control_hide_timer.stop()
+            self._control_hint.hide_hint()  # 回合结束兜底收起操作浮层 防卡住
             self._timed_inflight = False
             if not self._cancelling:   # 取消态不清 _inflight_timed 留给requeue
                 self._inflight_timed = None
@@ -1379,6 +1403,8 @@ class PetApp(QObject):
         self._reset_lecture()
         self._media.dismiss()
         self._todo.dismiss()
+        self._control_hide_timer.stop()
+        self._control_hint.hide_hint()
         self._input.fade_out()
         self._pending_bg.clear()
         self._requeue_timed()

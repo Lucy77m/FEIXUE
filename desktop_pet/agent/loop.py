@@ -82,6 +82,12 @@ _SHELL_TOOLS = frozenset({
     "run_shell", "check_shell", "run_python", "run_skill", "create_skill", "edit_skill", "write_file", "edit_file",
     "review_diff", "run_tests",
 })
+# 真正会接管鼠标/键盘去操作电脑的工具 → 执行期间弹浮层让用户知道（值是给用户看的动作名）
+_INPUT_TOOL_HINT = {
+    "click": "点击", "double_click": "双击", "right_click": "右键点击",
+    "move_mouse": "移动鼠标", "scroll": "滚动页面",
+    "type_text": "输入文字", "press_keys": "按快捷键", "act_element": "操作界面元素",
+}
 _MAX_PARALLEL_SUBAGENTS = 4
 _MAX_BG_TASKS = 3
 _BG_TASK_SEMAPHORE = threading.Semaphore(_MAX_BG_TASKS)
@@ -510,12 +516,13 @@ class Agent:
         on_plan: Callable[[str], None] | None = None,
         on_media: Callable[[str, str, str], None] | None = None,
         on_perform: Callable[[str], bool] | None = None,
+        on_control: Callable[[bool, str], None] | None = None,
     ) -> str:
         """对外入口 跑一轮对话回最终文本"""
         try:
             return self._run_impl(
                 user_message, attachments, on_step=on_step, on_think=on_think,
-                on_plan=on_plan, on_media=on_media, on_perform=on_perform,
+                on_plan=on_plan, on_media=on_media, on_perform=on_perform, on_control=on_control,
             )
         finally:
             if self._depth == 0:
@@ -530,11 +537,17 @@ class Agent:
         on_plan: Callable[[str], None] | None = None,
         on_media: Callable[[str, str, str], None] | None = None,
         on_perform: Callable[[str], bool] | None = None,
+        on_control: Callable[[bool, str], None] | None = None,
     ) -> str:
         """核心多步循环 执行工具调用直到纯文本回复或撞步数顶"""
         def step(message: str) -> None:
             if on_step is not None:
                 on_step(message)
+
+        def control(active: bool, label: str) -> None:
+            # 借用/归还鼠标键盘时通知 UI 弹/收浮层
+            if on_control is not None:
+                on_control(active, label)
 
         def think(fragment: str) -> None:
             if on_think is not None:
@@ -677,10 +690,17 @@ class Agent:
                     if denial is not None:
                         results[call.id] = tools.ToolResult(denial)
                     else:
-                        results[call.id] = tools.dispatch(
-                            call.function.name, arguments,
-                            shell_session=self._shell, py_session=self._python,
-                        )
+                        hint = _INPUT_TOOL_HINT.get(call.function.name)
+                        if hint is not None:
+                            control(True, hint)  # 要动你的鼠标/键盘了 弹浮层
+                        try:
+                            results[call.id] = tools.dispatch(
+                                call.function.name, arguments,
+                                shell_session=self._shell, py_session=self._python,
+                            )
+                        finally:
+                            if hint is not None:
+                                control(False, "")  # 这一下操作完了 收浮层（去抖留显交给UI）
                         self._note_file(call.function.name, arguments)
 
             for call, arguments in parsed:
@@ -1107,13 +1127,14 @@ class Agent:
         on_plan: Callable[[str], None] | None = None,
         on_media: Callable[[str, str, str], None] | None = None,
         on_perform: Callable[[str], bool] | None = None,
+        on_control: Callable[[bool, str], None] | None = None,
     ) -> str:
         """跑定时任务 跑完还原对话历史"""
         snapshot = list(self._messages)
         try:
             return self.run(
                 prompts.timed_task_nudge(task), on_step=on_step, on_think=on_think,
-                on_plan=on_plan, on_media=on_media, on_perform=on_perform,
+                on_plan=on_plan, on_media=on_media, on_perform=on_perform, on_control=on_control,
             )
         finally:
             self._messages = snapshot
