@@ -55,8 +55,16 @@ cb_partial = None   # (text) 说话中的实时文本
 cb_final = None     # (text) 一句定稿
 cb_state = None     # (state) idle/listening/wake_hit
 cb_tick = None      # (remaining_s) 采集中剩余秒数 给浮条画倒计时
+cb_busy = None      # app注入 返回True=正在思考执行任务 热键和唤醒词都无视
 
 _capturing = False  # 正在采集一句 防热键重入
+
+
+def _app_busy() -> bool:
+    try:
+        return bool(cb_busy()) if cb_busy is not None else False
+    except Exception:
+        return False
 
 
 def _path(key: str):
@@ -176,8 +184,8 @@ def _warmup_async() -> None:
 
 
 def start_talk() -> None:
-    """热键按下 开始听 采集中重按直接忽略 防状态打架"""
-    if not _enabled or _capturing:
+    """热键按下 开始听 采集中重按和它正忙时直接忽略"""
+    if not _enabled or _capturing or _app_busy():
         return
     _talk_end.clear()
     _talk_req.set()
@@ -343,6 +351,8 @@ def _loop() -> None:
                     r = kws.get_result(ks)
                     if r:
                         kws.reset_stream(ks)
+                        if _app_busy():
+                            continue  # 它正忙 喊名字也装没听见
                         talking_src = "wake"
                         _emit(cb_state, "wake_hit")
                         break

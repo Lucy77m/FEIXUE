@@ -503,6 +503,8 @@ class PetApp(QObject):
         hearing.cb_final = self._hear_final.emit
         hearing.cb_state = self._hear_state.emit
         hearing.cb_tick = self._hear_tick.emit
+        # 思考执行中热键和唤醒词都无视 hearing线程会来问
+        hearing.cb_busy = lambda: self._busy or self._worker.is_running
         self._connect()
 
     def _connect(self) -> None:
