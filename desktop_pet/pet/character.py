@@ -171,6 +171,27 @@ _ACTIVITIES = {
         ("blow", 2.2, "～"),
         ("watch", 4.0, "✦"),
     ]),
+    "guitar": ("guitar", 0.0, "happy_wiggle", [
+        ("tune", 1.6, "?"),
+        ("strum", 6.0, "✦"),
+    ]),
+    "watermelon": ("watermelon", 0.0, "puff_up", [
+        ("hold", 1.4, ""),
+        ("bite", 5.0, "～"),
+    ]),
+    "fireworks": ("fireworks", 0.0, "celebrate", [
+        ("launch", 2.0, "～"),
+        ("burst", 5.0, "✦"),
+    ]),
+    "yoyo": ("yoyo", 0.0, "jump_spin", [
+        ("throw", 1.6, ""),
+        ("sleep", 3.5, "✦"),
+        ("back", 1.4, "!"),
+    ]),
+    "painting": ("painting", 0.0, "celebrate", [
+        ("setup", 1.6, ""),
+        ("paint", 6.0, "✦"),
+    ]),
 }
 _ACTIVITY_GAP = (150.0, 300.0)
 _TRAVEL = "__travel__"

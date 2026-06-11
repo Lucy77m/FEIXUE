@@ -1119,6 +1119,129 @@ def draw_dandelion(painter: QPainter, bw: float, bh: float, t: float, stage: str
             painter.drawEllipse(QPointF(sx, sy), bw * 0.012, bw * 0.012)
 
 
+def draw_guitar(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
+    """抱吉他 调弦->扫弦(带音符)"""
+    painter.save()
+    painter.translate(bw * 0.04, bh * 0.10)
+    painter.rotate(-22)
+    painter.setPen(QPen(QColor(150, 100, 60), max(1.0, bw * 0.008)))
+    painter.setBrush(QColor(198, 142, 86))
+    painter.drawEllipse(QPointF(0, bh * 0.06), bw * 0.16, bh * 0.17)
+    painter.drawEllipse(QPointF(0, -bh * 0.05), bw * 0.115, bh * 0.12)
+    painter.setBrush(QColor(82, 56, 40))
+    painter.drawEllipse(QPointF(0, bh * 0.03), bw * 0.045, bw * 0.045)
+    painter.setBrush(QColor(120, 82, 52))
+    painter.drawRect(QRectF(-bw * 0.018, -bh * 0.42, bw * 0.036, bh * 0.34))
+    painter.drawRoundedRect(QRectF(-bw * 0.032, -bh * 0.48, bw * 0.064, bh * 0.07), 2, 2)
+    sh = math.sin(t * 13) * bw * 0.005 if stage == "strum" else 0.0
+    painter.setPen(QPen(QColor(232, 226, 214, 200), max(0.6, bw * 0.004)))
+    for k in range(3):
+        painter.drawLine(QPointF(-bw * 0.012 + k * bw * 0.012, -bh * 0.40),
+                         QPointF(-bw * 0.012 + k * bw * 0.012 + sh, bh * 0.14))
+    painter.restore()
+    if stage == "strum":
+        draw_note(painter, QPointF(bw * 0.30, -bh * 0.22 + math.sin(t * 3) * bh * 0.04),
+                  bw, bh, QColor(150, 130, 210), double=False)
+
+
+def draw_watermelon(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
+    """举西瓜片 一口口啃(红瓤往尖端缩)"""
+    cx = bw * 0.30
+    apex = QPointF(cx - bw * 0.02, bh * 0.30)      # 拿在手里的尖角(朝下)
+    L = QPointF(cx - bw * 0.18, -bh * 0.10)
+    R = QPointF(cx + bw * 0.16, -bh * 0.06)
+    painter.setPen(QPen(QColor(60, 130, 70), max(1.1, bw * 0.009)))
+    painter.setBrush(QColor(96, 174, 100))         # 绿皮
+    painter.drawPolygon(QPolygonF([apex, L, R]))
+    painter.setPen(QPen(QColor(225, 240, 220), max(1.0, bw * 0.007)))
+    painter.setBrush(QColor(243, 250, 240))        # 白边
+    painter.drawPolygon(QPolygonF([apex,
+                                   QPointF(L.x() + (apex.x() - L.x()) * 0.14, L.y() + (apex.y() - L.y()) * 0.14),
+                                   QPointF(R.x() + (apex.x() - R.x()) * 0.14, R.y() + (apex.y() - R.y()) * 0.14)]))
+    eaten = ease_out(stage_p) * 0.62 if stage == "bite" else 0.0
+    mL = QPointF(L.x() + (apex.x() - L.x()) * (0.22 + eaten), L.y() + (apex.y() - L.y()) * (0.22 + eaten))
+    mR = QPointF(R.x() + (apex.x() - R.x()) * (0.22 + eaten), R.y() + (apex.y() - R.y()) * (0.22 + eaten))
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor(233, 88, 96))          # 红瓤
+    painter.drawPolygon(QPolygonF([apex, mL, mR]))
+    painter.setBrush(QColor(58, 44, 40))           # 籽
+    for fx, fy in ((0.34, 0.34), (0.55, 0.40), (0.40, 0.58)):
+        sx = apex.x() + (((mL.x() + mR.x()) / 2) - apex.x()) * fy
+        sy = apex.y() + ((((L.y() + R.y()) / 2)) - apex.y()) * fy
+        painter.drawEllipse(QPointF(sx + (fx - 0.45) * bw * 0.18, sy), bw * 0.011, bw * 0.017)
+
+
+def draw_fireworks(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
+    """放烟花 升空->炸开"""
+    if stage == "launch":
+        y = bh * 0.1 - bh * 1.3 * stage_p
+        painter.setPen(QPen(QColor(255, 210, 120), max(1.4, bw * 0.012)))
+        painter.drawLine(QPointF(bw * 0.12, y + bh * 0.12), QPointF(bw * 0.12, y))
+        return
+    cols = [QColor(255, 140, 120), QColor(140, 200, 255), QColor(255, 225, 130), QColor(190, 165, 255)]
+    for bi, (bx, by, off) in enumerate(((-bw * 0.05, -bh * 1.18, 0.0), (bw * 0.40, -bh * 0.82, 0.45))):
+        p = (stage_p + off) % 1.0
+        rad = bw * 0.05 + p * bw * 0.42
+        col = QColor(cols[bi % len(cols)])
+        col.setAlpha(int(225 * (1.0 - p)))
+        for a in range(12):
+            ang = a * math.pi / 6
+            painter.setPen(QPen(col, max(1.0, bw * 0.008)))
+            painter.drawLine(QPointF(bx + math.cos(ang) * rad * 0.42, by + math.sin(ang) * rad * 0.42),
+                             QPointF(bx + math.cos(ang) * rad, by + math.sin(ang) * rad))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(col)
+            painter.drawEllipse(QPointF(bx + math.cos(ang) * rad, by + math.sin(ang) * rad), bw * 0.015, bw * 0.015)
+
+
+def draw_yoyo(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
+    """玩悠悠球 抛->空转->收"""
+    hand = QPointF(bw * 0.28, bh * 0.04)
+    if stage == "throw":
+        d = ease_out(stage_p)
+    elif stage == "sleep":
+        d = 1.0 + math.sin(t * 2.2) * 0.04
+    else:  # back
+        d = 1.0 - ease_in(stage_p)
+    yx, yy = hand.x() + bw * 0.02, hand.y() + bh * (0.12 + 0.52 * d)
+    painter.setPen(QPen(QColor(160, 160, 175), max(0.8, bw * 0.005)))
+    painter.drawLine(hand, QPointF(yx, yy))
+    painter.save()
+    painter.translate(yx, yy)
+    painter.rotate((t * 420) % 360)
+    painter.setPen(QPen(QColor(60, 110, 170), max(1.0, bw * 0.008)))
+    painter.setBrush(QColor(88, 152, 222))
+    painter.drawEllipse(QPointF(0, 0), bw * 0.09, bw * 0.09)
+    painter.setPen(QPen(QColor(255, 255, 255, 160), max(1.0, bw * 0.01)))
+    painter.drawLine(QPointF(-bw * 0.05, 0), QPointF(bw * 0.05, 0))
+    painter.restore()
+
+
+def draw_painting(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
+    """支画架画画 涂涂抹抹"""
+    ex = bw * 0.38
+    painter.setPen(QPen(QColor(150, 110, 70), max(1.2, bw * 0.01)))
+    painter.drawLine(QPointF(ex - bw * 0.10, bh * 0.34), QPointF(ex, -bh * 0.28))
+    painter.drawLine(QPointF(ex + bw * 0.10, bh * 0.34), QPointF(ex, -bh * 0.28))
+    painter.drawLine(QPointF(ex + bw * 0.05, bh * 0.34), QPointF(ex, -bh * 0.02))
+    painter.setPen(QPen(QColor(170, 150, 120), max(1.0, bw * 0.008)))
+    painter.setBrush(QColor(250, 248, 242))
+    painter.drawRect(QRectF(ex - bw * 0.14, -bh * 0.24, bw * 0.28, bh * 0.32))
+    painter.setPen(Qt.PenStyle.NoPen)
+    k = stage_p if stage == "paint" else 1.0
+    for col, dx, dy in ((QColor(232, 110, 120), -0.04, -0.06), (QColor(120, 180, 230), 0.05, 0.02),
+                        (QColor(250, 205, 110), -0.02, 0.08)):
+        painter.setBrush(col)
+        painter.drawEllipse(QPointF(ex + dx * bw, -bh * 0.08 + dy * bh), bw * 0.032 * k, bw * 0.032 * k)
+    if stage == "paint":
+        bxp = ex + math.sin(t * 4) * bw * 0.05
+        painter.setPen(QPen(QColor(150, 110, 70), max(1.2, bw * 0.01)))
+        painter.drawLine(QPointF(bxp, -bh * 0.04), QPointF(bxp + bw * 0.12, bh * 0.12))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(232, 110, 120))
+        painter.drawEllipse(QPointF(bxp, -bh * 0.05), bw * 0.018, bw * 0.026)
+
+
 # 装扮注册表 worn 穿身上 ambient 撒周围 二者互斥
 COSTUME_LAYERS = {
     "sherlock": (draw_sherlock, None),
@@ -1145,6 +1268,11 @@ COSTUME_LAYERS = {
     "bubbletea": (None, draw_bubbletea),
     "tanghulu": (None, draw_tanghulu),
     "dandelion": (None, draw_dandelion),
+    "guitar": (draw_guitar, None),
+    "watermelon": (draw_watermelon, None),
+    "fireworks": (None, draw_fireworks),
+    "yoyo": (None, draw_yoyo),
+    "painting": (None, draw_painting),
 }
 COSTUMES = frozenset(COSTUME_LAYERS)
 WORN_COSTUMES = frozenset(name for name, (worn, _ambient) in COSTUME_LAYERS.items() if worn)
