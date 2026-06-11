@@ -657,8 +657,9 @@ class BlobPet:
             self._blanket_e = min(1.0, self._blanket_e + dt * 1.6)
         else:
             self._blanket_e = max(0.0, self._blanket_e - dt * 2.0)
-        # 演出时环境装饰平滑退场
-        if self._performing:
+        # 只有真正"演出"(小品/反应/拖拽/藏起)时环境装饰才平滑退场——
+        # 说话/思考不算，否则伞之类的持续装饰会随每句话一闪一闪
+        if self._dragging or self._hidden or self._react is not None or self._activity is not None:
             self._calm_e = max(0.0, self._calm_e - dt * 3.5)
         else:
             self._calm_e = min(1.0, self._calm_e + dt * 2.0)
