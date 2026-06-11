@@ -84,6 +84,11 @@ class MemoryStore:
                     confidence REAL NOT NULL DEFAULT 1.0,
                     source     TEXT NOT NULL DEFAULT 'observed'
                 );
+                CREATE TABLE IF NOT EXISTS opinions (
+                    id      INTEGER PRIMARY KEY AUTOINCREMENT,
+                    content TEXT NOT NULL,
+                    ts      TEXT NOT NULL
+                );
                 """
             )
             self._conn.commit()
@@ -120,9 +125,41 @@ class MemoryStore:
 
     def wipe(self) -> None:
         with self._lock:
-            for table in ("profile", "experiences", "env"):
+            for table in ("profile", "experiences", "env", "opinions"):
                 self._conn.execute(f"DELETE FROM {table}")
             self._conn.commit()
+
+    _OPINION_KEEP = 14
+
+    def add_opinion(self, content: str) -> str:
+        """记一条它自己的看法 近似重复就刷新时间 超量裁老的"""
+        content = (content or "").strip()
+        if not content:
+            return "(nothing)"
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, content FROM opinions ORDER BY id DESC LIMIT 30"
+            ).fetchall()
+            for rid, text in rows:
+                if SequenceMatcher(None, content, text).ratio() >= _DEDUP_RATIO:
+                    self._conn.execute("UPDATE opinions SET content = ?, ts = ? WHERE id = ?",
+                                       (content, _now(), rid))
+                    self._conn.commit()
+                    return f"(refined an existing take: {content})"
+            self._conn.execute("INSERT INTO opinions(content, ts) VALUES (?, ?)", (content, _now()))
+            # 只留最近若干条
+            self._conn.execute(
+                "DELETE FROM opinions WHERE id NOT IN "
+                "(SELECT id FROM opinions ORDER BY id DESC LIMIT ?)", (self._OPINION_KEEP,))
+            self._conn.commit()
+        return f"Formed a take: {content}"
+
+    def opinions(self, n: int = 4) -> list[str]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT content FROM opinions ORDER BY id DESC LIMIT ?", (int(n),)
+            ).fetchall()
+        return [str(r[0]) for r in rows]
 
     def forget(self, query: str) -> str:
         """按关键词删三张表里命中的记忆"""
@@ -341,7 +378,8 @@ class MemoryStore:
         env_facts = self.recall_env(query or "")
         # 核心记忆常驻——形成性时刻，不被当轮召回冲掉，去重已展示的
         core = [c for c in self.core_memories(2) if c not in experiences]
-        if not prefs and not experiences and not env_facts and not core:
+        takes = self.opinions(4)
+        if not prefs and not experiences and not env_facts and not core and not takes:
             return ""
         lines = ["[Long-term memory about this user]"]
         if core:
@@ -356,6 +394,10 @@ class MemoryStore:
         if env_facts:
             lines.append("Environment memory (cached, may be stale; if acting on it fails, re-verify and update via note_env):")
             lines += [f"- {fact}" for fact in env_facts]
+        if takes:
+            lines.append("Your own takes (views YOU'VE formed about things in their world — they're yours, "
+                         "voice them naturally when relevant; you're allowed to disagree, but stay mild, not contrarian for its own sake):")
+            lines += [f"- {t}" for t in takes]
         return "\n".join(lines)
 
     def _query_vector(self, query: str) -> list[float] | None:

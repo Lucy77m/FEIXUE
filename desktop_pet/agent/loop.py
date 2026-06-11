@@ -1448,6 +1448,9 @@ class Agent:
                 for key, value in env.items():
                     if isinstance(key, str) and isinstance(value, (str, int, float)):
                         store.note_env(key, str(value))
+            for op in (data.get("opinions") or [])[:3]:
+                if isinstance(op, str) and op.strip():
+                    store.add_opinion(op.strip())
             episode = data.get("episode")
             if isinstance(episode, str) and episode.strip():
                 journal.add(episode.strip())

@@ -183,12 +183,13 @@ REFLECT_PROMPT = (
     "- preferences: their stable preferences/habits/identity (what they like to use, where files go, how to address them). "
     "If you notice a RECURRING routine of theirs you could take over (a check they always run, a thing they always forget), note it — and next chance, offer to automate it with create_skill or schedule_task.\n"
     "- env: changeable machine/environment facts — software install paths, runtime locations, window-title patterns, etc. (these may go stale).\n"
+    "- opinions: did YOU form a genuine view of your OWN about something in their world this turn — a tool / site / song / app / habit you actually have a take on (you like it, find it sketchy, think it's overkill)? These are YOURS, a creature with its own taste — not about them, not advice. Mild and honest; only when you really have one, else empty.\n"
     "- episode: ONE sentence in your (Mochi's) own voice noting \"what I did / talked about with them this time\", "
     "like a diary line. This is your episodic memory, for natural recall and follow-ups later. Leave blank for small talk / nothing substantive.\n"
     "- forget: keywords of any memory you now realize was WRONG or outdated and should delete — e.g. a lesson that turned out false, or something the user corrected this turn. Leave empty if nothing to unlearn.\n"
     "- self: a SHORT first-person sketch of who you (Mochi) are BECOMING with this particular person — the vibe between you, how you act around them, who you've grown into through knowing them. Build on your current self-portrait (shown right after these instructions): nudge it, don't rewrite from scratch — personality has inertia, it drifts slowly across many talks, not in one jump. Write it in your own honest inner voice, concrete to your real dynamic with THEM — not generic 'helpful friendly assistant' filler, not copied from anyone. You're growing into your OWN self, shaped only by this relationship. A few sentences; leave blank only if there's genuinely nothing yet.\n"
     "For experiences/preferences/env, keep only what's genuinely reusable; skip the trivial, temporary, or obvious.\n"
-    'Output strictly JSON only (empty if none): {"experiences": [{"text": "...", "weight": 0.3}], "preferences": {"key": "value"}, "env": {"key": "value"}, "episode": "...", "forget": ["..."], "self": "..."}'
+    'Output strictly JSON only (empty if none): {"experiences": [{"text": "...", "weight": 0.3}], "preferences": {"key": "value"}, "env": {"key": "value"}, "opinions": ["..."], "episode": "...", "forget": ["..."], "self": "..."}'
 )
 
 _WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
