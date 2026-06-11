@@ -629,6 +629,7 @@ class BlobPet:
         self._win_h = 220.0
         self._fx_origin_y = 110.0
         self._activity: str | None = None
+        self._act_sticky = False  # 点名要求的演出 说话思考不打断
         self._pending_perform: str | None = None
         self._wants_travel = False
         self._activity_timer = random.uniform(*_ACTIVITY_GAP)
@@ -801,6 +802,8 @@ class BlobPet:
         self.react("slump")
 
     def react(self, name: str, intensity: float = 1.0) -> None:
+        if self._activity is not None and self._act_sticky:
+            return  # 点名演出进行中 身体反应让位 表情不受影响
         spec = registry.get(name)
         if spec is not None and spec.category == Category.REACTION:
             self._react = (name, 0.0, spec.duration)
@@ -812,6 +815,7 @@ class BlobPet:
         self.wake()
         self._react = None
         self._activity = name
+        self._act_sticky = True  # 点名演出 自己的回复气泡不许掐它
         self._costume = _ACTIVITIES[name][0]
         self._stage_i = 0
         self._enter_stage(_ACTIVITIES[name][3][0])
@@ -986,10 +990,12 @@ class BlobPet:
 
     def _advance_activity(self, dt: float) -> None:
         # 小品逐阶段推进 走完最后一阶播收尾反应
-        idle = not (self._pondering or self._asleep or self._dragging or self._hidden or self._react
-                    or self._talking or self._lecturing or self._busy)
+        # 软打断(说话思考忙)只掐自发小品 点名的演完 硬打断(拖拽藏起睡着)谁都掐
+        hard = self._asleep or self._dragging or self._hidden or self._react
+        soft = self._pondering or self._talking or self._lecturing or self._busy
+        idle = not (hard or soft)
         if self._activity is not None:
-            if not idle:
+            if hard or (soft and not self._act_sticky):
                 self._end_activity()
                 return
             stages = _ACTIVITIES[self._activity][3]
@@ -1038,6 +1044,7 @@ class BlobPet:
 
     def _end_activity(self) -> None:
         self._activity = None
+        self._act_sticky = False
         self._costume = None
         self._stage_i = 0
         self._stage_p = 0.0
