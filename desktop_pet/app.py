@@ -503,8 +503,10 @@ class PetApp(QObject):
         hearing.cb_final = self._hear_final.emit
         hearing.cb_state = self._hear_state.emit
         hearing.cb_tick = self._hear_tick.emit
-        # 思考执行中热键和唤醒词都无视 hearing线程会来问
-        hearing.cb_busy = lambda: self._busy or self._worker.is_running
+        # 思考执行中或关机隐藏时 热键和唤醒词都无视 hearing线程会来问
+        hearing.cb_busy = lambda: self._busy or self._worker.is_running or not self._shown
+        # 开会时只屏蔽唤醒词 热键是用户主动按的仍然放行
+        hearing.cb_wake_block = lambda: self._meeting_mode
         self._connect()
 
     def _connect(self) -> None:
@@ -815,6 +817,7 @@ class PetApp(QObject):
             pass
         selector.set_emotion(*emotion.snapshot())
         self._wake()
+        self._pet.yield_performance()  # 点名演出让位 新消息要摆思考姿势
         self._todo.dismiss()
         self._just_returned = False
         stats.bump_interactions()

@@ -841,6 +841,10 @@ class BlobPet:
     def clear_pending(self) -> None:
         self._pending_perform = None
 
+    def yield_performance(self) -> None:
+        """用户来新消息 点名演出退掉粘性 让位给思考姿势"""
+        self._act_sticky = False
+
     def perform(self, name: str) -> bool:
         """点名小品或反应 入队等空闲再播"""
         if name in _ACTIVITIES or (

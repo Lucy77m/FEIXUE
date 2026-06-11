@@ -211,6 +211,9 @@ class PetWindow(QWidget):
     def clear_pending(self) -> None:
         self._blob.clear_pending()
 
+    def yield_performance(self) -> None:
+        self._blob.yield_performance()
+
     def express(self, tag: str) -> None:
         """情绪 tag 落成表情 反应小品和偶尔换装"""
         self._blob.set_expression(_TAG_EXPRESSION.get(tag, "neutral"))

@@ -87,12 +87,15 @@ class HearBar(QWidget):
         self.hide()
 
     def _relayout(self) -> None:
+        from PySide6.QtGui import QCursor
         fm = QFontMetrics(self._font)
         shown = self._text or i18n.t("hear_listening")
         text_w = min(fm.horizontalAdvance(shown) + 8, _MAX_W)
         w = max(_MIN_W, text_w + _PAD_H * 2 + int(_DOT_R * 2) + _DOT_GAP)
         h = fm.height() + _PAD_V * 2
-        screen = QApplication.primaryScreen().availableGeometry()
+        # 说话的人在哪块屏 浮条就贴哪块屏 找不到退回主屏
+        scr = QApplication.screenAt(QCursor.pos()) or QApplication.primaryScreen()
+        screen = scr.availableGeometry()
         self.resize(w, h)
         self.move(screen.center().x() - w // 2, screen.bottom() - h - _BOTTOM_GAP)
         self.update()

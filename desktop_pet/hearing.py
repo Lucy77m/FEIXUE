@@ -56,13 +56,22 @@ cb_final = None     # (text) 一句定稿
 cb_state = None     # (state) idle/listening/wake_hit
 cb_tick = None      # (remaining_s) 采集中剩余秒数 给浮条画倒计时
 cb_busy = None      # app注入 返回True=正在思考执行任务 热键和唤醒词都无视
+cb_wake_block = None  # app注入 返回True=只屏蔽唤醒词(开会等) 热键仍可用
 
 _capturing = False  # 正在采集一句 防热键重入
+_STALL_S = 5.0      # 麦克风这么久没出声当它死了(系统休眠回来) 重开
 
 
 def _app_busy() -> bool:
     try:
         return bool(cb_busy()) if cb_busy is not None else False
+    except Exception:
+        return False
+
+
+def _wake_blocked() -> bool:
+    try:
+        return bool(cb_wake_block()) if cb_wake_block is not None else False
     except Exception:
         return False
 
@@ -324,6 +333,7 @@ def _loop() -> None:
             except Exception:
                 pass
 
+        last_audio = time.monotonic()
         while not _shutdown.is_set():
             if not (_enabled or _wake_on):
                 break  # 全关了 线程退出 麦克风释放
@@ -331,6 +341,7 @@ def _loop() -> None:
                 stream = sd.InputStream(samplerate=_SR, channels=1, dtype="float32",
                                         blocksize=_CHUNK, callback=_on_audio)
                 stream.start()
+                last_audio = time.monotonic()
 
             # 等事件: 热键说话 或 唤醒词命中
             talking_src = None
@@ -340,8 +351,12 @@ def _loop() -> None:
             elif _wake_on:
                 try:
                     chunk = _audio_q.get(timeout=0.2)
+                    last_audio = time.monotonic()
                 except queue.Empty:
+                    stream = _check_stall(stream, last_audio)
                     continue
+                if _wake_blocked():
+                    continue  # 开会等场景 唤醒词整个屏蔽 音频直接丢
                 kws = _load_kws()
                 if ks is None:
                     ks = kws.create_stream()
@@ -362,8 +377,9 @@ def _loop() -> None:
                 # 只开了热键 没在说 闲等
                 try:
                     _audio_q.get(timeout=0.2)
+                    last_audio = time.monotonic()
                 except queue.Empty:
-                    pass
+                    stream = _check_stall(stream, last_audio)
                 continue
 
             # ── 采集一句 ──
@@ -374,11 +390,15 @@ def _loop() -> None:
             buf: list = []
             vad = _new_vad() if talking_src == "wake" else None
             spoke = False
+            discard = False
             t0 = time.monotonic()
-            last_partial = 0.0
+            last_partial = t0  # 不从0起 否则第一块音频就触发识别 冷加载时会堵住采集
             final_text = ""
             while not _shutdown.is_set():
                 if talking_src == "hotkey" and _talk_end.is_set():
+                    break
+                if (talking_src == "hotkey" and not _enabled) or (talking_src == "wake" and not _wake_on):
+                    discard = True  # 说一半被设置面板关掉 这句作废
                     break
                 try:
                     chunk = _audio_q.get(timeout=0.3)
@@ -411,7 +431,22 @@ def _loop() -> None:
                             _emit(cb_partial, partial)
                     except Exception:
                         pass
-            if buf:
+            if _shutdown.is_set():
+                discard = True  # 退出途中不再解码外发
+            if talking_src == "wake" and not spoke:
+                discard = True  # 误唤醒只录到环境噪音 解出来是幻觉文本 不许外发
+            if not discard:
+                # 识别解码期间积压的尾音补回来 不然松开瞬间说的话被吃掉
+                cap_n = int((_TALK_CAP_S + 2.0) * _SR)
+                total = sum(len(c) for c in buf)
+                try:
+                    while total < cap_n:
+                        tail = _audio_q.get_nowait()
+                        buf.append(tail)
+                        total += len(tail)
+                except queue.Empty:
+                    pass
+            if buf and not discard:
                 try:
                     final_text = _decode(np.concatenate(buf))
                 except Exception:
@@ -438,6 +473,9 @@ def _loop() -> None:
         _capturing = False  # 异常中途退出也不能卡死下一次按键
         with _lock:
             _loop_thread = None
+        # 退出的瞬间开关又被打开(快速切设置) 自己再拉起来 不然听觉静默失效
+        if not _shutdown.is_set() and (_enabled or _wake_on):
+            _kick()
 
 
 def _drain(q) -> None:
@@ -446,3 +484,15 @@ def _drain(q) -> None:
             q.get_nowait()
     except queue.Empty:
         pass
+
+
+def _check_stall(stream, last_audio: float):
+    """麦克风长时间没出声(系统休眠回来设备易死) 关掉让外层重开"""
+    if stream is not None and time.monotonic() - last_audio > _STALL_S:
+        try:
+            stream.stop()
+            stream.close()
+        except Exception:
+            pass
+        return None
+    return stream
