@@ -339,7 +339,7 @@ class Sensors(QObject):
         self._host.request_message.emit(agent_prompts.DESK_TIDY_MSG.format(n=n))
 
     def _check_weather(self) -> None:
-        """两小时问一次天气 拟态跟着换"""
+        """两小时问一次天气 拟态跟着换 —— 按IP自动定位 那是它自己小世界的天气"""
         if self._weather_busy or not self._host._settings.allow_web:
             return
         self._weather_busy = True

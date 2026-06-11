@@ -388,10 +388,12 @@ SOMA_BALL = "your owner threw a ball for you; you jumped up and caught it"
 SOMA_FOCUS_DONE = "you kept your owner company through a 25-minute focus session"
 SOMA_FOCUS_STATE = "your owner started a pomodoro and is focusing; you sit quietly beside them — don't chitchat proactively"
 SOMA_MEETING_STATE = "your owner seems to be in a meeting (microphone in use); you've gone quiet automatically — keep replies brief"
+# 天气按IP自动取，定位常常不准（可能在另一个国家），所以这是"你自己小世界的天气"，
+# 不是主人所在地——别声称知道主人那儿下不下雨，就当你这扇小窗外的天气。
 SOMA_WEATHER = {
-    "rain": "it's raining outside; you're holding a little umbrella",
-    "snow": "it's snowing outside; you built a tiny snowman to keep you company",
-    "melt": "it's scorching today; you're half melted",
+    "rain": "it's raining outside your own little window (your world inside the computer), so you've put up a tiny umbrella. This is YOUR weather — you do NOT know what it's like where your owner actually is, so never claim it's raining on their side; if it comes up, it's just wet in your little world.",
+    "snow": "it's snowing outside your little window, so you built a tiny snowman. This is your OWN weather, not a claim about where your owner is.",
+    "melt": "it's scorching in your own little world today and you're half melted. This is your OWN weather, not your owner's.",
 }
 SOMA_HOT_STATE = "CPU load is high; the machine is so hot you're sweating and fanning yourself"
 SOMA_FLOW_STATE = "your owner is deep in focused work (heads-down in their editor/tools for a while); you've settled into a calm quiet beside them and are holding back from interrupting — let them stay in the zone"
