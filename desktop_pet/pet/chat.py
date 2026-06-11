@@ -310,6 +310,11 @@ class SpeechText(QWidget):
             self._do_advance()
         else:
             self._advance_pending = True
+            # 音频端已收声而这句还没显示完 打字机也没在跑 重启打字机把它走完
+            if (not self._awaiting_start and not self._type_timer.isActive()
+                    and self._shown < len(self._full)):
+                self._synced = False
+                self._type_timer.start(_TYPE_MS)
 
     def _do_advance(self) -> None:
         self._type_timer.stop()

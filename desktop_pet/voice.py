@@ -271,7 +271,8 @@ def _play_synced(text: str, path: str, marks, on_start, on_progress) -> None:
                 on_progress(shown)
             _t.sleep(0.03)
         if on_progress is not None and not _stop.is_set():
-            on_progress(n)
+            # 收尾发大哨兵不发n 这边和气泡端清洗规则不同 长度对不上会卡死字幕
+            on_progress(10 ** 9)
     finally:
         _mci_close()
         try:
