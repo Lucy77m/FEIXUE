@@ -241,6 +241,30 @@ _ACTIVITIES = {
         ("hold", 1.4, ""),
         ("knit", 6.0, "～"),
     ]),
+    "phone": ("phone", 0.0, "happy_wiggle", [
+        ("hold", 1.4, ""),
+        ("tap", 6.0, "♥"),
+    ]),
+    "harmonica": ("harmonica", 0.0, "happy_wiggle", [
+        ("hold", 1.4, ""),
+        ("play", 6.0, "～"),
+    ]),
+    "popsicle": ("popsicle", 0.0, "puff_up", [
+        ("hold", 1.4, ""),
+        ("bite", 5.0, "～"),
+    ]),
+    "butterfly": ("butterfly", 0.0, "jump_spin", [
+        ("spot", 2.0, "!"),
+        ("chase", 5.0, "✦"),
+    ]),
+    "fishmoon": ("fishmoon", 0.0, "happy_wiggle", [
+        ("cast", 2.0, "～"),
+        ("wait", 5.0, "✦"),
+    ]),
+    "ringtoss": ("ringtoss", 0.0, "celebrate", [
+        ("toss", 6.0, "✦"),
+        ("done", 1.5, "!"),
+    ]),
 }
 _ACTIVITY_GAP = (150.0, 300.0)
 _TRAVEL = "__travel__"

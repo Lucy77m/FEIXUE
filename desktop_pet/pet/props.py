@@ -1527,6 +1527,118 @@ def draw_knitting(painter: QPainter, bw: float, bh: float, t: float, stage: str,
     painter.drawEllipse(QPointF(cx - bw * 0.01, cy + bh * 0.21), bw * 0.06, bw * 0.06)
 
 
+def draw_phone(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
+    """玩手机 戳屏 冒小爱心"""
+    cx, cy = bw * 0.30, bh * 0.02
+    pw, pht = bw * 0.16, bh * 0.30
+    painter.setPen(QPen(QColor(60, 62, 74), max(1.0, bw * 0.008)))
+    painter.setBrush(QColor(50, 52, 64))
+    painter.drawRoundedRect(QRectF(cx - pw / 2, cy - pht / 2, pw, pht), bw * 0.02, bw * 0.02)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor(150, 200, 250, 185 if stage == "tap" else 135))
+    painter.drawRoundedRect(QRectF(cx - pw * 0.38, cy - pht * 0.40, pw * 0.76, pht * 0.72), bw * 0.01, bw * 0.01)
+    if stage == "tap":
+        for k in range(3):
+            pp = (t * 0.8 + k * 0.33) % 1.0
+            painter.setBrush(QColor(240, 120, 140, int(200 * (1 - pp))))
+            painter.drawEllipse(QPointF(cx + math.sin(t + k) * bw * 0.03, cy - pht * 0.4 - pp * bh * 0.20),
+                                bw * 0.02, bw * 0.02)
+
+
+def draw_harmonica(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
+    """吹口琴 左右拉 冒音符"""
+    cx, cy = bw * 0.28, bh * 0.06
+    slide = math.sin(t * 6) * bw * 0.03 if stage == "play" else 0.0
+    painter.setPen(QPen(QColor(110, 120, 140), max(1.0, bw * 0.008)))
+    painter.setBrush(QColor(152, 162, 182))
+    painter.drawRoundedRect(QRectF(cx - bw * 0.13 + slide, cy - bh * 0.04, bw * 0.26, bh * 0.08), bw * 0.015, bw * 0.015)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor(60, 66, 78))
+    for k in range(6):
+        painter.drawRect(QRectF(cx - bw * 0.11 + slide + k * bw * 0.036, cy - bh * 0.015, bw * 0.022, bh * 0.03))
+    if stage == "play":
+        draw_note(painter, QPointF(cx + bw * 0.22, cy - bh * 0.18 + math.sin(t * 3) * bh * 0.03),
+                  bw, bh, QColor(150, 130, 210), double=False)
+
+
+def draw_popsicle(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
+    """吃冰棍 一口口咬"""
+    cx = bw * 0.30
+    top, bot = -bh * 0.12, bh * 0.16
+    eaten = ease_out(stage_p) * (bot - top) * 0.7 if stage == "bite" else 0.0
+    painter.setPen(QPen(QColor(200, 170, 130), max(1.4, bw * 0.012)))
+    painter.drawLine(QPointF(cx, bot), QPointF(cx, bh * 0.32))
+    painter.setPen(QPen(QColor(120, 170, 210), max(1.0, bw * 0.007)))
+    painter.setBrush(QColor(152, 206, 236))
+    painter.drawRoundedRect(QRectF(cx - bw * 0.09, top + eaten, bw * 0.18, (bot - top) - eaten), bw * 0.04, bw * 0.04)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor(255, 255, 255, 120))
+    if (bot - top) - eaten > bh * 0.04:
+        painter.drawRoundedRect(QRectF(cx - bw * 0.06, top + eaten + bh * 0.02, bw * 0.028, ((bot - top) - eaten) * 0.5),
+                                bw * 0.01, bw * 0.01)
+
+
+def draw_butterfly(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
+    """追蝴蝶 蝴蝶在头顶绕飞 翅膀扇"""
+    bx = bw * (0.1 + 0.4 * math.sin(t * 1.5))
+    by = -bh * (0.7 + 0.28 * math.sin(t * 2.2))
+    flap = 0.5 + 0.5 * abs(math.sin(t * 8))
+    painter.save()
+    painter.translate(bx, by)
+    painter.setPen(QPen(QColor(200, 120, 160), max(0.8, bw * 0.005)))
+    for sgn in (-1, 1):
+        painter.setBrush(QColor(236, 140, 180, 220))
+        painter.drawEllipse(QPointF(sgn * bw * 0.05 * flap, -bw * 0.02), bw * 0.05 * flap, bw * 0.04)
+        painter.setBrush(QColor(246, 182, 206, 220))
+        painter.drawEllipse(QPointF(sgn * bw * 0.04 * flap, bw * 0.03), bw * 0.035 * flap, bw * 0.03)
+    painter.setPen(QPen(QColor(80, 60, 70), max(1.0, bw * 0.006)))
+    painter.drawLine(QPointF(0, -bw * 0.04), QPointF(0, bw * 0.05))
+    painter.restore()
+
+
+def draw_fishmoon(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
+    """钓月亮 弯月高挂 钓线垂去勾它"""
+    mx, my = bw * 0.42, -bh * 0.95
+    moon = QPainterPath()
+    moon.setFillRule(Qt.FillRule.OddEvenFill)
+    moon.addEllipse(QPointF(mx, my), bw * 0.13, bw * 0.13)
+    moon.addEllipse(QPointF(mx + bw * 0.06, my - bw * 0.02), bw * 0.12, bw * 0.12)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor(248, 222, 130))
+    painter.drawPath(moon)
+    hand = QPointF(bw * 0.18, bh * 0.12)
+    rod_tip = QPointF(bw * 0.30, -bh * 0.36)
+    painter.setPen(QPen(QColor(150, 110, 70), max(1.2, bw * 0.01)))
+    painter.drawLine(hand, rod_tip)
+    sway = math.sin(t * 1.5) * bw * 0.03
+    painter.setPen(QPen(QColor(150, 150, 165), max(0.7, bw * 0.005)))
+    painter.drawLine(rod_tip, QPointF(mx - bw * 0.10 + sway, my + bw * 0.08))
+
+
+def draw_ringtoss(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
+    """套圈 一个个圈往桩子上飞"""
+    px = bw * 0.38
+    painter.setPen(QPen(QColor(170, 120, 80), max(1.4, bw * 0.012)))
+    painter.drawLine(QPointF(px, bh * 0.30), QPointF(px, -bh * 0.18))
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor(170, 120, 80))
+    painter.drawEllipse(QPointF(px, -bh * 0.18), bw * 0.03, bw * 0.02)
+    cols = [QColor(232, 120, 120), QColor(120, 180, 230), QColor(245, 205, 110)]
+    landed = int(stage_p * 3) if stage == "toss" else 3
+    for i in range(landed):
+        y = bh * 0.26 - i * bh * 0.07
+        painter.setPen(QPen(cols[i % 3], max(1.6, bw * 0.014)))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawEllipse(QPointF(px, y), bw * 0.10, bw * 0.045)
+    if stage == "toss" and landed < 3:
+        ph = (t * 1.2) % 1.0
+        fx = bw * 0.12 + (px - bw * 0.12) * ph
+        fy = bh * 0.1 - bh * 0.4 * math.sin(ph * math.pi)
+        painter.setPen(QPen(cols[landed % 3], max(1.6, bw * 0.014)))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawEllipse(QPointF(fx, fy), bw * 0.10, bw * 0.045)
+
+
 # 装扮注册表 worn 穿身上 ambient 撒周围 二者互斥
 COSTUME_LAYERS = {
     "sherlock": (draw_sherlock, None),
@@ -1570,6 +1682,12 @@ COSTUME_LAYERS = {
     "rubik": (None, draw_rubik),
     "magic": (None, draw_magic),
     "knitting": (None, draw_knitting),
+    "phone": (None, draw_phone),
+    "harmonica": (None, draw_harmonica),
+    "popsicle": (None, draw_popsicle),
+    "butterfly": (None, draw_butterfly),
+    "fishmoon": (None, draw_fishmoon),
+    "ringtoss": (None, draw_ringtoss),
 }
 COSTUMES = frozenset(COSTUME_LAYERS)
 WORN_COSTUMES = frozenset(name for name, (worn, _ambient) in COSTUME_LAYERS.items() if worn)
