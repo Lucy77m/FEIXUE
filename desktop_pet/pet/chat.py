@@ -316,19 +316,23 @@ class SpeechText(QWidget):
                 self._synced = False
                 self._type_timer.start(_TYPE_MS)
 
+    def _read_ms(self) -> int:
+        """按句长给的阅读停留 念完不许立刻翻页"""
+        return min(2600, 500 + 32 * len(self._full))
+
     def _do_advance(self) -> None:
         self._type_timer.stop()
         self._synced = False
         self._awaiting_start = False
         if self._queue:
-            self._shown = 0
-            self._phase = "blank"
-            self._phase_timer.start(_BLANK_MS)
+            # 走hold相位 全文停留够读再清屏翻页
+            self._phase = "hold"
+            self._phase_timer.start(self._read_ms())
             self.update()
         else:
             self.talking.emit(False)
             self._phase = "linger"
-            self._phase_timer.start(_LINGER_MS)
+            self._phase_timer.start(max(_LINGER_MS, self._read_ms()))
 
     def _next(self) -> None:
         self._set_text(self._queue.pop(0))

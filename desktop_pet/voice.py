@@ -26,8 +26,8 @@ _file_seq = 0
 _SR = 22050
 _BASE_FREQ = 440.0
 _SCALE = (0, 2, 4, 7, 9)  # 五声音阶单八度 不往上蹿免得刺耳
-_SYL_DUR = 0.052
-_MAX_TOTAL = 6.0  # 一句的音频硬上限秒 到点直接收声 字幕由结尾回调补完
+_SYL_DUR = 0.072  # 字幕逐字跟着音节走 这也是阅读速度 别快过人眼
+_MAX_TOTAL = 7.0  # 一句的音频硬上限秒 到点直接收声 字幕由结尾回调补完
 
 _TAG = re.compile(r"^\s*\[(\w+)\]\s*")
 _MD = re.compile(r"[*#`>~_|]+")
@@ -182,7 +182,7 @@ def _synth(text: str, rate: int) -> "tuple[str, list[tuple[float, int]]] | None"
         return None
     speed = 1.0 + rate / 100.0  # ±50%
     dur = _SYL_DUR / speed
-    gaps = {"syl": 0.012 / speed, "gap": 0.045 / speed, "pause": 0.08 / speed, "stop": 0.12 / speed}
+    gaps = {"syl": 0.017 / speed, "gap": 0.06 / speed, "pause": 0.11 / speed, "stop": 0.16 / speed}
     # 偏长的句子温和加速 再长就到点收声 绝不无限叽歪
     syls = sum(1 for t in toks if t["kind"] == "syl")
     est = syls * (dur + gaps["syl"])
