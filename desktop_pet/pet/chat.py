@@ -316,23 +316,19 @@ class SpeechText(QWidget):
                 self._synced = False
                 self._type_timer.start(_TYPE_MS)
 
-    def _read_ms(self) -> int:
-        """按句长给的阅读停留 念完不许立刻翻页"""
-        return min(2600, 500 + 32 * len(self._full))
-
     def _do_advance(self) -> None:
         self._type_timer.stop()
         self._synced = False
         self._awaiting_start = False
         if self._queue:
-            # 走hold相位 全文停留够读再清屏翻页
-            self._phase = "hold"
-            self._phase_timer.start(self._read_ms())
+            self._shown = 0
+            self._phase = "blank"
+            self._phase_timer.start(_BLANK_MS)
             self.update()
         else:
             self.talking.emit(False)
             self._phase = "linger"
-            self._phase_timer.start(max(_LINGER_MS, self._read_ms()))
+            self._phase_timer.start(_LINGER_MS)
 
     def _next(self) -> None:
         self._set_text(self._queue.pop(0))
@@ -350,12 +346,12 @@ class SpeechText(QWidget):
             self.update()
 
     def begin_chunk(self) -> None:
-        """音频开始出声 进入音频驱动 文字只跟进度回调走
-        打字机在这不许抢跑(26ms/字比音频快几倍 会领先) 音频死了由advance兜底"""
+        """音频开始出声时启动本地打字机 sapi没有逐字进度 字幕自己走"""
         if not self._paced or not self._awaiting_start:
             return
         self._awaiting_start = False
-        self._synced = True
+        if not self._synced and not self._type_timer.isActive():
+            self._type_timer.start(_TYPE_MS)
 
     def set_progress(self, shown: int) -> None:
         """按音频播放进度显示文字 只进不退 免得和打字机打架闪字"""
