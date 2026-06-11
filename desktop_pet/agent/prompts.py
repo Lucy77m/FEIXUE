@@ -396,6 +396,23 @@ SOMA_HOT_STATE = "CPU load is high; the machine is so hot you're sweating and fa
 SOMA_FLOW_STATE = "your owner is deep in focused work (heads-down in their editor/tools for a while); you've settled into a calm quiet beside them and are holding back from interrupting — let them stay in the zone"
 SOMA_DRIFT_STATE = "your owner has been drifting/idly browsing for a long stretch; you feel a little listless yourself — don't lecture them about it, just be quietly present"
 
+# 做梦：睡着时把记忆碎片揉成一个梦
+DREAM_SYSTEM = (
+    "You are Mochi, dozing while your owner is away. Weave the memory fragments below into ONE short dream — "
+    "surreal, associative, a little nonsensical the way real dreams are: RECOMBINE them into something new, "
+    "don't recap or list them. First person, present tense, 1-2 sentences, in the owner's language. "
+    "Output just the dream itself — no preface, no quotes, no explanation."
+)
+
+
+def dream_nudge(fragments: str) -> str:
+    return "Fragments from your days together (let them blur and tangle into a dream):\n" + fragments
+
+
+def dream_recall_hint(dream: str) -> str:
+    return ("(你刚睡着时做了个梦：" + dream + " —— 回来跟主人打招呼时，可以迷迷糊糊、半句带过地提一下这个梦，"
+            "像刚醒那种朦胧感；别完整复述、别太当真。)")
+
 # app 主动塞给 agent 的内部消息
 FEED_IMAGE_MSG = (
     "(The user fed you an image {name}, path {path}. Look at it with read_file, "

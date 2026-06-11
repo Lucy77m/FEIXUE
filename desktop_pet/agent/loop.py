@@ -1273,6 +1273,30 @@ class Agent:
             return ""
         return _strip_think_leak(content)
 
+    def dream(self) -> str:
+        """睡着时把高显著记忆碎片揉成一个梦 材料不够或失败返回空串"""
+        frags = store.core_memories(3)
+        frags += [e for e in store.recent_experiences(5) if e not in frags]
+        frags += [str(it.get("text", "")) for it in journal.recent(4) if it.get("text")]
+        frags = [f for f in frags if f][:7]
+        if len(frags) < 2:
+            return ""  # 还没攒够记忆 做不了梦
+        fragments = "\n".join(f"- {f}" for f in frags)
+        try:
+            resp = self._client().chat.completions.create(
+                model=self._settings.model,
+                messages=[
+                    {"role": "system", "content": prompts.DREAM_SYSTEM},
+                    {"role": "user", "content": prompts.dream_nudge(fragments)},
+                ],
+                timeout=_BACKGROUND_TIMEOUT,
+            )
+            self._meter_response(resp)
+            text = _strip_think_leak((resp.choices[0].message.content or "").strip())
+        except Exception:
+            return ""
+        return text[:200]
+
     def explore_topic(self, topic: str) -> str:
         worker = Agent(self._settings, depth=self._depth + 1)
         try:

@@ -25,6 +25,7 @@ from desktop_pet.companions.rituals import Rituals
 from desktop_pet.companions.sensors import Sensors
 from desktop_pet.companions.watchers import Watchers
 from desktop_pet.companions.wellbeing import Wellbeing
+from desktop_pet.companions.dreams import Dreams
 from desktop_pet.docs import docs
 from desktop_pet.memory.store import store
 from desktop_pet.skills import skills
@@ -177,6 +178,7 @@ class AgentWorker(QObject):
     background_done = Signal(str, str)
     rewrite_ready = Signal(str)
     analysis_ready = Signal(str)
+    dream_ready = Signal(str)
 
     def __init__(self, agent: Agent) -> None:
         super().__init__()
@@ -285,6 +287,19 @@ class AgentWorker(QObject):
                 self.proactive_reply.emit(reply)
         threading.Thread(target=work, daemon=True, name="mochi-explore").start()
 
+    @Slot()
+    def make_dream(self) -> None:
+        # 睡着时后台揉一个梦 不出声 攒着回来再提
+        def work() -> None:
+            try:
+                text = self._agent.dream()
+            except Exception as exc:
+                audit.system("dream failed", error=repr(exc))
+                text = ""
+            if text and text.strip():
+                self.dream_ready.emit(text)
+        threading.Thread(target=work, daemon=True, name="mochi-dream").start()
+
     @Slot(str)
     def peek_screen(self, trigger: str = "") -> None:
         def work() -> None:
@@ -349,6 +364,7 @@ class PetApp(QObject):
     request_explore = Signal(str)
     request_peek = Signal(str)
     request_analyze = Signal(str)
+    request_dream = Signal()
     request_message = Signal(str)
     _remote_action = Signal(str, str)
     request_confirm = Signal(str)
@@ -453,6 +469,7 @@ class PetApp(QObject):
         self._watchers = Watchers(self)
         self._rituals = Rituals(self)
         self._wellbeing = Wellbeing(self)
+        self._dreams = Dreams(self)
 
         self._tray = Tray(
             on_open_panel=self._open_panel,
@@ -509,6 +526,8 @@ class PetApp(QObject):
         self.request_proactive.connect(self._worker.speak_spontaneously)
         self.request_explore.connect(self._worker.explore)
         self.request_peek.connect(self._worker.peek_screen)
+        self.request_dream.connect(self._worker.make_dream)
+        self._worker.dream_ready.connect(self._dreams.set_dream)
         self.request_analyze.connect(self._worker.analyze_screen)
         self.request_message.connect(self._worker.handle)
         self._worker.analysis_ready.connect(self._on_analysis)
@@ -1232,7 +1251,8 @@ class PetApp(QObject):
         if self._just_returned and proactive.welcome_ready(now, level):
             self._just_returned = False
             proactive.record(now, level)
-            self.request_proactive.emit("welcome_back", context)
+            dream = self._dreams.take_dream_hint()  # 睡着时做了梦就迷糊提一句
+            self.request_proactive.emit("welcome_back", (context + "\n" + dream) if dream else context)
             return
         self._just_returned = False
         if not proactive.ready(now, level):
@@ -1527,7 +1547,7 @@ class PetApp(QObject):
 
     def _do_quit(self) -> None:
         # 先掐死全部伴生轮询 退出过程不再孵新线程
-        for c in (self._sensors, self._playtime, self._watchers, self._rituals, self._feeding, self._wellbeing):
+        for c in (self._sensors, self._playtime, self._watchers, self._rituals, self._feeding, self._wellbeing, self._dreams):
             try:
                 c.stop()
             except Exception:
@@ -1589,6 +1609,7 @@ class PetApp(QObject):
         self._watchers.start()
         self._rituals.start()
         self._wellbeing.start()
+        self._dreams.start()
         if self._settings.remote_inbox:
             remote_inbox.ensure_dir()
         self._hotkeys.start()
