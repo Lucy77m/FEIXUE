@@ -447,6 +447,9 @@ class ControlPanel(QDialog):
         self._sfx = QCheckBox(self._t("cb_sfx"))
         self._sfx.setChecked(settings.sfx_enabled)
         self._sfx.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._weather_cb = QCheckBox(self._t("cb_weather"))
+        self._weather_cb.setChecked(settings.weather_enabled)
+        self._weather_cb.setCursor(Qt.CursorShape.PointingHandCursor)
         self._tts_voice = QComboBox()
         self._tts_voice.addItem(self._t("opt_voice_system"), voice.SYSTEM_VOICE)
         if voice.edge_available():
@@ -774,6 +777,7 @@ class ControlPanel(QDialog):
         body.addWidget(self._field("lbl_proactive_freq", self._proactive_level, "help_proactive_freq"))
         body.addWidget(self._check_field(self._tts, "help_tts"))
         body.addWidget(self._check_field(self._sfx, "help_sfx"))
+        body.addWidget(self._check_field(self._weather_cb, "help_weather"))
         voice_row = QHBoxLayout()
         voice_row.setSpacing(8)
         voice_row.addWidget(self._tts_voice, 1)
@@ -1108,6 +1112,7 @@ class ControlPanel(QDialog):
         s.proactive_level = self._proactive_level.currentData() or "正常"
         s.tts_enabled = self._tts.isChecked()
         s.sfx_enabled = self._sfx.isChecked()
+        s.weather_enabled = self._weather_cb.isChecked()
         if self._tts_voice.findData(self._tts_voice_orig) < 0:
             s.tts_voice = self._tts_voice_orig  # 原音色不在列表就原样留着
         else:

@@ -1505,6 +1505,10 @@ class PetApp(QObject):
         voice.set_enabled(self._settings.tts_enabled)
         voice_sfx.set_enabled(self._settings.sfx_enabled)
         sampler.set_enabled(self._settings.clip_sampler or self._settings.clip_alchemy)
+        try:
+            self._sensors._check_weather()  # 天气开关切换后立即生效(关→收伞 开→即查) 不必等2小时
+        except Exception:
+            pass
         if self._settings.remote_inbox:
             remote_inbox.ensure_dir()
         self._hotkeys.restart({
