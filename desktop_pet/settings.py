@@ -87,6 +87,7 @@ class Settings:
     tts_enabled: bool = False
     tts_voice: str = ""
     tts_rate: int = 0
+    sfx_enabled: bool = False
     watch_screen: bool = False
     clip_sampler: bool = False
     clip_alchemy: bool = False

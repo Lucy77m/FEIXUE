@@ -17,7 +17,7 @@ from PySide6.QtCore import QObject, QPoint, QThread, QTimer, Signal, Slot, qInst
 from PySide6.QtGui import QColor, QCursor, QFont, QPalette
 from PySide6.QtWidgets import QApplication
 
-from desktop_pet import i18n, journal, occasions, persona, presence, stats, voice
+from desktop_pet import i18n, journal, occasions, persona, presence, stats, voice, voice_sfx
 from desktop_pet.audit import audit
 from desktop_pet.companions.feeding_ctrl import FeedingCtrl
 from desktop_pet.companions.playtime import Playtime
@@ -914,6 +914,8 @@ class PetApp(QObject):
             return
         self._wake()
         self._pet.perform(name)
+        if not self._speech.is_speaking:
+            voice_sfx.play(voice_sfx.cue_for(name))  # 配个情绪音(默认关)
 
     @Slot(bool, str)
     def _on_control(self, active: bool, label: str) -> None:
@@ -966,6 +968,7 @@ class PetApp(QObject):
         if self._meeting_mode or not self._shown or self._engaged():
             return
         self._pet.react(name)
+        voice_sfx.play(voice_sfx.cue_for(name))  # 配个情绪音(默认关)
 
     def _feed_perform(self, name: str) -> None:
         """伴生的自发表演 —— 同上，忙时不打断"""
@@ -1500,6 +1503,7 @@ class PetApp(QObject):
         voice.set_voice(self._settings.tts_voice)
         voice.set_rate(self._settings.tts_rate)
         voice.set_enabled(self._settings.tts_enabled)
+        voice_sfx.set_enabled(self._settings.sfx_enabled)
         sampler.set_enabled(self._settings.clip_sampler or self._settings.clip_alchemy)
         if self._settings.remote_inbox:
             remote_inbox.ensure_dir()
@@ -1595,6 +1599,7 @@ class PetApp(QObject):
         voice.set_voice(self._settings.tts_voice)
         voice.set_rate(self._settings.tts_rate)
         voice.set_enabled(self._settings.tts_enabled)
+        voice_sfx.set_enabled(self._settings.sfx_enabled)
         self._pet.express("neutral")
         self._thread.start()
         self._tray.show()
