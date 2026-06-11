@@ -31,7 +31,8 @@ DOWNLOAD_SIZE_HINT = "250MB"
 _WAKE_KEYWORD = "m ò ch í @墨池"
 _TALK_CAP_S = 25.0     # 单次说话硬上限
 _WAKE_IDLE_S = 6.0     # 唤醒后一直没人说话就收回
-_PARTIAL_EVERY = 0.5   # 部分识别刷新间隔
+_PARTIAL_EVERY = 0.6   # 部分识别刷新间隔
+_PARTIAL_WIN_S = 10.0  # 实时识别只看最近这几秒 不然越说越卡
 
 _enabled = False
 _wake_on = False
@@ -46,6 +47,8 @@ _audio_q: "queue.Queue" = queue.Queue()
 _recognizer = None
 _kws = None
 _vad_cfg = None
+_model_lock = threading.Lock()  # 预热线程和工作线程都会触发加载
+_warming = False
 
 # 回调由app注入 全在工作线程触发 注意转qt信号
 cb_partial = None   # (text) 说话中的实时文本
@@ -115,6 +118,7 @@ def _download(proxy: str) -> None:
                 done_w += weight
         with _dl_lock:
             _dl_state.update(state="idle", pct=1.0, msg="")
+        _warmup_async()  # 刚下完就预热 用户第一句不用等冷加载
     except Exception as e:
         for key in _FILES:
             part = _path(key).with_suffix(_path(key).suffix + ".part")
@@ -132,6 +136,8 @@ def set_enabled(on: bool) -> None:
     """听觉总开关 开了热键说话可用"""
     global _enabled
     _enabled = bool(on) and is_ready()
+    if _enabled:
+        _warmup_async()
     _kick()
 
 
@@ -139,7 +145,31 @@ def set_wake_enabled(on: bool) -> None:
     """唤醒词开关 开了麦克风常开跑关键词检测"""
     global _wake_on
     _wake_on = bool(on) and is_ready()
+    if _wake_on:
+        _warmup_async()
     _kick()
+
+
+def _warmup_async() -> None:
+    """后台预载模型并跑一遍空音频 把首句的冷启动消掉"""
+    global _warming
+    if _warming or _recognizer is not None:
+        return
+    _warming = True
+
+    def _go():
+        global _warming
+        try:
+            import numpy as np
+            _decode(np.zeros(_SR // 2, dtype=np.float32))
+            if _wake_on:
+                _load_kws()
+        except Exception:
+            pass
+        finally:
+            _warming = False
+
+    threading.Thread(target=_go, daemon=True, name="mochi-hear-warmup").start()
 
 
 def start_talk() -> None:
@@ -194,21 +224,24 @@ def _import_sherpa():
 
 def _load_recognizer():
     global _recognizer
-    if _recognizer is None:
-        sherpa_onnx = _import_sherpa()
-        _recognizer = sherpa_onnx.OfflineRecognizer.from_sense_voice(
-            model=str(_path("sv_model")),
-            tokens=str(_path("sv_tokens")),
-            num_threads=2,
-            use_itn=True,
-            language="auto",
-        )
+    with _model_lock:
+        if _recognizer is None:
+            sherpa_onnx = _import_sherpa()
+            _recognizer = sherpa_onnx.OfflineRecognizer.from_sense_voice(
+                model=str(_path("sv_model")),
+                tokens=str(_path("sv_tokens")),
+                num_threads=1,  # 单线程 慢一点但不跟ui抢核 卡动画
+                use_itn=True,
+                language="auto",
+            )
     return _recognizer
 
 
 def _load_kws():
     global _kws
-    if _kws is None:
+    with _model_lock:
+        if _kws is not None:
+            return _kws
         sherpa_onnx = _import_sherpa()
         kw_file = HEAR_DIR / "keywords.txt"
         kw_file.write_text(_WAKE_KEYWORD + "\n", encoding="utf-8")
@@ -265,6 +298,12 @@ def _loop() -> None:
     import numpy as np
     import sounddevice as sd
 
+    try:
+        # 降优先级 识别突发不许跟ui抢核卡动画
+        import ctypes
+        ctypes.windll.kernel32.SetThreadPriority(ctypes.windll.kernel32.GetCurrentThread(), -1)
+    except Exception:
+        pass
     stream = None
     ks = None
     try:
@@ -342,11 +381,15 @@ def _loop() -> None:
                             spoke = True
                 if now - t0 > (_TALK_CAP_S if spoke or talking_src == "hotkey" else _WAKE_IDLE_S):
                     break  # 说太久 或 唤醒后一直没开口
-                # 实时部分识别
+                # 实时部分识别 只看最近一段 整段重解会越说越卡
                 if buf and now - last_partial >= _PARTIAL_EVERY:
                     last_partial = now
                     try:
-                        partial = _decode(np.concatenate(buf))
+                        win = np.concatenate(buf)
+                        n_win = int(_PARTIAL_WIN_S * _SR)
+                        if len(win) > n_win:
+                            win = win[-n_win:]
+                        partial = _decode(win)
                         if partial:
                             _emit(cb_partial, partial)
                     except Exception:
