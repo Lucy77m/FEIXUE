@@ -1,4 +1,4 @@
-# author: bdth
+﻿# author: bdth
 # email: 2074055628@qq.com
 # 聊天显示组件 打字机气泡 思考气泡 思绪粒子 输入框
 
@@ -55,6 +55,7 @@ from PySide6.QtWidgets import (
 
 from desktop_pet import i18n
 from desktop_pet.pet.fx import make_floating as _make_floating
+from desktop_pet.pet.fx import smooth_font as _smooth_font
 
 _IMAGE_EXT = frozenset({".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".jfif"})
 _ATTACH_MAX = 8
@@ -239,7 +240,7 @@ class SpeechText(QWidget):
         _make_floating(self)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 
-        self._font = QFont("Microsoft YaHei UI")
+        self._font = _smooth_font(QFont("Microsoft YaHei UI"))
         self._font.setPixelSize(_FONT_PX)
         self._font.setWeight(QFont.Weight.DemiBold)
 
@@ -408,7 +409,7 @@ class ThoughtBubble(QWidget):
         super().__init__()
         _make_floating(self)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        self._font = QFont("Microsoft YaHei UI")
+        self._font = _smooth_font(QFont("Microsoft YaHei UI"))
         self._font.setPixelSize(_BUBBLE_FONT_PX)
         self._font.setWeight(QFont.Weight.DemiBold)
         self._text = ""
@@ -553,7 +554,7 @@ class ThoughtBubbles(QWidget):
         _make_floating(self)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.setFixedSize(_THINK_W, _THINK_H)
-        self._font = QFont("Microsoft YaHei UI")
+        self._font = _smooth_font(QFont("Microsoft YaHei UI"))
         self._font.setPixelSize(_THINK_FONT_PX)
         self._font.setWeight(QFont.Weight.DemiBold)
         self._source = ""

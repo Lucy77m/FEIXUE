@@ -1,4 +1,4 @@
-# author: bdth
+﻿# author: bdth
 # email: 2074055628@qq.com
 # 桌宠媒体展示窗 图片渲成拍立得 动图渲成复古电视机 带弹出收起动画和点击保存
 
@@ -26,7 +26,7 @@ from PySide6.QtWidgets import QFileDialog, QWidget
 
 from desktop_pet import i18n
 from desktop_pet.audit import audit
-from desktop_pet.pet.fx import ease_out_back, make_floating, place_beside_pet
+from desktop_pet.pet.fx import ease_out_back, make_floating, place_beside_pet, smooth_font
 
 _IMG_MAX_W, _IMG_MAX_H = 300, 220
 _BORDER = 14
@@ -56,7 +56,7 @@ class MediaFrame(QWidget):
         super().__init__()
         make_floating(self)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._font = QFont("Microsoft YaHei UI")
+        self._font = smooth_font(QFont("Microsoft YaHei UI"))
         self._pixmap: QPixmap | None = None
         self._movie: QMovie | None = None
         self._chrome: QPixmap | None = None

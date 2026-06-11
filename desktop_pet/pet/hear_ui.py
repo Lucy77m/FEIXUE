@@ -40,7 +40,10 @@ class HearBar(QWidget):
         self._font = QFont("Microsoft YaHei UI")
         self._font.setPixelSize(_FONT_PX)
         self._font.setWeight(QFont.Weight.DemiBold)
+        self._font.setHintingPreference(QFont.HintingPreference.PreferNoHinting)
+        self._font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias)
         self._text = ""
+        self._remaining = -1.0
         self._t0 = 0.0
         self._pulse = QTimer(self)
         self._pulse.timeout.connect(self.update)
@@ -52,6 +55,7 @@ class HearBar(QWidget):
         """进入聆听 文字清空 圆点开始呼吸"""
         self._flash.stop()
         self._text = ""
+        self._remaining = -1.0
         self._t0 = time.monotonic()
         self._relayout()
         self.show()
@@ -64,9 +68,14 @@ class HearBar(QWidget):
         self._text = text or ""
         self._relayout()
 
+    def set_remaining(self, sec: float) -> None:
+        if self.isVisible():
+            self._remaining = sec
+
     def finish(self, text: str) -> None:
         """定稿 亮一下随即收起"""
         self._text = text or ""
+        self._remaining = -1.0
         self._relayout()
         self._pulse.stop()
         self.update()
@@ -105,11 +114,22 @@ class HearBar(QWidget):
         p.setBrush(dot)
         cx = _PAD_H + _DOT_R
         p.drawEllipse(QRectF(cx - _DOT_R, r.center().y() - _DOT_R, _DOT_R * 2, _DOT_R * 2))
+        # 倒计时 最后10秒在右端显示
+        right_w = 0
+        if self._remaining >= 0.0:
+            cd = f"{int(self._remaining + 0.999)}s"
+            p.setFont(self._font)
+            fm = QFontMetrics(self._font)
+            right_w = fm.horizontalAdvance(cd) + 10
+            p.setPen(_DOT if self._remaining <= 3.0 else _HINT_INK)
+            p.drawText(QRectF(0, 0, self.width() - _PAD_H, self.height()),
+                       int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight), cd)
         # 文字 没识别出来时放提示灰
         p.setFont(self._font)
         p.setPen(_INK if self._text else _HINT_INK)
         shown = self._text or i18n.t("hear_listening")
         fm = QFontMetrics(self._font)
-        shown = fm.elidedText(shown, Qt.TextElideMode.ElideLeft, self.width() - _PAD_H * 2 - int(_DOT_R * 2) - _DOT_GAP)
+        shown = fm.elidedText(shown, Qt.TextElideMode.ElideLeft,
+                              self.width() - _PAD_H * 2 - int(_DOT_R * 2) - _DOT_GAP - right_w)
         p.drawText(QRectF(cx + _DOT_R + _DOT_GAP, 0, self.width(), self.height()),
                    int(Qt.AlignmentFlag.AlignVCenter), shown)

@@ -22,6 +22,7 @@ from desktop_pet.pet import adornments, palette, props
 from desktop_pet.pet.behavior import selector
 from desktop_pet.pet.behaviors import Category, registry
 from desktop_pet.pet.behaviors.easing import ease_in, ease_out, ease_out_back
+from desktop_pet.pet.fx import smooth_font
 
 _INK = palette.INK
 _SKIN = palette.SKIN
@@ -1069,7 +1070,7 @@ class BlobPet:
         ])
 
     def _draw_dream(self, painter: QPainter, cx: float, head_y: float, bw: float, bh: float) -> None:
-        font = QFont("Microsoft YaHei UI")
+        font = smooth_font(QFont("Microsoft YaHei UI"))
         font.setPixelSize(max(11, int(bw * 0.26)))
         painter.setFont(font)
         for glyph, x_frac, age, life, color in self._dream_bubbles:

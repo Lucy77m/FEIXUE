@@ -29,7 +29,7 @@ _FILES = {  # 短名: (release文件名, 进度权重)
 DOWNLOAD_SIZE_HINT = "250MB"
 
 _WAKE_KEYWORD = "m ò ch í @墨池"
-_TALK_CAP_S = 25.0     # 单次说话硬上限
+_TALK_CAP_S = 10.0     # 单次说话硬上限 浮条带倒计时
 _WAKE_IDLE_S = 6.0     # 唤醒后一直没人说话就收回
 _PARTIAL_EVERY = 0.6   # 部分识别刷新间隔
 _PARTIAL_WIN_S = 10.0  # 实时识别只看最近这几秒 不然越说越卡
@@ -54,6 +54,9 @@ _warming = False
 cb_partial = None   # (text) 说话中的实时文本
 cb_final = None     # (text) 一句定稿
 cb_state = None     # (state) idle/listening/wake_hit
+cb_tick = None      # (remaining_s) 采集中剩余秒数 给浮条画倒计时
+
+_capturing = False  # 正在采集一句 防热键重入
 
 
 def _path(key: str):
@@ -173,8 +176,8 @@ def _warmup_async() -> None:
 
 
 def start_talk() -> None:
-    """热键按下 开始听"""
-    if not _enabled:
+    """热键按下 开始听 采集中重按直接忽略 防状态打架"""
+    if not _enabled or _capturing:
         return
     _talk_end.clear()
     _talk_req.set()
@@ -354,6 +357,8 @@ def _loop() -> None:
                 continue
 
             # ── 采集一句 ──
+            global _capturing
+            _capturing = True
             _drain(_audio_q)
             _emit(cb_state, "listening")
             buf: list = []
@@ -379,8 +384,10 @@ def _loop() -> None:
                             break
                         if vad.is_speech_detected():
                             spoke = True
-                if now - t0 > (_TALK_CAP_S if spoke or talking_src == "hotkey" else _WAKE_IDLE_S):
-                    break  # 说太久 或 唤醒后一直没开口
+                cap = _TALK_CAP_S if spoke or talking_src == "hotkey" else _WAKE_IDLE_S
+                _emit(cb_tick, max(0.0, cap - (now - t0)))
+                if now - t0 > cap:
+                    break  # 说到上限 或 唤醒后一直没开口
                 # 实时部分识别 只看最近一段 整段重解会越说越卡
                 if buf and now - last_partial >= _PARTIAL_EVERY:
                     last_partial = now
@@ -402,6 +409,8 @@ def _loop() -> None:
             if final_text:
                 _emit(cb_final, final_text)  # 先定稿再idle ui按这个顺序收尾
             _emit(cb_state, "idle")
+            _capturing = False
+            _talk_req.clear()  # 采集期间的重按作废
             _talk_end.clear()
             if ks is not None:
                 ks = None  # 唤醒流重建 防残留
@@ -416,6 +425,7 @@ def _loop() -> None:
                 pass
         _drain(_audio_q)
         global _loop_thread
+        _capturing = False  # 异常中途退出也不能卡死下一次按键
         with _lock:
             _loop_thread = None
 

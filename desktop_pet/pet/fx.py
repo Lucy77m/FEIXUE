@@ -5,11 +5,19 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QWidget
 
 _BACK = 1.70158
 _GAP = 24
 _EDGE = 8
+
+
+def smooth_font(font: QFont) -> QFont:
+    """半透明窗口没有ClearType 关hinting强制抗锯齿 中文笔画不毛糙"""
+    font.setHintingPreference(QFont.HintingPreference.PreferNoHinting)
+    font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias)
+    return font
 
 
 def make_floating(widget: QWidget) -> None:

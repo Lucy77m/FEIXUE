@@ -374,6 +374,7 @@ class PetApp(QObject):
     _hear_final = Signal(str)
     _hear_state = Signal(str)
     _hear_submit = Signal(str, object)  # 语音定稿走信号进worker线程 直调会把llm请求卡在ui线程
+    _hear_tick = Signal(float)
 
     def __init__(self) -> None:
         _install_qt_message_filter()
@@ -381,7 +382,8 @@ class PetApp(QObject):
         self._app.setStyle("Fusion")
         self._app.setPalette(_light_palette())
         self._app.setQuitOnLastWindowClosed(False)
-        self._app.setFont(QFont("Microsoft YaHei UI", 10))
+        from desktop_pet.pet.fx import smooth_font
+        self._app.setFont(smooth_font(QFont("Microsoft YaHei UI", 10)))
         from desktop_pet.pet.icon import mochi_icon
         self._app.setWindowIcon(mochi_icon())
         super().__init__()
@@ -500,6 +502,7 @@ class PetApp(QObject):
         hearing.cb_partial = self._hear_partial.emit
         hearing.cb_final = self._hear_final.emit
         hearing.cb_state = self._hear_state.emit
+        hearing.cb_tick = self._hear_tick.emit
         self._connect()
 
     def _connect(self) -> None:
@@ -522,6 +525,7 @@ class PetApp(QObject):
         self._hear_state.connect(self._on_hear_state)
         self._hear_submit.connect(self._worker.handle)
         self._hear_submit.connect(self._on_submit)
+        self._hear_tick.connect(self._on_hear_tick)
         self._worker.reply_ready.connect(self._on_reply)
         self._worker.proactive_reply.connect(self._on_proactive_reply)
         self._worker.busy_changed.connect(self._on_busy)
@@ -755,6 +759,8 @@ class PetApp(QObject):
     def _on_talk_hotkey(self) -> None:
         if not self._settings.hear_enabled or not hearing.is_ready():
             return
+        if self._busy or self._worker.is_running:
+            return  # 它正干着活 这时候的语音会排队造成迷惑 直接不收
         hearing.start_talk()
         self._talk_release_timer.start()
 
@@ -784,6 +790,10 @@ class PetApp(QObject):
     @Slot(str)
     def _on_hear_partial(self, text: str) -> None:
         self._hearbar.set_text(text)
+
+    @Slot(float)
+    def _on_hear_tick(self, remaining: float) -> None:
+        self._hearbar.set_remaining(remaining)
 
     @Slot(str)
     def _on_hear_final(self, text: str) -> None:

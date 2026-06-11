@@ -1,4 +1,4 @@
-# author: bdth
+﻿# author: bdth
 # email: 2074055628@qq.com
 # 小黑板浮窗 markdown渲染成粉笔字黑板 带展开落灰动画
 
@@ -27,7 +27,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QWidget
 
-from desktop_pet.pet.fx import ease_out_back, make_floating, place_beside_pet
+from desktop_pet.pet.fx import ease_out_back, make_floating, place_beside_pet, smooth_font
 
 _PAD = 20
 _FRAME = 15
@@ -154,7 +154,7 @@ class BlackBoard(QWidget):
         super().__init__()
         make_floating(self)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        self._font = QFont("Microsoft YaHei UI")
+        self._font = smooth_font(QFont("Microsoft YaHei UI"))
         self._font.setPixelSize(_FONT_PX)
         self._backdrop: QPixmap | None = None
         self._chalk: QPixmap | None = None
