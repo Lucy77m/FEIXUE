@@ -1912,6 +1912,137 @@ def draw_crane(painter: QPainter, bw: float, bh: float, t: float, stage: str, st
     painter.restore()
 
 
+def draw_piano(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
+    """弹钢琴 小键盘 按键冒音符"""
+    cx, cy = bw * 0.30, bh * 0.08
+    kw, nk = bw * 0.30, 7
+    painter.setPen(QPen(QColor(180, 180, 190), max(0.8, bw * 0.005)))
+    painter.setBrush(QColor(250, 250, 252))
+    painter.drawRoundedRect(QRectF(cx - kw / 2, cy - bh * 0.05, kw, bh * 0.14), bw * 0.01, bw * 0.01)
+    painter.setPen(QPen(QColor(205, 205, 215), max(0.7, bw * 0.004)))
+    for k in range(1, nk):
+        x = cx - kw / 2 + k * kw / nk
+        painter.drawLine(QPointF(x, cy - bh * 0.05), QPointF(x, cy + bh * 0.09))
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor(50, 50, 60))
+    for k in (1, 2, 4, 5, 6):
+        x = cx - kw / 2 + k * kw / nk - kw / nk * 0.28
+        painter.drawRect(QRectF(x, cy - bh * 0.05, kw / nk * 0.56, bh * 0.085))
+    if stage == "play":
+        draw_note(painter, QPointF(cx + kw * 0.5, cy - bh * 0.18 + math.sin(t * 3) * bh * 0.03),
+                  bw, bh, QColor(150, 130, 210), double=False)
+
+
+def draw_piggybank(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
+    """存钱罐 投硬币"""
+    cx, cy = bw * 0.30, bh * 0.06
+    painter.setPen(QPen(QColor(220, 150, 170), max(1.0, bw * 0.008)))
+    painter.setBrush(QColor(244, 180, 200))
+    painter.drawEllipse(QPointF(cx, cy), bw * 0.16, bh * 0.16)
+    painter.drawPolygon(QPolygonF([QPointF(cx - bw * 0.10, cy - bh * 0.10), QPointF(cx - bw * 0.03, cy - bh * 0.13),
+                                   QPointF(cx - bw * 0.05, cy - bh * 0.05)]))
+    painter.setBrush(QColor(238, 165, 188))
+    painter.drawEllipse(QPointF(cx + bw * 0.14, cy), bw * 0.05, bh * 0.06)
+    for dx in (-0.08, 0.06):
+        painter.drawRect(QRectF(cx + dx * bw, cy + bh * 0.12, bw * 0.04, bh * 0.05))
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor(206, 138, 158))
+    painter.drawEllipse(QPointF(cx + bw * 0.132, cy - bh * 0.01), bw * 0.011, bw * 0.011)
+    painter.drawEllipse(QPointF(cx + bw * 0.150, cy - bh * 0.01), bw * 0.011, bw * 0.011)
+    painter.setPen(QPen(QColor(190, 120, 140), max(1.4, bw * 0.012)))
+    painter.drawLine(QPointF(cx - bw * 0.03, cy - bh * 0.14), QPointF(cx + bw * 0.03, cy - bh * 0.14))
+    if stage == "save":
+        ph = (t * 1.0) % 1.0
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(245, 205, 110))
+        painter.drawEllipse(QPointF(cx, cy - bh * 0.30 + ph * bh * 0.15), bw * 0.03, bw * 0.035)
+
+
+def draw_crystalball(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
+    """凝视水晶球 里头打转"""
+    cx, cy = bw * 0.30, -bh * 0.02
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor(150, 120, 90))
+    painter.drawPolygon(QPolygonF([QPointF(cx - bw * 0.10, bh * 0.22), QPointF(cx + bw * 0.10, bh * 0.22),
+                                   QPointF(cx + bw * 0.06, bh * 0.14), QPointF(cx - bw * 0.06, bh * 0.14)]))
+    painter.setPen(QPen(QColor(170, 195, 230), max(1.0, bw * 0.007)))
+    painter.setBrush(QColor(190, 210, 240, 200))
+    painter.drawEllipse(QPointF(cx, cy), bw * 0.15, bw * 0.15)
+    painter.setPen(QPen(QColor(150, 180, 230, 170), max(0.9, bw * 0.006)))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawArc(QRectF(cx - bw * 0.08, cy - bh * 0.04, bw * 0.16, bh * 0.10), (int(t * 40) % 360) * 16, 160 * 16)
+    if stage == "gaze":
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(255, 255, 255, 200))
+        for k in range(3):
+            a = t + k * 2.0
+            painter.drawEllipse(QPointF(cx + math.cos(a) * bw * 0.07, cy + math.sin(a) * bw * 0.07), bw * 0.012, bw * 0.012)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor(255, 255, 255, 130))
+    painter.drawEllipse(QPointF(cx - bw * 0.05, cy - bh * 0.05), bw * 0.035, bw * 0.03)
+
+
+def draw_cards(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
+    """玩扑克 摊开一把牌"""
+    cx, cy = bw * 0.30, bh * 0.08
+    pips = [QColor(60, 60, 70), QColor(214, 70, 72), QColor(60, 60, 70), QColor(214, 70, 72), QColor(214, 70, 72)]
+    spread = 16 if stage == "fan" else 8
+    for i in range(5):
+        painter.save()
+        painter.translate(cx, cy)
+        painter.rotate(-(spread * 2) + i * spread)
+        painter.setPen(QPen(QColor(190, 190, 200), max(0.8, bw * 0.005)))
+        painter.setBrush(QColor(252, 252, 255))
+        painter.drawRoundedRect(QRectF(-bw * 0.055, -bh * 0.22, bw * 0.11, bh * 0.22), bw * 0.015, bw * 0.015)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(pips[i])
+        painter.drawEllipse(QPointF(0, -bh * 0.13), bw * 0.02, bw * 0.024)
+        painter.restore()
+
+
+def draw_matryoshka(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
+    """套娃 一开俩"""
+    def doll(dx, scale):
+        cx = bw * 0.30 + dx
+        painter.setPen(QPen(QColor(190, 90, 80), max(1.0, bw * 0.007)))
+        painter.setBrush(QColor(232, 120, 100))
+        painter.drawEllipse(QPointF(cx, 0), bw * 0.12 * scale, bh * 0.22 * scale)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(252, 224, 200))
+        painter.drawEllipse(QPointF(cx, -bh * 0.10 * scale), bw * 0.07 * scale, bh * 0.09 * scale)
+        painter.setBrush(QColor(60, 55, 70))
+        painter.drawEllipse(QPointF(cx - bw * 0.025 * scale, -bh * 0.10 * scale), bw * 0.01 * scale, bw * 0.013 * scale)
+        painter.drawEllipse(QPointF(cx + bw * 0.025 * scale, -bh * 0.10 * scale), bw * 0.01 * scale, bw * 0.013 * scale)
+        painter.setBrush(QColor(245, 205, 110))
+        painter.drawEllipse(QPointF(cx, bh * 0.05 * scale), bw * 0.035 * scale, bw * 0.035 * scale)
+    if stage == "open":
+        doll(-bw * 0.17, 0.62)
+        doll(bw * 0.03, 1.0)
+    else:
+        doll(0.0, 1.0)
+
+
+def draw_sheep(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
+    """数羊 蓬蓬羊跳过去"""
+    ph = (t * 0.5) % 1.0
+    sx = bw * 0.5 - ph * bw * 0.95
+    sy = -bh * 0.55 - abs(math.sin(ph * math.pi * 3)) * bh * 0.10
+    painter.save()
+    painter.translate(sx, sy)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor(248, 248, 250))
+    for a in range(0, 360, 60):
+        aa = math.radians(a)
+        painter.drawEllipse(QPointF(math.cos(aa) * bw * 0.05, math.sin(aa) * bw * 0.04), bw * 0.05, bw * 0.05)
+    painter.drawEllipse(QPointF(0, 0), bw * 0.08, bw * 0.07)
+    painter.setBrush(QColor(72, 66, 82))
+    painter.drawEllipse(QPointF(-bw * 0.09, -bw * 0.01), bw * 0.035, bw * 0.045)
+    painter.setPen(QPen(QColor(72, 66, 82), max(1.0, bw * 0.008)))
+    for dx in (-0.04, 0.04):
+        painter.drawLine(QPointF(dx * bw, bw * 0.06), QPointF(dx * bw, bw * 0.12))
+    painter.restore()
+
+
 # 装扮注册表 worn 穿身上 ambient 撒周围 二者互斥
 COSTUME_LAYERS = {
     "sherlock": (draw_sherlock, None),
@@ -1973,6 +2104,12 @@ COSTUME_LAYERS = {
     "pizza": (None, draw_pizza),
     "spintop": (None, draw_spintop),
     "crane": (None, draw_crane),
+    "piano": (None, draw_piano),
+    "piggybank": (None, draw_piggybank),
+    "crystalball": (None, draw_crystalball),
+    "cards": (None, draw_cards),
+    "matryoshka": (None, draw_matryoshka),
+    "sheep": (None, draw_sheep),
 }
 COSTUMES = frozenset(COSTUME_LAYERS)
 WORN_COSTUMES = frozenset(name for name, (worn, _ambient) in COSTUME_LAYERS.items() if worn)

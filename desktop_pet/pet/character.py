@@ -313,6 +313,29 @@ _ACTIVITIES = {
         ("fold", 6.0, "～"),
         ("done", 1.5, "✦"),
     ]),
+    "piano": ("piano", 0.0, "happy_wiggle", [
+        ("hold", 1.4, ""),
+        ("play", 6.0, "✦"),
+    ]),
+    "piggybank": ("piggybank", 0.0, "celebrate", [
+        ("hold", 1.4, ""),
+        ("save", 5.0, "✦"),
+    ]),
+    "crystalball": ("crystalball", 0.0, "happy_wiggle", [
+        ("hold", 1.4, ""),
+        ("gaze", 6.0, "✦"),
+    ]),
+    "cards": ("cards", 0.0, "celebrate", [
+        ("hold", 1.4, ""),
+        ("fan", 5.5, "?"),
+    ]),
+    "matryoshka": ("matryoshka", 0.0, "happy_wiggle", [
+        ("hold", 1.6, ""),
+        ("open", 4.0, "✦"),
+    ]),
+    "sheep": ("sheep", 0.0, "happy_wiggle", [
+        ("count", 6.0, "～"),
+    ]),
 }
 _ACTIVITY_GAP = (150.0, 300.0)
 _TRAVEL = "__travel__"
