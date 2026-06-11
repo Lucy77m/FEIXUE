@@ -33,7 +33,7 @@
 
 Mochi is two things at once:
 
-- 🐾 **A desktop pet with a life of its own** — drawn entirely in code (no sprite assets whatsoever). It blinks, follows your cursor with its eyes, daydreams and hums, goes fishing and sips coffee. Ignore it and it finds its own fun; leave and it dozes off; now and then it strikes up a conversation on its own.
+- 🐾 **A desktop pet with a life of its own** — drawn entirely in code (no sprite assets whatsoever). It blinks, follows your cursor with its eyes, daydreams and hums, goes fishing and sips coffee, plays catch and hide-and-seek; it fans itself when the machine runs hot, puts up an umbrella in the rain, hunts down garbage bugs when junk piles up, eats files you drop on it, and brings out a cake on anniversaries. Ignore it and it finds its own fun; leave and it dozes off; now and then it strikes up a conversation on its own.
 - 🧠 **A local Agent that can drive your whole computer** — plug in your own LLM (any OpenAI-compatible endpoint) and it can see the screen, click windows, move the mouse and keyboard, run commands, write code, read and write files, search the web, remember things, and look stuff up; it can also **read its replies aloud, watch your screen on a timer, run tests after it edits code, fan out a team of sub-agents in parallel, remind you on a daily/weekly schedule, and even take orders remotely from your phone**… turning "chatting with an AI" into "having the AI do it for you."
 
 It carries persistent **emotions and rapport**, and slowly grows a **self-portrait (personality evolution)** as you spend time together — so it's "the same one," not a chat box that resets every time.
@@ -48,8 +48,8 @@ It carries persistent **emotions and rapport**, and slowly grows a **self-portra
 
 | Capability | Details |
 | --- | --- |
-| **Commands & Code** | PowerShell / cmd, a persistent Python environment (pip-install libraries, call APIs, drive automation) |
-| **Files & Codebase** | Read / write / precisely edit files, regex code search, find files by name |
+| **Commands & Code** | PowerShell / cmd (long commands can run in the background and have their output checked anytime), a persistent Python environment (pip-install libraries, call APIs, drive automation) |
+| **Files & Codebase** | Read / write / precisely edit files (sees images directly, auto-extracts PDF text / OCRs scanned pages), regex code search, find files by name |
 | **Engineering Discipline** | View the uncommitted `git diff`, auto-detect and run the test suite (pytest / npm) to verify a change — looks before it leaps, self-checks after editing, like a buddy who actually writes code |
 | **Internet** | Web search, fetch page text, HTTP requests, install packages |
 | **See Screen & Control** | Screenshots, OCR (RapidOCR), on-screen image matching, reading the accessibility tree to click controls precisely, mouse & keyboard; plus **watching your screen on the interval you set** (e.g. keep an eye on your game and warn you of danger/openings) |
@@ -68,7 +68,7 @@ It carries persistent **emotions and rapport**, and slowly grows a **self-portra
 | **Emotion System** | valence / arousal / rapport drive expressions and behavior; the closer you get, the more it opens up — praise makes it happy, scolding brings it down |
 | **Personality Evolution** | As you spend time together, each round of reflection slowly rewrites a "self-portrait" that's injected into the way it talks and acts — a "self" grown out of the relationship |
 | **Spontaneous Animation** | 15 thinking poses, daydream bubbles, eyes tracking the cursor — all continuous functions of time, never jittery |
-| **Prop-Based Skits** | Drinking coffee, fishing, cracking cases, reading, listening to music, gaming, stargazing, a void-leap, a shadow-clone act, catching a meteor, planting a flower — 11 in all, each a multi-stage little play |
+| **Prop-Based Skits** | Drinking coffee, fishing, cracking cases, reading, listening to music, gaming, stargazing, a void-leap, a shadow-clone act, catching a meteor, planting a flower, playing with a yarn ball — 12 in all, each a multi-stage little play |
 | **One-Shot Actions** | Dancing, cheering, spinning… each with fitting effects (confetti / musical notes / afterimages) |
 | **Presence Awareness** | It dozes off when you leave and wakes when you return; drag it to a screen edge and it tucks itself away, peeking out from a little corner; once in a while it "wormholes," teleporting and popping out from somewhere else on the screen |
 | **Holidays & Anniversaries** | It recognizes Gregorian holidays (New Year's, Valentine's, April Fools', Children's Day, Halloween, Christmas Eve, Christmas, New Year's Eve) and your birthday, and brings them up naturally on the day |
@@ -76,6 +76,14 @@ It carries persistent **emotions and rapport**, and slowly grows a **self-portra
 | **Talking First** | Occasionally speaks up on its own when idle, yet **with restraint** — long cooldowns, a daily cap, and rapport gating mean it never spams |
 | **Structured Expression** | It draws comparisons / lists / code on a little blackboard beside it to explain things; multi-step tasks get a **persistent task-list panel** (independent of the blackboard, never wiped by reply content); it can also display images / GIFs |
 | **Screen Helper & Clipboard** | Optional: while idle it occasionally glances at your screen and offers help if you seem stuck; it recognizes when you copy an error / foreign text / code and helps explain / translate on the spot ("Clipboard Alchemy") |
+| **Machine Mimicry** | It senses the machine's state and its body follows: fans itself when the CPU runs hot, gets squished when RAM is maxed, warns you on low battery, tucks under a blanket and yawns late at night, snuggles up to a warm machine in winter; when the machine truly goes idle it pulls out a yarn ball to play |
+| **Weather Mimicry** | Quietly checks the weather every two hours: umbrella in the rain, curls up in the snow, melting in a heatwave — whatever it's like outside is what it's like on it |
+| **Meeting-Aware** | Detects when the mic is in use (a call / meeting) and slips into a quiet mode so it won't bother you, popping back up once the meeting ends |
+| **Playful Interaction** | Throw it a ball and it goes to catch it; once in a while it hides with just its tail-tip showing for you to find; it perches atop your foreground window (and tumbles off in a huff when the window moves); tickle it and it giggles; drag-and-drop it hard and it holds a grudge; in a good mood it leaves a trail of footprints as it walks (swapped for petals / snowflakes on holidays) |
+| **Garbage Bugs** | When temp files pile past 500MB, a little garbage bug crawls out beside it — squish it, and it **actually** clears that junk and frees up space |
+| **Feeding** | Drag files onto it: junk gets eaten (into the Recycle Bin), documents are swallowed into the knowledge base, images get a glance; protected / risky paths are dodged, not eaten |
+| **Rituals** | A "mood forecast" on your first meeting each day; an anniversary cake at 7 / 30 / 100 / 365 days together (tap to blow out the candles); a goodbye wave at exit; a 25-minute Pomodoro focus session with you |
+| **Thoughtful Watching** | It keeps an eye on background commands for you — celebrating on success, analyzing on failure on its own; it quietly stashes little things from your clipboard and fondly "gives them back" hours later; it also pipes up when a download finishes or your desktop gets too cluttered |
 
 ### ⌨️ Handy Interaction
 
@@ -93,20 +101,25 @@ desktop_pet/
 ├─ app.py            # Conductor: wires UI / agent / timers / tray / hotkeys, live-gates proactive messages
 ├─ agent/            # The brain
 │   ├─ loop.py       #   Agent loop: model↔tool feedback, streaming, trimming, reflection, personality evolution, sub-agent orchestration
-│   ├─ tools.py      #   Tool table (62 tools) with dispatch, concurrency-safe locks
+│   ├─ tools.py      #   Tool table (63 tools) with dispatch, concurrency-safe locks
 │   ├─ bgtasks.py    #   Background-task registry (listable / cooperatively stoppable)
 │   ├─ streaming.py  #   Folds the delta stream back into a single message, chunks chain-of-thought
 │   ├─ prompts.py    #   All prompts (persona seed, system, reflection, code-editing discipline) gathered in one place
 │   └─ progress.py   #   Thinking-pose scheduling and progress hints
 ├─ pet/              # The body: window, code-drawn character, speech/input, blackboard, task-list panel (todo_board),
 │                    #       control panel, confirm panel, hiding/entrance/wormhole teleport (wormhole), tray (tray),
-│                    #       window effects (fx), behavior selector & action library, props & palette
+│                    #       window effects (fx), behavior selector & action library, props & palette;
+│                    #       toy ball (ball), garbage bug (bug), feeding (feeding), ink footprints (footprints),
+│                    #       hide-and-seek (hideseek), persistent-state adornments (adornments)
+├─ companions/       # Companion-behavior package, one little machine per module: feeding routing (feeding_ctrl),
+│                    #       play & physics (playtime), rituals (rituals), environment sensors (sensors), background watching (watchers)
 ├─ emotion/          # Emotion state machine (VA + rapport) and emotion-tag tables
+├─ somatic.py        # Body sensations: injects "what just happened to it" + ongoing states into each turn's context
 ├─ persona.py        # Self-portrait evolution layer (persona.json), injected into conversation context
 ├─ voice.py          # Read-aloud (TTS): Edge online neural voices + local SAPI fallback, synced sentence-by-sentence with the bubble
 ├─ memory/           # Long-term memory (SQLite) + vector embeddings (numpy-vectorized recall)
 ├─ executor/         # Commands / Python / files / network / vision (OCR · matching) / system memory / dev tools (diff · tests) / safety guardrails
-├─ hands/            # Mouse / keyboard / window control
+├─ hands/            # Mouse / keyboard / window control / ghost mouse (ghost — background PostMessage clicks without moving the real cursor)
 ├─ eyes/             # Screenshots + accessibility tree (UIA) + on-screen image matching
 ├─ docs.py · reminders.py · proactive.py · journal.py · presence.py
 ├─ occasions.py      # Holiday / birthday awareness: hands the model a fitting "hook" on special days
@@ -114,6 +127,8 @@ desktop_pet/
 ├─ clipsampler.py · clipclass.py   # Clipboard-alchemy backend: sampling + local classification (error/foreign-language/code/link) + dedup & throttle
 ├─ watcher.py        # Scheduled screen-watching (session-level, e.g. watch your game)
 ├─ remote.py         # Remote trigger (file inbox, off by default)
+├─ usage.py          # Token usage metering: cumulative input / output / cache hits, persisted per day
+├─ updater.py        # Version update check: queries the latest GitHub release and compares with local
 └─ hotkeys.py · skills.py · mcp_hub.py · settings.py · audit.py · i18n.py
 ```
 
@@ -199,6 +214,13 @@ A continuous valence / arousal mood + slowly accumulating rapport, persisted to 
 - **Remote trigger**: `remote.py` — when enabled it polls `data/inbox/*.json`, running `{"task":...}` in the background or having it `{"say":...}` a line, then archiving into `inbox/done/`. **Files only, opens no network port**; off by default; to avoid reading a half-synced cloud file it waits until the mtime has been stable for a few seconds, and polls on a background thread so the UI never freezes.
 - **Hiding / entrance**: dragged to a screen edge it shrinks into a corner and occasionally peeks out; every launch picks a random entrance animation and never repeats the previous one; once in a while it "wormholes" — cracking open a wormhole in place, spinning inward, teleporting while the window is invisible, and popping out elsewhere on the screen.
 - **Holidays / companionship**: `occasions.py` recognizes Gregorian holidays + the birthday you set and, on the day, gives the model a fitting "hook" so it brings them up naturally rather than offering a canned greeting; `stats.py` quietly tracks first-meeting time and cumulative interactions — the basis for "how long we've known each other."
+- **Companion behaviors (companions/)**: five "little machines," each minding its own patch, all wrapped in presence / busy / rapport / cooldown gating —
+  - `sensors.py`: reads CPU / RAM / battery vitals every 10s (with hysteresis, no jitter), driving **machine mimicry** (fan when hot, squished RAM, low battery, late-night blanket, winter snuggle); checks mic usage for **meeting-mute**; queries `wttr.in` every two hours for **weather mimicry**; watches the Downloads folder and desktop icon count; covers its eyes when the focused field is a password box.
+  - `playtime.py`: play & physical feedback — throw/catch ball, hide-and-seek (rapport-gated, once a day max), windowsill perch (tumbles when the window moves), tickle / drag-throw grudge, **ink footprints** while walking, a fishing-catch easter egg; scans temp and spawns a **garbage bug** past 500MB, squishing it triggers a real cleanup.
+  - `rituals.py`: **rituals** — morning mood forecast, anniversary cake (blow out candles), a goodbye wave at exit, a 25-minute Pomodoro focus.
+  - `feeding_ctrl.py` + `pet/feeding.py`: **feeding routing** — dropped files routed by type (junk → Recycle Bin, docs → knowledge base, images → a glance), protected / risky paths blocked, big meals / whole directories confirmed first.
+  - `watchers.py`: **background watching** — watches background shells started by `start_background_task`, celebrating success and calling the agent to analyze failures; quietly stashes clipboard treasures and fondly "gives them back" hours later.
+- **Body sensations (somatic.py)**: things that happen to it (being fed / tossed / catching a ball / the cake coming out), together with ongoing states ("in a meeting," "machine running hot"), are gathered into one "body status" note injected into every turn's context — so when it chats it **actually knows what just happened to it**, instead of faking it.
 - **MCP / hotkeys / skills / audit / i18n**: MCP connectors blend into the tool table as `mcp__{server}__{tool}`; global hotkeys run a Win32 message loop on a dedicated thread (summon / ask selection / quick rewrite); skills save working code as reusable items injected into the prompt; all tool calls are written to an audit log; the control panel UI supports Chinese / English / Japanese.
 
 ---
