@@ -149,6 +149,28 @@ _ACTIVITIES = {
         ("throw", 1.0, "!"),
         ("glide", 5.5, "～"),
     ]),
+    "kite": ("kite", 0.0, "jump_spin", [
+        ("run", 3.0, "～"),
+        ("fly", 6.0, "✦"),
+    ]),
+    "camera": ("camera", 0.0, "celebrate", [
+        ("aim", 3.0, "?"),
+        ("flash", 0.8, "!"),
+        ("aim", 2.0, "♥"),
+    ]),
+    "bubbletea": ("bubbletea", 0.0, "happy_wiggle", [
+        ("hold", 1.6, ""),
+        ("sip", 5.5, "～"),
+    ]),
+    "tanghulu": ("tanghulu", 0.0, "puff_up", [
+        ("hold", 1.6, ""),
+        ("bite", 5.0, "～"),
+    ]),
+    "dandelion": ("dandelion", 0.0, "happy_wiggle", [
+        ("hold", 1.8, ""),
+        ("blow", 2.2, "～"),
+        ("watch", 4.0, "✦"),
+    ]),
 }
 _ACTIVITY_GAP = (150.0, 300.0)
 _TRAVEL = "__travel__"

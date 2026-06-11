@@ -989,6 +989,136 @@ def draw_paperplane(painter: QPainter, bw: float, bh: float, t: float, stage: st
     painter.restore()
 
 
+def draw_kite(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
+    """放风筝 跑->放线->高飞"""
+    sway = math.sin(t * 1.2) * bw * 0.10
+    if stage == "run":
+        kx = bw * (0.15 + 0.32 * stage_p) + sway
+        ky = -bh * (0.45 + 0.5 * stage_p)
+    else:
+        kx, ky = bw * 0.46 + sway, -bh * 0.98
+    hand = QPointF(bw * 0.20, bh * 0.12)
+    pen = QPen(QColor(150, 150, 165), max(0.9, bw * 0.006))
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    painter.setPen(pen)
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    path = QPainterPath(hand)
+    path.quadTo(QPointF((hand.x() + kx) / 2, ky + bh * 0.55), QPointF(kx, ky + bw * 0.18))
+    painter.drawPath(path)
+    s = bw * 0.16
+    painter.save()
+    painter.translate(kx, ky)
+    painter.rotate(sway * 0.5)
+    painter.setPen(QPen(QColor(180, 90, 80), max(1.0, bw * 0.008)))
+    painter.setBrush(QColor(236, 120, 108))
+    painter.drawPolygon(QPolygonF([QPointF(0, -s * 1.3), QPointF(s, 0), QPointF(0, s * 1.05), QPointF(-s, 0)]))
+    painter.setPen(QPen(QColor(160, 80, 72, 180), max(0.8, bw * 0.005)))
+    painter.drawLine(QPointF(0, -s * 1.3), QPointF(0, s * 1.05))
+    painter.drawLine(QPointF(-s, 0), QPointF(s, 0))
+    painter.restore()
+    pen2 = QPen(QColor(236, 120, 108), max(0.9, bw * 0.006))
+    pen2.setCapStyle(Qt.PenCapStyle.RoundCap)
+    painter.setPen(pen2)
+    tail = QPainterPath(QPointF(kx, ky + s * 1.05))
+    for j in range(1, 4):
+        tail.lineTo(QPointF(kx + math.sin(t * 3 + j) * bw * 0.05, ky + s * 1.05 + j * bh * 0.13))
+    painter.drawPath(tail)
+
+
+def draw_camera(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
+    """举相机拍照 取景->咔嚓闪光"""
+    if stage == "flash":
+        k = max(0.0, 1.0 - stage_p * 1.6)
+        if k > 0.0:
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(255, 255, 235, int(120 * k)))
+            rr = bw * 0.5 * (1.0 + stage_p)
+            painter.drawEllipse(QPointF(-bw * 0.40, -bh * 0.10), rr, rr)
+    cy = bh * 0.0
+    cw, ch = bw * 0.30, bh * 0.26
+    painter.setPen(QPen(QColor(70, 72, 84), max(1.0, bw * 0.008)))
+    painter.setBrush(QColor(96, 98, 112))
+    painter.drawRoundedRect(QRectF(-cw, cy - ch * 0.5, cw * 2, ch), bw * 0.03, bw * 0.03)
+    painter.setBrush(QColor(70, 72, 84))
+    painter.drawRoundedRect(QRectF(cw * 0.35, cy - ch * 0.5 - bh * 0.05, cw * 0.55, bh * 0.05), 2, 2)
+    painter.setBrush(QColor(206, 86, 86))
+    painter.drawEllipse(QPointF(cw * 0.62, cy - ch * 0.5 - bh * 0.025), bw * 0.022, bw * 0.022)
+    painter.setBrush(QColor(58, 60, 72))
+    painter.drawEllipse(QPointF(0, cy), bw * 0.12, bw * 0.12)
+    painter.setBrush(QColor(120, 142, 162))
+    painter.drawEllipse(QPointF(0, cy), bw * 0.075, bw * 0.075)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor(255, 255, 255, 170))
+    painter.drawEllipse(QPointF(-bw * 0.035, cy - bw * 0.035), bw * 0.026, bw * 0.026)
+
+
+def draw_bubbletea(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
+    """奶茶 举杯->吸珍珠"""
+    cx = bw * 0.30
+    top, bot = -bh * 0.08, bh * 0.30
+    wt, wbo = bw * 0.13, bw * 0.10
+    painter.setPen(QPen(QColor(180, 150, 140), max(1.0, bw * 0.007)))
+    painter.setBrush(QColor(228, 205, 180, 238))
+    painter.drawPolygon(QPolygonF([QPointF(cx - wt, top), QPointF(cx + wt, top),
+                                   QPointF(cx + wbo, bot), QPointF(cx - wbo, bot)]))
+    painter.setBrush(QColor(210, 225, 235, 235))
+    painter.drawRoundedRect(QRectF(cx - wt - bw * 0.012, top - bh * 0.045, (wt + bw * 0.012) * 2, bh * 0.05), 2, 2)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor(74, 56, 50))
+    for dx, dy in ((-0.05, 0.0), (0.03, 0.01), (-0.01, 0.045), (0.055, 0.04), (-0.06, 0.05), (0.005, 0.075)):
+        painter.drawEllipse(QPointF(cx + dx * bw, bot - bh * 0.05 + dy * bh), bw * 0.023, bw * 0.023)
+    painter.setPen(QPen(QColor(225, 110, 120), max(1.4, bw * 0.014)))
+    painter.drawLine(QPointF(cx + bw * 0.04, top - bh * 0.18), QPointF(cx - bw * 0.02, bot - bh * 0.05))
+
+
+def draw_tanghulu(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
+    """糖葫芦 举串->一颗颗咬"""
+    base = QPointF(bw * 0.16, bh * 0.30)
+    tip = QPointF(bw * 0.44, -bh * 0.34)
+    painter.setPen(QPen(QColor(196, 174, 142), max(1.2, bw * 0.01)))
+    painter.drawLine(base, tip)
+    n = 5
+    eaten = int(stage_p * n) if stage == "bite" else 0
+    for i in range(eaten, n):
+        f = i / (n - 1)
+        c = QPointF(base.x() + (tip.x() - base.x()) * f, base.y() + (tip.y() - base.y()) * f)
+        painter.setPen(QPen(QColor(150, 40, 40), max(0.8, bw * 0.005)))
+        painter.setBrush(QColor(214, 50, 52))
+        painter.drawEllipse(c, bw * 0.062, bw * 0.062)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(255, 205, 195, 160))
+        painter.drawEllipse(QPointF(c.x() - bw * 0.02, c.y() - bw * 0.02), bw * 0.02, bw * 0.02)
+
+
+def draw_dandelion(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
+    """吹蒲公英 举着->吹散->看种子飘"""
+    head = QPointF(bw * 0.30, -bh * 0.06)
+    painter.setPen(QPen(QColor(120, 170, 110), max(1.2, bw * 0.01)))
+    painter.drawLine(QPointF(head.x(), head.y() + bw * 0.05), QPointF(head.x() - bw * 0.04, bh * 0.30))
+    remain = (1.0 - stage_p) if stage == "blow" else 1.0
+    for k in range(28):
+        if k / 28.0 > remain:
+            continue
+        ang = k / 28.0 * 2 * math.pi
+        rr = bw * 0.09
+        tipp = QPointF(head.x() + math.cos(ang) * rr, head.y() + math.sin(ang) * rr)
+        painter.setPen(QPen(QColor(218, 224, 230, 200), max(0.7, bw * 0.004)))
+        painter.drawLine(head, tipp)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(246, 248, 251, 225))
+        painter.drawEllipse(tipp, bw * 0.012, bw * 0.012)
+    if stage in ("blow", "watch"):
+        for s in range(6):
+            ph = (t * 0.4 + s * 0.2) % 1.0
+            sx = head.x() + bw * (0.1 + 0.5 * ph)
+            sy = head.y() - bh * (0.2 + 0.8 * ph)
+            painter.setPen(QPen(QColor(218, 224, 230, int(150 * (1 - ph))), max(0.6, bw * 0.004)))
+            painter.drawLine(QPointF(sx, sy), QPointF(sx - bw * 0.03, sy + bw * 0.03))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(246, 248, 251, int(190 * (1 - ph))))
+            painter.drawEllipse(QPointF(sx, sy), bw * 0.012, bw * 0.012)
+
+
 # 装扮注册表 worn 穿身上 ambient 撒周围 二者互斥
 COSTUME_LAYERS = {
     "sherlock": (draw_sherlock, None),
@@ -1010,6 +1140,11 @@ COSTUME_LAYERS = {
     "balloon": (None, draw_balloon),
     "icecream": (None, draw_icecream),
     "paperplane": (None, draw_paperplane),
+    "kite": (None, draw_kite),
+    "camera": (draw_camera, None),
+    "bubbletea": (None, draw_bubbletea),
+    "tanghulu": (None, draw_tanghulu),
+    "dandelion": (None, draw_dandelion),
 }
 COSTUMES = frozenset(COSTUME_LAYERS)
 WORN_COSTUMES = frozenset(name for name, (worn, _ambient) in COSTUME_LAYERS.items() if worn)
