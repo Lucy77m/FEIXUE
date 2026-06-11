@@ -268,6 +268,7 @@ class Agent:
         self._on_perform: Callable[[str], bool] | None = None
         self._turn_used_tools = False
         self._turn_substantive = True
+        self._turn_emotion_peak = 0.5  # 本轮情绪强度峰值 喂给记忆显著性
         self._hit_step_limit = False
         self._last_active = 0.0
         self._turn_user_idx = -1
@@ -562,6 +563,9 @@ class Agent:
             self._known_files.clear()
             self._messages = [self._system_message()]
         self._last_active = now
+        # 抓这次交流的情绪强度（此刻夸/骂的鉴别已结算）——记忆显著性用它放大
+        _val, _aro, _rap = emotion.snapshot()
+        self._turn_emotion_peak = max(_aro, abs(_val))
         self._prepare()
         history_mark = len(self._messages)  # 出错回滚点
         n_att = len(attachments) if isinstance(attachments, list) else 0
@@ -1353,7 +1357,12 @@ class Agent:
     def _reflect(self, snapshot: list[dict]) -> None:
         """反思线程体 提炼json写进各存储"""
         try:
-            reflect_msg = prompts.REFLECT_PROMPT + "\n\n[Your current self-portrait — evolve THIS gently, don't toss it]:\n" + (persona.get() or "(none yet — this is the first one you're forming)")
+            core = store.core_memories(4)
+            core_block = (
+                "\n\n[Your core memories — the formative moments that made you who you are; "
+                "keep your self-portrait true to these]:\n- " + "\n- ".join(core)
+            ) if core else ""
+            reflect_msg = prompts.REFLECT_PROMPT + core_block + "\n\n[Your current self-portrait — evolve THIS gently, don't toss it]:\n" + (persona.get() or "(none yet — this is the first one you're forming)")
             conversation = snapshot + [{"role": "user", "content": reflect_msg}]
             try:
                 resp = self._client().chat.completions.create(
@@ -1366,9 +1375,21 @@ class Agent:
             data = _parse_json(content)
             if not data:
                 return
+            peak = getattr(self, "_turn_emotion_peak", 0.5)
             for experience in (data.get("experiences") or [])[:5]:
-                if isinstance(experience, str) and experience.strip():
-                    store.remember(experience.strip())
+                text, weight = "", 0.3
+                if isinstance(experience, dict):  # 新格式 {text, weight}
+                    text = str(experience.get("text") or "").strip()
+                    try:
+                        weight = float(experience.get("weight", 0.3))
+                    except (TypeError, ValueError):
+                        weight = 0.3
+                elif isinstance(experience, str):  # 兼容旧格式 纯字符串
+                    text = experience.strip()
+                if text:
+                    # 模型判断的形成性为主 当下情绪强度为辅
+                    salience = max(0.0, min(1.0, 0.55 * weight + 0.45 * peak))
+                    store.remember(text, salience=salience)
             preferences = data.get("preferences")
             if isinstance(preferences, dict):
                 for key, value in preferences.items():

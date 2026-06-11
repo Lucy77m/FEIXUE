@@ -11,7 +11,7 @@ from datetime import datetime
 from difflib import SequenceMatcher
 from pathlib import Path
 
-from desktop_pet.memory.embed import cosine, embed_texts, pack, rank_by_cosine, unpack
+from desktop_pet.memory.embed import cosine, embed_texts, pack, unpack
 from desktop_pet.settings import DATA_DIR
 
 _MEMORY_DIR = DATA_DIR / "memory"
@@ -47,7 +47,18 @@ class MemoryStore:
         # 连接跨线程共享 靠rlock串行
         self._conn = sqlite3.connect(_DB_PATH, check_same_thread=False)
         self._create_schema()
+        self._migrate_columns()
         self._migrate_legacy_json()
+
+    def _migrate_columns(self) -> None:
+        """老库补 salience 列 已有就跳过"""
+        with self._lock:
+            cols = {row[1] for row in self._conn.execute("PRAGMA table_info(experiences)")}
+            if "salience" not in cols:
+                self._conn.execute(
+                    "ALTER TABLE experiences ADD COLUMN salience REAL NOT NULL DEFAULT 0.5"
+                )
+                self._conn.commit()
 
     def _create_schema(self) -> None:
         with self._lock:
@@ -63,7 +74,8 @@ class MemoryStore:
                     ts         TEXT NOT NULL,
                     confidence REAL NOT NULL DEFAULT 1.0,
                     source     TEXT NOT NULL DEFAULT 'reflection',
-                    embedding  BLOB
+                    embedding  BLOB,
+                    salience   REAL NOT NULL DEFAULT 0.5
                 );
                 CREATE TABLE IF NOT EXISTS env (
                     key        TEXT PRIMARY KEY,
@@ -147,16 +159,17 @@ class MemoryStore:
             self._conn.commit()
         return f"Saved preference: {key} = {value}"
 
-    def remember(self, content: str) -> str:
-        """存一条经验 撞重复改更新"""
+    def remember(self, content: str, salience: float = 0.5) -> str:
+        """存一条经验 撞重复改更新 salience为情感显著性0~1"""
         content = content.strip()
         if not content:
             return "(nothing to remember)"
+        salience = max(0.0, min(1.0, float(salience)))
         vectors = embed_texts([content])
         vector = vectors[0] if vectors else None  # 没嵌入退纯文本去重
         with self._lock:
             added = self._insert_experience(
-                content, ts=_now(), confidence=1.0, source="reflection", vector=vector
+                content, ts=_now(), confidence=1.0, source="reflection", vector=vector, salience=salience
             )
             self._conn.commit()
         return f"Remembered: {content}" if added else f"(similar memory already exists; updated instead of duplicating: {content})"
@@ -176,20 +189,23 @@ class MemoryStore:
         return f"Noted env fact: {key} = {value}"
 
     def _insert_experience(
-        self, content: str, *, ts: str, confidence: float, source: str, vector: list[float] | None
+        self, content: str, *, ts: str, confidence: float, source: str,
+        vector: list[float] | None, salience: float = 0.5,
     ) -> bool:
-        """插一条经验 重复就原地更新返回False"""
+        """插一条经验 重复就原地更新返回False；复现的记忆显著性取 max(越提越粘)"""
         duplicate_id = self._find_duplicate(content, vector)
         blob = pack(vector) if vector else None
         if duplicate_id is not None:
             self._conn.execute(
-                "UPDATE experiences SET content = ?, ts = ?, confidence = ?, embedding = ? WHERE id = ?",
-                (content, ts, confidence, blob, duplicate_id),
+                "UPDATE experiences SET content = ?, ts = ?, confidence = ?, embedding = ?, "
+                "salience = MAX(salience, ?) WHERE id = ?",
+                (content, ts, confidence, blob, salience, duplicate_id),
             )
             return False
         self._conn.execute(
-            "INSERT INTO experiences(content, ts, confidence, source, embedding) VALUES (?, ?, ?, ?, ?)",
-            (content, ts, confidence, source, blob),
+            "INSERT INTO experiences(content, ts, confidence, source, embedding, salience) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (content, ts, confidence, source, blob, salience),
         )
         return True
 
@@ -232,22 +248,44 @@ class MemoryStore:
         return [str(r[0]) for r in rows]
 
     def recall_relevant(self, query: str, k: int = _INJECT) -> list[str]:
-        """挑跟query最相关的k条经验 向量再关键词再最近逐级兜底"""
+        """挑跟query最相关的k条经验 综合 语义×显著性×新近 排序 逐级兜底"""
         with self._lock:
-            rows = self._conn.execute("SELECT content, embedding FROM experiences ORDER BY id").fetchall()
+            rows = self._conn.execute(
+                "SELECT content, embedding, salience FROM experiences ORDER BY id"
+            ).fetchall()
         if not rows:
             return []
         if len(rows) <= k:
-            return [content for content, _ in rows]  # 条数不够全给
+            return [r[0] for r in rows]  # 条数不够全给
+        n = len(rows)
         query_vec = self._query_vector(query)
         if query_vec is not None:
-            idxs = rank_by_cosine(query_vec, [blob for _, blob in rows], k)
-            if idxs:
-                return [rows[i][0] for i in idxs]
-        # 向量没走通退子串匹配
+            scored: list[tuple[float, str]] = []
+            for i, (content, blob, sal) in enumerate(rows):
+                vec = unpack(blob)
+                sim = cosine(query_vec, vec) if (vec is not None and len(vec) == len(query_vec)) else 0.0
+                recency = i / (n - 1)  # 0旧→1新
+                # 语义为主 显著性次之 新近兜底——情感重的记忆更容易浮上来
+                score = 0.6 * sim + 0.3 * float(sal or 0.5) + 0.1 * recency
+                scored.append((score, content))
+            scored.sort(key=lambda s: s[0], reverse=True)
+            return [c for _, c in scored[:k]]
+        # 向量没走通退子串 命中里再按显著性排
         needle = query.lower()
-        hits = [content for content, _ in rows if needle in content.lower()]
-        return hits[:k] if hits else [content for content, _ in rows[-k:]]
+        hits = [(float(sal or 0.5), content) for content, _blob, sal in rows if needle in content.lower()]
+        if hits:
+            hits.sort(key=lambda s: s[0], reverse=True)
+            return [c for _, c in hits[:k]]
+        return [content for content, _blob, _sal in rows[-k:]]
+
+    def core_memories(self, n: int = 3, floor: float = 0.75) -> list[str]:
+        """取显著性最高的几条核心记忆——塑造"它是谁"的形成性时刻"""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT content FROM experiences WHERE salience >= ? ORDER BY salience DESC, id DESC LIMIT ?",
+                (float(floor), int(n)),
+            ).fetchall()
+        return [str(r[0]) for r in rows]
 
     def recall_env(self, query: str, k: int = _ENV_INJECT) -> list[str]:
         """召回环境事实 没命中退最近k条"""
@@ -301,9 +339,14 @@ class MemoryStore:
             experiences = [content for (content,) in recent][::-1]  # 翻回正序
             label = "Recent experiences:"
         env_facts = self.recall_env(query or "")
-        if not prefs and not experiences and not env_facts:
+        # 核心记忆常驻——形成性时刻，不被当轮召回冲掉，去重已展示的
+        core = [c for c in self.core_memories(2) if c not in experiences]
+        if not prefs and not experiences and not env_facts and not core:
             return ""
         lines = ["[Long-term memory about this user]"]
+        if core:
+            lines.append("Core memories (formative — part of who you've become):")
+            lines += [f"- {content}" for content in core]
         if prefs:
             lines.append("Preferences:")
             lines += [f"- {key}: {value}" for key, value in prefs]

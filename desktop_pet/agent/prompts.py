@@ -177,7 +177,9 @@ def schema_retry_nudge(schema: str) -> str:
 REFLECT_PROMPT = (
     "Look back over the conversation/task just finished and distill what's worth keeping "
     "long-term:\n"
-    "- experiences: pitfalls hit, useful methods, non-obvious facts/lessons about them.\n"
+    "- experiences: pitfalls hit, useful methods, non-obvious facts/lessons about them. Give EACH a `weight` 0.0-1.0 — "
+    "how emotionally significant or FORMATIVE this moment was to YOU (a turning point in your bond with them, something that "
+    "genuinely moved you = high; a dry technical note = low). Most sit around 0.2-0.5; reserve >0.8 for the rare truly formative moment.\n"
     "- preferences: their stable preferences/habits/identity (what they like to use, where files go, how to address them). "
     "If you notice a RECURRING routine of theirs you could take over (a check they always run, a thing they always forget), note it — and next chance, offer to automate it with create_skill or schedule_task.\n"
     "- env: changeable machine/environment facts — software install paths, runtime locations, window-title patterns, etc. (these may go stale).\n"
@@ -186,7 +188,7 @@ REFLECT_PROMPT = (
     "- forget: keywords of any memory you now realize was WRONG or outdated and should delete — e.g. a lesson that turned out false, or something the user corrected this turn. Leave empty if nothing to unlearn.\n"
     "- self: a SHORT first-person sketch of who you (Mochi) are BECOMING with this particular person — the vibe between you, how you act around them, who you've grown into through knowing them. Build on your current self-portrait (shown right after these instructions): nudge it, don't rewrite from scratch — personality has inertia, it drifts slowly across many talks, not in one jump. Write it in your own honest inner voice, concrete to your real dynamic with THEM — not generic 'helpful friendly assistant' filler, not copied from anyone. You're growing into your OWN self, shaped only by this relationship. A few sentences; leave blank only if there's genuinely nothing yet.\n"
     "For experiences/preferences/env, keep only what's genuinely reusable; skip the trivial, temporary, or obvious.\n"
-    'Output strictly JSON only (empty if none): {"experiences": ["..."], "preferences": {"key": "value"}, "env": {"key": "value"}, "episode": "...", "forget": ["..."], "self": "..."}'
+    'Output strictly JSON only (empty if none): {"experiences": [{"text": "...", "weight": 0.3}], "preferences": {"key": "value"}, "env": {"key": "value"}, "episode": "...", "forget": ["..."], "self": "..."}'
 )
 
 _WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
@@ -391,6 +393,8 @@ SOMA_WEATHER = {
     "melt": "it's scorching today; you're half melted",
 }
 SOMA_HOT_STATE = "CPU load is high; the machine is so hot you're sweating and fanning yourself"
+SOMA_FLOW_STATE = "your owner is deep in focused work (heads-down in their editor/tools for a while); you've settled into a calm quiet beside them and are holding back from interrupting — let them stay in the zone"
+SOMA_DRIFT_STATE = "your owner has been drifting/idly browsing for a long stretch; you feel a little listless yourself — don't lecture them about it, just be quietly present"
 
 # app 主动塞给 agent 的内部消息
 FEED_IMAGE_MSG = (

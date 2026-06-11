@@ -24,6 +24,7 @@ from desktop_pet.companions.playtime import Playtime
 from desktop_pet.companions.rituals import Rituals
 from desktop_pet.companions.sensors import Sensors
 from desktop_pet.companions.watchers import Watchers
+from desktop_pet.companions.wellbeing import Wellbeing
 from desktop_pet.docs import docs
 from desktop_pet.memory.store import store
 from desktop_pet.skills import skills
@@ -443,6 +444,7 @@ class PetApp(QObject):
         self._playtime = Playtime(self)
         self._watchers = Watchers(self)
         self._rituals = Rituals(self)
+        self._wellbeing = Wellbeing(self)
 
         self._tray = Tray(
             on_open_panel=self._open_panel,
@@ -1077,6 +1079,8 @@ class PetApp(QObject):
         try:
             if self._meeting_mode:
                 return  # 开会不主动出声
+            if self._wellbeing.in_flow():
+                return  # 你在心流里 一切打扰都让路
             if self._maybe_peek():
                 return
             if self._maybe_occasion():
@@ -1484,7 +1488,7 @@ class PetApp(QObject):
 
     def _do_quit(self) -> None:
         # 先掐死全部伴生轮询 退出过程不再孵新线程
-        for c in (self._sensors, self._playtime, self._watchers, self._rituals, self._feeding):
+        for c in (self._sensors, self._playtime, self._watchers, self._rituals, self._feeding, self._wellbeing):
             try:
                 c.stop()
             except Exception:
@@ -1545,6 +1549,7 @@ class PetApp(QObject):
         self._playtime.start()
         self._watchers.start()
         self._rituals.start()
+        self._wellbeing.start()
         if self._settings.remote_inbox:
             remote_inbox.ensure_dir()
         self._hotkeys.start()
