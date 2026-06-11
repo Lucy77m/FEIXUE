@@ -728,8 +728,8 @@ class PetApp(QObject):
     @Slot(str)
     @Slot(str)
     def _on_proactive_reply(self, raw: str) -> None:
-        if self._foreground_busy() or self._lecturing:
-            return
+        if not self._shown or self._foreground_busy() or self._lecturing:
+            return  # 关机隐藏时 即便有在途的主动回复返回 也不弹气泡
         self._on_reply(raw)
 
     def _on_reply(self, raw: str) -> None:
@@ -916,8 +916,8 @@ class PetApp(QObject):
         self._confirm_event.set()
 
     def _feed_pop(self, text: str) -> None:
-        if self._meeting_mode:
-            return  # 开会静音 主动气泡全咽下去
+        if self._meeting_mode or not self._shown:
+            return  # 开会静音 / 关机隐藏时 主动气泡全咽下去
         self._thought.pop(text, self._pet)
 
     @Slot(bool)
