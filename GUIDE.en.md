@@ -86,7 +86,7 @@ After building, **double-click to run it once and click through every feature**,
 
 ## 3. Testing & Troubleshooting
 
-There are no automated UI tests; verification relies on a **manual walkthrough checklist**, item by item (action → expected). Before running it, make sure Mochi is started and the control panel's API is configured. Three observation channels:
+The safety guardrail has unit tests (`tests/test_safety.py`, run with `uv run --no-dev --group test python -m pytest tests/ -q`, covering positive/negative cases for `check_blocked` / `check_risky` and the "already-blocked, don't double-warn" precedence); beyond that there are no automated UI tests, and verification relies on a **manual walkthrough checklist**, item by item (action → expected). Before running it, make sure Mochi is started and the control panel's API is configured. Three observation channels:
 
 1. The **bubble / blackboard / polaroid / confirm panel** beside the pet;
 2. The **control panel** (Endpoint / Chat / Permissions / About — four pages);

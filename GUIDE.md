@@ -86,7 +86,7 @@ uv run pyinstaller mochi.spec --noconfirm
 
 ## 3. 测试与排错
 
-无自动化 UI 测试，靠一份**人工走查清单**逐项验证（操作 → 预期）。跑之前确保 Mochi 已启动、控制面板已配好 API。三个观察渠道：
+安全护栏有单元测试（`tests/test_safety.py`，跑 `uv run --no-dev --group test python -m pytest tests/ -q`，覆盖 `check_blocked` / `check_risky` 的正反例与"已拦不重复 warn"优先级）；其余无自动化 UI 测试，靠一份**人工走查清单**逐项验证（操作 → 预期）。跑之前确保 Mochi 已启动、控制面板已配好 API。三个观察渠道：
 
 1. 宠物身边的**气泡 / 黑板 / 拍立得 / 确认面板**；
 2. **控制面板**（接口 / 对话 / 权限 / 关于四页）；

@@ -42,6 +42,19 @@ It carries persistent **emotions and rapport**, and slowly grows a **self-portra
 
 ---
 
+## ✦ Design Philosophy: A Full-Privilege Companion
+
+Mochi acts on your machine with **the same privileges you have** — running arbitrary commands and code, moving the mouse and keyboard, reading and writing files. This is **deliberate**:
+
+- **No sandbox, no layered restrictions.** Caging it would defeat the whole premise that "it can actually do things for you." I wanted a full-privilege companion, not a restricted assistant that needs approval at every turn.
+- **The power is in your hands, but open by default.** The control panel can switch off capability groups (web / control / commands), and the `confirm` panel intercepts before irreversible operations — these are switches for you to use **when you want them**, not a leash kept on it by default.
+- **The safety guardrail only catches "catastrophic slips."** `executor/safety.py` hard-blocks only a tiny set of irreversible, destructive operations (formatting a disk, deleting a system root, etc.); it does not try to stop a model that's been turned malicious or injected — that isn't something this layer can solve, nor is it its job. It's a net for the model's occasional misfire, not a cage.
+- **So this is a tool that trusts you and asks the same judgment back.** Its capability is matched by your responsibility; on a machine you trust, use it as a companion.
+
+> In a word: I'd rather it be **over-powered and need you at the wheel** than **so safe it can't get anything done**.
+
+---
+
 ## 2. Highlights
 
 ### 🧠 A Brain That Gets Work Done

@@ -28,6 +28,10 @@ dependencies = [
 dev = [
     "pyinstaller>=6.6",
 ]
+# 单独成组 跑测试不必拽进重的 pyinstaller：uv run --no-dev --group test python -m pytest tests/ -q
+test = [
+    "pytest>=8.0",
+]
 
 [tool.uv]
 package = false
