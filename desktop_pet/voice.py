@@ -24,10 +24,10 @@ _rate = 0
 _file_seq = 0
 
 _SR = 22050
-_BASE_FREQ = 620.0
-_SCALE = (0, 2, 4, 7, 9)  # 五声音阶 怎么排列都不刺耳
-_SYL_DUR = 0.062
-_MAX_TOTAL = 6.5  # 一句的音频上限秒 超了整体加速
+_BASE_FREQ = 440.0
+_SCALE = (0, 2, 4, 7, 9)  # 五声音阶单八度 不往上蹿免得刺耳
+_SYL_DUR = 0.052
+_MAX_TOTAL = 6.0  # 一句的音频硬上限秒 到点直接收声 字幕由结尾回调补完
 
 _TAG = re.compile(r"^\s*\[(\w+)\]\s*")
 _MD = re.compile(r"[*#`>~_|]+")
@@ -105,8 +105,7 @@ def _is_cjk(ch: str) -> bool:
 def _pitch(ch: str) -> float:
     """字符定音高 同字永远同音 这就是它的'词'"""
     h = (ord(ch) * 2654435761) & 0xFFFFFFFF
-    deg = _SCALE[h % 5] + 12 * ((h >> 8) % 2)  # 两个八度里挑
-    return _BASE_FREQ * (2.0 ** (deg / 12.0))
+    return _BASE_FREQ * (2.0 ** (_SCALE[h % 5] / 12.0))
 
 
 def _tokenize(text: str) -> list[dict]:
@@ -153,23 +152,24 @@ def _tokenize(text: str) -> list[dict]:
 def _chirp(np, freq: float, dur: float, vol: float, rise: bool, bright: bool):
     """一个音节 短促圆润的啁啾"""
     if bright:
-        freq *= 1.10
-        vol *= 1.25
-        dur *= 0.85
+        freq *= 1.06
+        vol *= 1.2
+        dur *= 0.88
     n = max(8, int(_SR * dur))
     t = np.arange(n) / _SR
     if rise:
-        f = np.linspace(freq, freq * 1.30, n)
+        f = np.linspace(freq, freq * 1.22, n)
     else:
-        f = freq * (1.0 - 0.07 * np.exp(-t * 70.0))  # 起音从下方滑进来 像开口
-    f = f * (1.0 + 0.012 * np.sin(2 * np.pi * 6.5 * t))  # 一点颤音
+        f = freq * (1.0 - 0.06 * np.exp(-t * 70.0))  # 起音从下方滑进来 像开口
+    f = f * (1.0 + 0.010 * np.sin(2 * np.pi * 6.0 * t))  # 一点颤音
     phase = 2 * np.pi * np.cumsum(f) / _SR
-    w = np.sin(phase) + 0.35 * np.sin(2 * phase) + 0.10 * np.sin(3 * phase)
+    w = np.sin(phase) + 0.18 * np.sin(2 * phase) + 0.05 * np.sin(3 * phase)
+    # 升余弦包络 圆头圆尾不咔哒
+    a, d = max(2, int(n * 0.25)), max(2, int(n * 0.45))
     env = np.ones(n)
-    a, d = max(1, int(n * 0.18)), max(1, int(n * 0.42))
-    env[:a] = np.linspace(0.0, 1.0, a)
-    env[-d:] = np.linspace(1.0, 0.0, d)
-    return w * env * (vol / 1.45)
+    env[:a] = 0.5 - 0.5 * np.cos(np.linspace(0.0, np.pi, a))
+    env[-d:] = 0.5 + 0.5 * np.cos(np.linspace(0.0, np.pi, d))
+    return w * env * (vol / 1.23)
 
 
 def _synth(text: str, rate: int) -> "tuple[str, list[tuple[float, int]]] | None":
@@ -182,12 +182,12 @@ def _synth(text: str, rate: int) -> "tuple[str, list[tuple[float, int]]] | None"
         return None
     speed = 1.0 + rate / 100.0  # ±50%
     dur = _SYL_DUR / speed
-    gaps = {"syl": 0.016 / speed, "gap": 0.05 / speed, "pause": 0.085 / speed, "stop": 0.13 / speed}
-    # 估时长 太长整体加速 不无限叽歪
+    gaps = {"syl": 0.012 / speed, "gap": 0.045 / speed, "pause": 0.08 / speed, "stop": 0.12 / speed}
+    # 偏长的句子温和加速 再长就到点收声 绝不无限叽歪
     syls = sum(1 for t in toks if t["kind"] == "syl")
     est = syls * (dur + gaps["syl"])
     if est > _MAX_TOTAL:
-        squeeze = max(0.45, _MAX_TOTAL / est)
+        squeeze = max(0.7, _MAX_TOTAL / est)
         dur *= squeeze
         gaps = {k: v * squeeze for k, v in gaps.items()}
 
@@ -195,8 +195,10 @@ def _synth(text: str, rate: int) -> "tuple[str, list[tuple[float, int]]] | None"
     marks: list[tuple[float, int]] = []
     cum = 0.0
     for tk in toks:
+        if cum >= _MAX_TOTAL:
+            break  # 硬上限 剩下的字幕由播完回调一次性补完
         if tk["kind"] == "syl":
-            seg = _chirp(np, _pitch(tk["ch"]), dur, 0.34,
+            seg = _chirp(np, _pitch(tk["ch"]), dur, 0.30,
                          tk.get("rise", False), tk.get("bright", False))
             parts.append(seg)
             cum += len(seg) / _SR
@@ -253,8 +255,10 @@ def _play_synced(text: str, path: str, marks, on_start, on_progress) -> None:
         if _mci("play mochitts") != 0:
             raise RuntimeError("MCI play failed")
         last = -1
+        # 看门狗 哪怕mci状态抽风也绝不困在这里
+        deadline = _t.monotonic() + (length_ms / 1000.0 if length_ms > 0 else _MAX_TOTAL) + 2.0
         while _mci_status("mode") == "playing":
-            if _stop.is_set():
+            if _stop.is_set() or _t.monotonic() > deadline:
                 _mci("stop mochitts")
                 break
             try:
