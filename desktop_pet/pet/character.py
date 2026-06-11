@@ -128,6 +128,27 @@ _ACTIVITIES = {
         ("tangle", 3.5, "～"),
         ("rest", 2.5, "♥"),
     ]),
+    "bubbles": ("bubbles", 0.0, "happy_wiggle", [
+        ("dip", 1.8, ""),
+        ("blow", 2.6, "～"),
+        ("watch", 4.5, "✦"),
+        ("pop", 1.6, "!"),
+    ]),
+    "balloon": ("balloon", 0.0, "jump_spin", [
+        ("grab", 1.6, ""),
+        ("bob", 5.0, "～"),
+        ("float", 3.0, "♥"),
+    ]),
+    "icecream": ("icecream", 0.0, "puff_up", [
+        ("hold", 1.6, ""),
+        ("lick", 5.5, "～"),
+        ("melt", 2.6, "～"),
+    ]),
+    "paperplane": ("paperplane", 0.0, "celebrate", [
+        ("fold", 2.2, ""),
+        ("throw", 1.0, "!"),
+        ("glide", 5.5, "～"),
+    ]),
 }
 _ACTIVITY_GAP = (150.0, 300.0)
 _TRAVEL = "__travel__"

@@ -873,6 +873,122 @@ def draw_yarn(painter: QPainter, bw: float, bh: float, t: float, stage: str, sta
     painter.restore()
 
 
+def draw_bubbles(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
+    """吹泡泡 蘸->吹->看着飘->啵地破"""
+    wand = QPointF(bw * 0.30, bh * 0.08)
+    # 嘴边的小吹圈(蘸了泡泡水的环)
+    if stage in ("dip", "blow"):
+        painter.setPen(QPen(QColor(180, 150, 120), max(1.4, bw * 0.02)))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawEllipse(wand, bw * 0.07, bw * 0.07)
+        painter.drawLine(QPointF(wand.x() + bw * 0.06, wand.y() + bw * 0.05),
+                         QPointF(wand.x() + bw * 0.14, wand.y() + bw * 0.14))
+    base = QPointF(wand.x() + bw * 0.02, wand.y() - bw * 0.02)
+    count = 6
+    popped = int(stage_p * count) % count if stage == "pop" else -1
+    for i in range(count):
+        if stage == "dip":
+            continue
+        age = max(0.0, stage_p - i * 0.13) * 1.3 if stage == "blow" else ((t * 0.35 + i * 0.17) % 1.0)
+        if age <= 0.0 or age >= 1.0:
+            continue
+        x = base.x() + bw * (0.05 + 0.45 * age) + math.sin(t * 1.8 + i * 1.3) * bw * 0.05
+        y = base.y() - bh * (0.15 + 1.25 * age)
+        r = bw * (0.05 + 0.045 * ((i * 7) % 3)) * (0.7 + 0.5 * age)
+        alpha = int(165 * (1.0 - age) ** 0.6)
+        if i == popped and age > 0.4:  # 啵——小爆裂
+            painter.setPen(QPen(QColor(150, 200, 235, alpha), max(1.0, bw * 0.012)))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            for a in range(6):
+                ang = a * math.pi / 3
+                painter.drawLine(QPointF(x + math.cos(ang) * r * 0.7, y + math.sin(ang) * r * 0.7),
+                                 QPointF(x + math.cos(ang) * r * 1.4, y + math.sin(ang) * r * 1.4))
+            continue
+        painter.setPen(QPen(QColor(150, 200, 235, min(255, alpha + 40)), max(1.0, bw * 0.01)))
+        painter.setBrush(QColor(195, 228, 246, int(alpha * 0.45)))
+        painter.drawEllipse(QPointF(x, y), r, r)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(255, 255, 255, int(alpha * 0.85)))
+        painter.drawEllipse(QPointF(x - r * 0.32, y - r * 0.32), r * 0.24, r * 0.24)
+
+
+def draw_balloon(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
+    """攥着气球 抓->晃->拽->飘"""
+    lift = ease_out(stage_p) if stage == "float" else 0.0
+    sway = math.sin(t * 1.5) * bw * 0.06
+    bx = bw * 0.34 + sway
+    by = -bh * (0.78 + 0.55 * lift)
+    hand = QPointF(bw * 0.22, bh * 0.20)
+    pen = QPen(QColor(120, 120, 135), max(1.0, bw * 0.008))
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    painter.setPen(pen)
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    path = QPainterPath(hand)
+    path.cubicTo(QPointF(bx - bw * 0.10, by + bh * 0.55), QPointF(bx + bw * 0.10, by + bh * 0.35),
+                 QPointF(bx, by + bh * 0.18))
+    painter.drawPath(path)
+    rw, rh = bw * 0.18, bh * 0.30
+    painter.setPen(QPen(QColor(190, 70, 90), max(1.2, bw * 0.01)))
+    painter.setBrush(QColor(232, 96, 112))
+    painter.drawEllipse(QPointF(bx, by), rw, rh)
+    painter.setBrush(QColor(210, 80, 96))
+    painter.drawPolygon(QPolygonF([QPointF(bx - rw * 0.14, by + rh * 0.92),
+                                   QPointF(bx + rw * 0.14, by + rh * 0.92), QPointF(bx, by + rh * 1.14)]))
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor(255, 255, 255, 150))
+    painter.drawEllipse(QPointF(bx - rw * 0.36, by - rh * 0.34), rw * 0.28, rh * 0.20)
+
+
+def draw_icecream(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
+    """举个甜筒 舔->融化滴"""
+    cx = bw * 0.30
+    cone_top = bh * 0.06
+    cw = bw * 0.15
+    painter.setPen(QPen(QColor(190, 140, 80), max(1.0, bw * 0.008)))
+    painter.setBrush(QColor(222, 175, 110))
+    painter.drawPolygon(QPolygonF([QPointF(cx - cw, cone_top), QPointF(cx + cw, cone_top),
+                                   QPointF(cx, cone_top + bh * 0.36)]))
+    painter.setPen(QPen(QColor(180, 130, 75, 160), max(0.8, bw * 0.005)))
+    for k in (-1, 0, 1):
+        painter.drawLine(QPointF(cx + k * cw * 0.5, cone_top), QPointF(cx + k * cw * 0.18, cone_top + bh * 0.32))
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor(245, 200, 215))
+    painter.drawEllipse(QPointF(cx, cone_top - bh * 0.01), cw * 1.05, bh * 0.16)
+    painter.setBrush(QColor(250, 236, 205))
+    painter.drawEllipse(QPointF(cx, cone_top - bh * 0.15), cw * 0.82, bh * 0.13)
+    painter.setBrush(QColor(232, 96, 112))  # 樱桃
+    painter.drawEllipse(QPointF(cx, cone_top - bh * 0.26), cw * 0.18, cw * 0.18)
+    if stage == "melt":
+        d = ease_out(stage_p)
+        painter.setBrush(QColor(245, 200, 215, 220))
+        painter.drawEllipse(QPointF(cx + cw * 0.7, cone_top + bh * 0.05 + d * bh * 0.10),
+                            bw * 0.02, bh * 0.04 + d * bh * 0.05)
+
+
+def draw_paperplane(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
+    """折->掷->弧线滑翔的小纸飞机"""
+    if stage == "fold":
+        x, y, ang, sc = bw * 0.28, bh * 0.02, -10.0, 0.8
+    elif stage == "throw":
+        x, y, ang, sc = bw * (0.10 + 0.5 * stage_p), -bh * (0.10 + 0.3 * stage_p), -20.0, 1.0
+    else:  # glide
+        x = bw * (0.45 + 0.5 * math.sin(stage_p * math.pi))
+        y = -bh * (0.6 + 0.3 * math.sin(stage_p * math.pi * 2))
+        ang, sc = -15.0 + math.sin(t * 2) * 8, 1.0
+    painter.save()
+    painter.translate(x, y)
+    painter.rotate(ang)
+    s = bw * 0.16 * sc
+    painter.setPen(QPen(QColor(150, 155, 170), max(1.0, bw * 0.008)))
+    painter.setBrush(QColor(245, 247, 252))
+    painter.drawPolygon(QPolygonF([QPointF(-s, 0), QPointF(s, -s * 0.2), QPointF(-s * 0.2, s * 0.12)]))
+    painter.setBrush(QColor(224, 228, 238))
+    painter.drawPolygon(QPolygonF([QPointF(-s, 0), QPointF(-s * 0.2, s * 0.12), QPointF(-s * 0.5, s * 0.42)]))
+    painter.setPen(QPen(QColor(170, 175, 190), max(0.8, bw * 0.005)))
+    painter.drawLine(QPointF(-s, 0), QPointF(s, -s * 0.2))
+    painter.restore()
+
+
 # 装扮注册表 worn 穿身上 ambient 撒周围 二者互斥
 COSTUME_LAYERS = {
     "sherlock": (draw_sherlock, None),
@@ -890,6 +1006,10 @@ COSTUME_LAYERS = {
     "meteor": (None, draw_meteor),
     "sprout": (None, draw_sprout),
     "yarn": (None, draw_yarn),
+    "bubbles": (None, draw_bubbles),
+    "balloon": (None, draw_balloon),
+    "icecream": (None, draw_icecream),
+    "paperplane": (None, draw_paperplane),
 }
 COSTUMES = frozenset(COSTUME_LAYERS)
 WORN_COSTUMES = frozenset(name for name, (worn, _ambient) in COSTUME_LAYERS.items() if worn)
