@@ -26,8 +26,7 @@ datas += collect_data_files("trafilatura")
 # justext的stoplists数据
 datas += collect_data_files("justext")
 hiddenimports += collect_submodules("justext")
-# edge-tts子模块和certifi证书
-hiddenimports += collect_submodules("edge_tts")
+# certifi证书
 datas += collect_data_files("certifi")
 
 # 易漏的隐藏依赖
@@ -47,7 +46,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=["tkinter"],  # 没用tk 不带整套tcl数据
     noarchive=False,
 )
 

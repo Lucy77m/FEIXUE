@@ -1,6 +1,7 @@
 # author: bdth
 # email: 2074055628@qq.com
-# 语音朗读 edge tts 和系统 sapi 两种后端
+# 墨池语 不念内容 按字符合成叽里呱啦的小啁啾 同字同音像一门真的语言
+# 纯numpy合成零依赖零联网 问号句尾上扬 叹号更亮更快 字幕跟着音节走
 
 from __future__ import annotations
 
@@ -9,6 +10,7 @@ import queue
 import re
 import tempfile
 import threading
+import wave
 
 _queue: "queue.Queue[tuple]" = queue.Queue()
 _enabled = False
@@ -18,22 +20,14 @@ _stop = threading.Event()
 _shutdown = threading.Event()
 _worker_thread: "threading.Thread | None" = None
 
-_voice = ""
 _rate = 0
 _file_seq = 0
-_EDGE_SYNTH_TIMEOUT = 25.0
 
-SYSTEM_VOICE = ""
-EDGE_VOICES: list[tuple[str, str]] = [
-    ("zh-CN-XiaoxiaoNeural", "晓晓 Xiaoxiao · 温柔"),
-    ("zh-CN-XiaoyiNeural", "晓伊 Xiaoyi · 活泼"),
-    ("zh-CN-YunxiNeural", "云希 Yunxi · 少年"),
-    ("zh-CN-YunyangNeural", "云扬 Yunyang · 播音"),
-    ("zh-CN-YunjianNeural", "云健 Yunjian · 浑厚"),
-    ("zh-CN-YunxiaNeural", "云夏 Yunxia · 童声"),
-    ("zh-CN-liaoning-XiaobeiNeural", "小北 Xiaobei · 东北"),
-    ("zh-CN-shaanxi-XiaoniNeural", "晓妮 Xiaoni · 陕西"),
-]
+_SR = 22050
+_BASE_FREQ = 620.0
+_SCALE = (0, 2, 4, 7, 9)  # 五声音阶 怎么排列都不刺耳
+_SYL_DUR = 0.062
+_MAX_TOTAL = 6.5  # 一句的音频上限秒 超了整体加速
 
 _TAG = re.compile(r"^\s*\[(\w+)\]\s*")
 _MD = re.compile(r"[*#`>~_|]+")
@@ -53,6 +47,9 @@ _EMOJI = re.compile(
     "]+",
     flags=re.UNICODE,
 )
+
+_PAUSE_CH = "，、；：,;:"
+_END_CH = "。．.！!？?…～~"
 
 
 def _clean(text: str) -> str:
@@ -77,11 +74,6 @@ def set_enabled(enabled: bool) -> None:
         flush()
 
 
-def set_voice(voice_id: str) -> None:
-    global _voice
-    _voice = voice_id or ""
-
-
 def set_rate(percent) -> None:
     global _rate
     try:
@@ -90,84 +82,140 @@ def set_rate(percent) -> None:
         _rate = 0
 
 
-_edge_ok: "bool | None" = None
-
-
-def edge_available() -> bool:
-    """探一次 edge tts 装没装并缓存"""
-    global _edge_ok
-    if _edge_ok is None:
-        try:
-            import edge_tts
-            _edge_ok = True
-        except Exception:
-            _edge_ok = False
-    return _edge_ok
-
-
 def _ensure() -> None:
     global _started, _worker_thread
     with _lock:
         if _started:
             return
         _started = True
-    _worker_thread = threading.Thread(target=_worker, daemon=True, name="mochi-tts")
+    _worker_thread = threading.Thread(target=_worker, daemon=True, name="mochi-voice")
     _worker_thread.start()
 
 
-def _select_voice(sp) -> None:
-    """给 sapi 挑一个中文嗓"""
-    try:
-        for v in sp.GetVoices():
-            desc = v.GetDescription() or ""
-            if any(k in desc for k in ("Chinese", "中文", "Huihui", "Yaoyao", "Kangkang", "Xiaoxiao")):
-                sp.Voice = v
-                return
-    except Exception:
-        pass
+def _is_cjk(ch: str) -> bool:
+    o = ord(ch)
+    return (
+        0x4E00 <= o <= 0x9FFF or 0x3400 <= o <= 0x4DBF
+        or 0x3040 <= o <= 0x30FF  # 假名
+        or 0xAC00 <= o <= 0xD7AF  # 谚文
+        or 0xF900 <= o <= 0xFAFF
+    )
 
 
-def _synth_edge(text: str, voice_id: str, rate: int) -> tuple[str, list[tuple[float, int]]] | None:
-    """edge tts 合成 收音频和逐词时间戳"""
-    import asyncio
-    import edge_tts
+def _pitch(ch: str) -> float:
+    """字符定音高 同字永远同音 这就是它的'词'"""
+    h = (ord(ch) * 2654435761) & 0xFFFFFFFF
+    deg = _SCALE[h % 5] + 12 * ((h >> 8) % 2)  # 两个八度里挑
+    return _BASE_FREQ * (2.0 ** (deg / 12.0))
+
+
+def _tokenize(text: str) -> list[dict]:
+    """切音节 每项带结束字符位 标点变停顿 问叹回标到前面的音节"""
+    toks: list[dict] = []
+    i, n = 0, len(text)
+    while i < n:
+        ch = text[i]
+        if ch in _PAUSE_CH:
+            toks.append({"kind": "pause", "end": i + 1})
+            i += 1
+        elif ch in _END_CH:
+            # 问号往前最多3个音节上扬 叹号往前最多4个加亮
+            mark = "rise" if ch in "？?" else ("bright" if ch in "！!" else None)
+            if mark:
+                left = 3 if mark == "rise" else 4
+                for t in reversed(toks):
+                    if left == 0:
+                        break
+                    if t["kind"] == "syl":
+                        t[mark] = True
+                        left -= 1
+            toks.append({"kind": "stop", "end": i + 1})
+            i += 1
+        elif ch.isspace():
+            toks.append({"kind": "gap", "end": i + 1})
+            i += 1
+        elif _is_cjk(ch):
+            toks.append({"kind": "syl", "end": i + 1, "ch": ch})
+            i += 1
+        elif ch.isalnum():
+            j = i
+            while j < n and text[j].isalnum() and not _is_cjk(text[j]):
+                j += 1
+            for k in range(i, j, 2):  # 拉丁词两字符一个音节
+                toks.append({"kind": "syl", "end": min(k + 2, j), "ch": text[k]})
+            i = j
+        else:
+            toks.append({"kind": "gap", "end": i + 1})
+            i += 1
+    return toks
+
+
+def _chirp(np, freq: float, dur: float, vol: float, rise: bool, bright: bool):
+    """一个音节 短促圆润的啁啾"""
+    if bright:
+        freq *= 1.10
+        vol *= 1.25
+        dur *= 0.85
+    n = max(8, int(_SR * dur))
+    t = np.arange(n) / _SR
+    if rise:
+        f = np.linspace(freq, freq * 1.30, n)
+    else:
+        f = freq * (1.0 - 0.07 * np.exp(-t * 70.0))  # 起音从下方滑进来 像开口
+    f = f * (1.0 + 0.012 * np.sin(2 * np.pi * 6.5 * t))  # 一点颤音
+    phase = 2 * np.pi * np.cumsum(f) / _SR
+    w = np.sin(phase) + 0.35 * np.sin(2 * phase) + 0.10 * np.sin(3 * phase)
+    env = np.ones(n)
+    a, d = max(1, int(n * 0.18)), max(1, int(n * 0.42))
+    env[:a] = np.linspace(0.0, 1.0, a)
+    env[-d:] = np.linspace(1.0, 0.0, d)
+    return w * env * (vol / 1.45)
+
+
+def _synth(text: str, rate: int) -> "tuple[str, list[tuple[float, int]]] | None":
+    """整句合成墨池语 返回wav路径和逐音节字幕时间戳"""
+    import numpy as np
 
     global _file_seq
-    rate_str = f"+{rate}%" if rate >= 0 else f"{rate}%"
-    audio = bytearray()
-    words: list[tuple[float, str]] = []
-
-    async def _consume() -> None:
-        comm = edge_tts.Communicate(text, voice_id, rate=rate_str)
-        async for chunk in comm.stream():
-            kind = chunk.get("type")
-            if kind == "audio" and chunk.get("data"):
-                audio.extend(chunk["data"])
-            elif kind == "WordBoundary":
-                # offset 单位 100ns 转毫秒
-                words.append((chunk.get("offset", 0) / 10000.0, chunk.get("text", "")))
-
-    async def _go() -> None:
-        await asyncio.wait_for(_consume(), timeout=_EDGE_SYNTH_TIMEOUT)
-
-    asyncio.run(_go())
-    if not audio:
+    toks = _tokenize(text)
+    if not any(t["kind"] == "syl" for t in toks):
         return None
+    speed = 1.0 + rate / 100.0  # ±50%
+    dur = _SYL_DUR / speed
+    gaps = {"syl": 0.016 / speed, "gap": 0.05 / speed, "pause": 0.085 / speed, "stop": 0.13 / speed}
+    # 估时长 太长整体加速 不无限叽歪
+    syls = sum(1 for t in toks if t["kind"] == "syl")
+    est = syls * (dur + gaps["syl"])
+    if est > _MAX_TOTAL:
+        squeeze = max(0.45, _MAX_TOTAL / est)
+        dur *= squeeze
+        gaps = {k: v * squeeze for k, v in gaps.items()}
+
+    parts = []
+    marks: list[tuple[float, int]] = []
+    cum = 0.0
+    for tk in toks:
+        if tk["kind"] == "syl":
+            seg = _chirp(np, _pitch(tk["ch"]), dur, 0.34,
+                         tk.get("rise", False), tk.get("bright", False))
+            parts.append(seg)
+            cum += len(seg) / _SR
+        g = gaps[tk["kind"]]
+        parts.append(np.zeros(max(1, int(_SR * g))))
+        cum += g
+        marks.append((cum * 1000.0, tk["end"]))
+
+    pcm = np.clip(np.concatenate(parts), -1.0, 1.0)
+    pcm = (pcm * 32767.0).astype("<i2")
     with _lock:
         _file_seq += 1
         seq = _file_seq
-    path = os.path.join(tempfile.gettempdir(), f"mochi_tts_{seq}.mp3")
-    with open(path, "wb") as fh:
-        fh.write(bytes(audio))
-
-    # 按词长占比把进度摊回 text 字符数
-    total_wlen = sum(len(w) for _, w in words) or 1
-    n = len(text)
-    cum = 0
-    marks: list[tuple[float, int]] = []
-    for off_ms, w in words:
-        cum += len(w)
-        marks.append((off_ms, min(n, round(n * cum / total_wlen))))
+    path = os.path.join(tempfile.gettempdir(), f"mochi_voice_{seq}.wav")
+    with wave.open(path, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(_SR)
+        w.writeframes(pcm.tobytes())
     return path, marks
 
 
@@ -192,10 +240,8 @@ def _play_synced(text: str, path: str, marks, on_start, on_progress) -> None:
     import time as _t
 
     _mci_close()
-    # 先用 mpegvideo 开 开不了退回默认设备
-    if _mci(f'open "{path}" type mpegvideo alias mochitts') != 0:
-        if _mci(f'open "{path}" alias mochitts') != 0:
-            raise RuntimeError("MCI open failed")
+    if _mci(f'open "{path}" alias mochitts') != 0:
+        raise RuntimeError("MCI open failed")
     n = len(text)
     try:
         try:
@@ -249,103 +295,28 @@ def _mci_status(what: str) -> str:
     return buf.value
 
 
-def _apply_sapi_rate(sp, percent: int) -> None:
-    try:
-        sp.Rate = max(-10, min(10, round(percent / 5)))
-    except Exception:
-        pass
-
-
-_SVSF_ASYNC = 1
-_SVSF_PURGE = 3
-
-
-def _sapi_speak(sp, text: str) -> None:
-    """异步念加轮询 支持中途打断"""
-    try:
-        sp.Speak(text, _SVSF_ASYNC)
-    except Exception:
-        return
-    try:
-        while not sp.WaitUntilDone(80):
-            if _stop.is_set():
-                try:
-                    sp.Speak("", _SVSF_PURGE)
-                except Exception:
-                    pass
-                return
-    except Exception:
-        try:
-            sp.WaitUntilDone(-1)
-        except Exception:
-            pass
-
-
 def _worker() -> None:
-    """tts 工作线程 串行消费队列逐句念"""
-    sp = None
-    sapi_ready = False
-
-    def sapi():
-        nonlocal sp, sapi_ready
-        if not sapi_ready:
-            sapi_ready = True  # 失败也置位 不每句重试
-            try:
-                import pythoncom
-                import win32com.client
-                pythoncom.CoInitialize()
-                sp = win32com.client.Dispatch("SAPI.SpVoice")
-                _select_voice(sp)
-            except Exception:
-                sp = None
-        return sp
-
+    """合成播放工作线程 串行消费队列"""
     while True:
-        text, on_start, on_progress, on_done, voice, rate = _queue.get()
+        text, on_start, on_progress, on_done, rate = _queue.get()
         if _shutdown.is_set():
-            try:
-                if sp is not None:
-                    sp.Speak("", _SVSF_PURGE)
-            except Exception:
-                pass
             _mci_close()
-            if sapi_ready:
-                try:
-                    import pythoncom
-                    pythoncom.CoUninitialize()
-                except Exception:
-                    pass
             return
         _stop.clear()
         started = False
         if text and not _stop.is_set():
-            played = False
-            # 优先 edge 失败回落 sapi
-            if voice and edge_available():
-                try:
-                    synth = _synth_edge(text, voice, rate)
-                    if synth is not None and _stop.is_set():
-                        try:
-                            os.remove(synth[0])
-                        except OSError:
-                            pass
-                    elif synth is not None:
-                        _play_synced(text, synth[0], synth[1], on_start, on_progress)
-                        started = True
-                        played = True
-                except Exception:
-                    played = False
-            if not played:
-                cur = sapi()
-                if cur is not None:
+            try:
+                synth = _synth(text, rate)
+                if synth is not None and _stop.is_set():
                     try:
-                        _apply_sapi_rate(cur, rate)
-                        if on_start is not None:
-                            on_start()
-                            started = True
-                        _sapi_speak(cur, text)
-                    except Exception:
+                        os.remove(synth[0])
+                    except OSError:
                         pass
+                elif synth is not None:
+                    _play_synced(text, synth[0], synth[1], on_start, on_progress)
+                    started = True
+            except Exception:
+                pass
         if not started and on_start is not None:
             try:
                 on_start()
@@ -358,9 +329,9 @@ def _worker() -> None:
                 pass
 
 
-def _enqueue(cleaned: str, on_start, on_progress, on_done, voice: str, rate: int) -> None:
+def _enqueue(cleaned: str, on_start, on_progress, on_done, rate: int) -> None:
     _ensure()
-    _queue.put((cleaned, on_start, on_progress, on_done, voice, rate))
+    _queue.put((cleaned, on_start, on_progress, on_done, rate))
 
 
 def speak(text: str) -> None:
@@ -368,11 +339,11 @@ def speak(text: str) -> None:
         return
     cleaned = _clean(text)
     if cleaned:
-        _enqueue(cleaned, None, None, None, _voice, _rate)
+        _enqueue(cleaned, None, None, None, _rate)
 
 
 def speak_one(text: str, on_start=None, on_progress=None, on_done=None) -> None:
-    """念一句 带逐词跟随回调"""
+    """念一句 带逐音节字幕跟随回调"""
     cleaned = _clean(text) if _enabled else ""
     if not _enabled or not cleaned:
         for cb in (on_start, on_done):
@@ -382,11 +353,11 @@ def speak_one(text: str, on_start=None, on_progress=None, on_done=None) -> None:
                 except Exception:
                     pass
         return
-    _enqueue(cleaned, on_start, on_progress, on_done, _voice, _rate)
+    _enqueue(cleaned, on_start, on_progress, on_done, _rate)
 
 
-def preview(text: str, voice: str, rate, on_done=None) -> None:
-    """用指定音色语速试听一句"""
+def preview(text: str, rate, on_done=None) -> None:
+    """按指定语速试听一句"""
     try:
         rate = max(-50, min(50, int(rate)))
     except (TypeError, ValueError):
@@ -396,7 +367,7 @@ def preview(text: str, voice: str, rate, on_done=None) -> None:
         if on_done is not None:
             on_done()
         return
-    _enqueue(cleaned, None, None, on_done, voice or "", rate)
+    _enqueue(cleaned, None, None, on_done, rate)
 
 
 def flush() -> None:
@@ -418,7 +389,7 @@ def flush() -> None:
 
 
 def shutdown() -> None:
-    """退出前停掉朗读并收掉 worker"""
+    """退出前停掉发声并收掉 worker"""
     _shutdown.set()
     _stop.set()
     try:
@@ -427,7 +398,7 @@ def shutdown() -> None:
     except queue.Empty:
         pass
     try:
-        _queue.put_nowait((None, None, None, None, "", 0))
+        _queue.put_nowait((None, None, None, None, 0))
     except Exception:
         pass
     t = _worker_thread

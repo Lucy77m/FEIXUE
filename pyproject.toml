@@ -19,7 +19,6 @@ dependencies = [
     "rapidocr-onnxruntime>=1.4.4",
     "pymupdf>=1.27.2.3",
     "pywinauto>=0.6.9",
-    "edge-tts>=7.2.8",
     # gpu加速 无gpu自动回退cpu
     "onnxruntime-directml>=1.24",
 ]

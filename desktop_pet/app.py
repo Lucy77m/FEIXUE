@@ -1494,13 +1494,12 @@ class PetApp(QObject):
             self._relang_intro = self._panel.snapshot_for_transition()
             self._panel.accept()
 
-    def _preview_voice(self, voice_id: str, rate: int) -> None:
-        voice.preview(i18n.t("tts_sample"), voice_id, rate)
+    def _preview_voice(self, rate: int) -> None:
+        voice.preview(i18n.t("tts_sample"), rate)
 
     def _apply_settings_live(self) -> None:
         i18n.set_language(self._settings.ui_language)
         self._tray.retranslate()
-        voice.set_voice(self._settings.tts_voice)
         voice.set_rate(self._settings.tts_rate)
         voice.set_enabled(self._settings.tts_enabled)
         voice_sfx.set_enabled(self._settings.sfx_enabled)
@@ -1600,7 +1599,6 @@ class PetApp(QObject):
 
     def run(self) -> int:
         stats.mark_first_seen()
-        voice.set_voice(self._settings.tts_voice)
         voice.set_rate(self._settings.tts_rate)
         voice.set_enabled(self._settings.tts_enabled)
         voice_sfx.set_enabled(self._settings.sfx_enabled)

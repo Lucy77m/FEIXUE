@@ -12,7 +12,6 @@ from PySide6.QtGui import QColor, QKeySequence, QMouseEvent
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
-    QComboBox,
     QDialog,
     QFileDialog,
     QFrame,
@@ -30,7 +29,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from desktop_pet import __version__, i18n, updater, voice
+from desktop_pet import __version__, i18n, updater
 from desktop_pet.docs import docs
 from desktop_pet.eyes import detect
 from desktop_pet.i18n import UI_LANGUAGES
@@ -199,7 +198,7 @@ class ControlPanel(QDialog):
                  bond_provider: Callable[[], dict] | None = None,
                  on_set_language: Callable[[str], None] | None = None,
                  hotkey_status_provider: Callable[[], dict] | None = None,
-                 on_preview_voice: Callable[[str, int], None] | None = None,
+                 on_preview_voice: Callable[[int], None] | None = None,
                  on_new_topic: Callable[[], None] | None = None,
                  intro: "tuple | None" = None) -> None:
         """设置面板 交互全靠注入的回调和provider"""
@@ -450,15 +449,6 @@ class ControlPanel(QDialog):
         self._weather_cb = QCheckBox(self._t("cb_weather"))
         self._weather_cb.setChecked(settings.weather_enabled)
         self._weather_cb.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._tts_voice = QComboBox()
-        self._tts_voice.addItem(self._t("opt_voice_system"), voice.SYSTEM_VOICE)
-        if voice.edge_available():
-            for vid, label in voice.EDGE_VOICES:
-                self._tts_voice.addItem(label, vid)
-        self._tts_voice_orig = settings.tts_voice
-        vidx = self._tts_voice.findData(settings.tts_voice)
-        self._tts_voice.setCurrentIndex(vidx if vidx >= 0 else 0)
-        self._tts_voice.setCursor(Qt.CursorShape.PointingHandCursor)
         self._tts_rate = QSlider(Qt.Orientation.Horizontal)
         self._tts_rate.setRange(-50, 50)
         self._tts_rate.setValue(int(settings.tts_rate))
@@ -611,7 +601,7 @@ class ControlPanel(QDialog):
 
     def _on_preview(self) -> None:
         if self._on_preview_voice is not None:
-            self._on_preview_voice(self._tts_voice.currentData() or "", int(self._tts_rate.value()))
+            self._on_preview_voice(int(self._tts_rate.value()))
 
     def _section_block(self, title: str, value: QLabel) -> QFrame:
         card = QFrame(objectName="statusCard")
@@ -778,18 +768,14 @@ class ControlPanel(QDialog):
         body.addWidget(self._check_field(self._tts, "help_tts"))
         body.addWidget(self._check_field(self._sfx, "help_sfx"))
         body.addWidget(self._check_field(self._weather_cb, "help_weather"))
-        voice_row = QHBoxLayout()
-        voice_row.setSpacing(8)
-        voice_row.addWidget(self._tts_voice, 1)
-        preview_btn = QPushButton(self._t("tts_preview"), objectName="cancel")
-        preview_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        preview_btn.clicked.connect(self._on_preview)
-        voice_row.addWidget(preview_btn)
-        body.addWidget(self._field("lbl_tts_voice", voice_row, "help_tts_voice"))
         rate_row = QHBoxLayout()
         rate_row.setSpacing(10)
         rate_row.addWidget(self._tts_rate, 1)
         rate_row.addWidget(self._tts_rate_label)
+        preview_btn = QPushButton(self._t("tts_preview"), objectName="cancel")
+        preview_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        preview_btn.clicked.connect(self._on_preview)
+        rate_row.addWidget(preview_btn)
         body.addWidget(self._field("lbl_tts_rate", rate_row, "help_tts_rate"))
         body.addWidget(self._build_hotkeys_block())
         body.addStretch(1)
@@ -1113,10 +1099,6 @@ class ControlPanel(QDialog):
         s.tts_enabled = self._tts.isChecked()
         s.sfx_enabled = self._sfx.isChecked()
         s.weather_enabled = self._weather_cb.isChecked()
-        if self._tts_voice.findData(self._tts_voice_orig) < 0:
-            s.tts_voice = self._tts_voice_orig  # 原音色不在列表就原样留着
-        else:
-            s.tts_voice = self._tts_voice.currentData() or ""
         s.tts_rate = int(self._tts_rate.value())
         s.allow_web = self._allow_web.isChecked()
         s.allow_control = self._allow_control.isChecked()

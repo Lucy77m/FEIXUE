@@ -85,7 +85,6 @@ class Settings:
     proactive_level: str = "正常"
     ui_language: str = "中文"
     tts_enabled: bool = False
-    tts_voice: str = ""
     tts_rate: int = 0
     sfx_enabled: bool = False
     weather_enabled: bool = False  # 天气拟态默认关：IP定位常常离谱(代理/CGNAT)，宁可不显也不显错的
