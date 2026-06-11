@@ -192,6 +192,31 @@ _ACTIVITIES = {
         ("setup", 1.6, ""),
         ("paint", 6.0, "✦"),
     ]),
+    "watering": ("watering", 0.0, "happy_wiggle", [
+        ("hold", 1.4, ""),
+        ("pour", 3.5, "～"),
+        ("grow", 2.5, "✦"),
+    ]),
+    "blocks": ("blocks", 0.0, "celebrate", [
+        ("stack", 6.0, "✦"),
+        ("done", 1.5, "!"),
+    ]),
+    "lollipop": ("lollipop", 0.0, "happy_wiggle", [
+        ("hold", 1.4, ""),
+        ("lick", 6.0, "～"),
+    ]),
+    "popcorn": ("popcorn", 0.0, "puff_up", [
+        ("hold", 1.4, ""),
+        ("toss", 5.0, "～"),
+    ]),
+    "pinwheel": ("pinwheel", 0.0, "jump_spin", [
+        ("hold", 1.4, ""),
+        ("spin", 5.5, "✦"),
+    ]),
+    "donut": ("donut", 0.0, "puff_up", [
+        ("hold", 1.4, ""),
+        ("munch", 5.0, "～"),
+    ]),
 }
 _ACTIVITY_GAP = (150.0, 300.0)
 _TRAVEL = "__travel__"

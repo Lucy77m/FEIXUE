@@ -1242,6 +1242,154 @@ def draw_painting(painter: QPainter, bw: float, bh: float, t: float, stage: str,
         painter.drawEllipse(QPointF(bxp, -bh * 0.05), bw * 0.018, bw * 0.026)
 
 
+def draw_watering(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
+    """浇花 举喷壶->浇水->嫩芽冒头"""
+    px = bw * 0.40
+    grow = ease_out(stage_p) if stage == "grow" else (0.4 if stage == "pour" else 0.2)
+    painter.setPen(QPen(QColor(170, 110, 80), max(1.0, bw * 0.008)))
+    painter.setBrush(QColor(206, 134, 96))
+    painter.drawPolygon(QPolygonF([QPointF(px - bw * 0.09, bh * 0.18), QPointF(px + bw * 0.09, bh * 0.18),
+                                   QPointF(px + bw * 0.07, bh * 0.34), QPointF(px - bw * 0.07, bh * 0.34)]))
+    painter.drawRect(QRectF(px - bw * 0.10, bh * 0.13, bw * 0.20, bh * 0.06))
+    stem_top = bh * 0.16 - bh * 0.18 * grow
+    painter.setPen(QPen(QColor(110, 170, 100), max(1.4, bw * 0.012)))
+    painter.drawLine(QPointF(px, bh * 0.16), QPointF(px, stem_top))
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor(140, 196, 120))
+    painter.drawEllipse(QPointF(px - bw * 0.045, stem_top + bh * 0.03), bw * 0.045, bw * 0.028)
+    painter.drawEllipse(QPointF(px + bw * 0.045, stem_top + bh * 0.01), bw * 0.045, bw * 0.028)
+    cx, cy = bw * 0.10, -bh * 0.12
+    painter.setPen(QPen(QColor(110, 150, 180), max(1.0, bw * 0.008)))
+    painter.setBrush(QColor(152, 192, 216))
+    painter.drawRoundedRect(QRectF(cx - bw * 0.10, cy - bh * 0.06, bw * 0.18, bh * 0.15), bw * 0.02, bw * 0.02)
+    painter.drawLine(QPointF(cx + bw * 0.07, cy - bh * 0.02), QPointF(px - bw * 0.05, bh * 0.0))
+    painter.drawArc(QRectF(cx - bw * 0.12, cy - bh * 0.05, bw * 0.10, bh * 0.12), 90 * 16, 160 * 16)
+    if stage == "pour":
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(150, 200, 235, 200))
+        for k in range(4):
+            ph = (t * 1.3 + k * 0.25) % 1.0
+            painter.drawEllipse(QPointF(px - bw * 0.05 + k * bw * 0.012, bh * 0.0 + ph * bh * 0.14),
+                                bw * 0.012, bw * 0.02)
+
+
+def draw_blocks(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
+    """堆积木 一块块往上摞"""
+    bx = bw * 0.34
+    s = bw * 0.13
+    cols = [QColor(232, 120, 120), QColor(120, 180, 230), QColor(245, 205, 110), QColor(140, 200, 150)]
+    placed = int(stage_p * 4) + 1 if stage == "stack" else 4
+    placed = max(1, min(4, placed))
+    for i in range(placed):
+        y = bh * 0.30 - i * s
+        off = math.sin(t * 1.5 + i) * bw * 0.01
+        painter.setPen(QPen(QColor(90, 90, 100), max(0.9, bw * 0.006)))
+        painter.setBrush(cols[i % len(cols)])
+        painter.drawRoundedRect(QRectF(bx - s / 2 + off, y - s, s, s), bw * 0.012, bw * 0.012)
+    if stage == "stack" and placed < 4:
+        carry = QPointF(bw * 0.10, bh * 0.30 - placed * s - bh * (0.2 * (1 - stage_p % 0.25 * 4)))
+        painter.setPen(QPen(QColor(90, 90, 100), max(0.9, bw * 0.006)))
+        painter.setBrush(cols[placed % len(cols)])
+        painter.drawRoundedRect(QRectF(carry.x() - s / 2, carry.y() - s, s, s), bw * 0.012, bw * 0.012)
+
+
+def draw_lollipop(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
+    """棒棒糖 举着->舔(转圈纹)"""
+    head = QPointF(bw * 0.30, -bh * 0.06)
+    painter.setPen(QPen(QColor(230, 225, 220), max(1.4, bw * 0.012)))
+    painter.drawLine(head, QPointF(head.x() - bw * 0.04, bh * 0.28))
+    r = bw * 0.13
+    painter.setPen(QPen(QColor(210, 90, 110), max(1.0, bw * 0.008)))
+    painter.setBrush(QColor(244, 150, 170))
+    painter.drawEllipse(head, r, r)
+    painter.save()
+    painter.translate(head)
+    painter.rotate((t * 60) % 360 if stage == "lick" else 20)
+    pen = QPen(QColor(232, 110, 130), max(1.2, bw * 0.012))
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    painter.setPen(pen)
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    path = QPainterPath(QPointF(0, 0))
+    for a in range(1, 70):
+        rr = r * 0.92 * a / 70.0
+        ang = a * 0.5
+        path.lineTo(QPointF(math.cos(ang) * rr, math.sin(ang) * rr))
+    painter.drawPath(path)
+    painter.restore()
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor(255, 255, 255, 140))
+    painter.drawEllipse(QPointF(head.x() - r * 0.35, head.y() - r * 0.35), r * 0.22, r * 0.22)
+
+
+def draw_popcorn(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
+    """爆米花 捧桶->抛着吃"""
+    cx = bw * 0.30
+    painter.setPen(QPen(QColor(190, 70, 80), max(1.0, bw * 0.008)))
+    for k in range(5):
+        painter.setBrush(QColor(232, 96, 102) if k % 2 == 0 else QColor(248, 246, 240))
+        x = cx - bw * 0.12 + k * bw * 0.048
+        painter.drawPolygon(QPolygonF([QPointF(x, bh * 0.06), QPointF(x + bw * 0.048, bh * 0.06),
+                                       QPointF(x + bw * 0.038, bh * 0.30), QPointF(x + bw * 0.01, bh * 0.30)]))
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor(250, 232, 170))
+    for dx, dy in ((-0.08, -0.02), (-0.02, -0.05), (0.04, -0.03), (0.09, -0.01), (0.0, 0.0), (0.06, 0.02)):
+        painter.drawEllipse(QPointF(cx + dx * bw, bh * 0.02 + dy * bh), bw * 0.03, bw * 0.028)
+    if stage == "toss":
+        ph = (t * 1.4) % 1.0
+        fy = bh * 0.02 - bh * 0.30 * math.sin(ph * math.pi)
+        painter.setBrush(QColor(250, 232, 170))
+        painter.drawEllipse(QPointF(cx + bw * 0.02, fy), bw * 0.03, bw * 0.028)
+
+
+def draw_pinwheel(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
+    """风车 举着转 风一吹就快"""
+    cx, cy = bw * 0.34, -bh * 0.08
+    painter.setPen(QPen(QColor(180, 150, 120), max(1.2, bw * 0.01)))
+    painter.drawLine(QPointF(cx, cy), QPointF(cx - bw * 0.03, bh * 0.30))
+    spin = (t * (260 if stage == "spin" else 90)) % 360
+    cols = [QColor(232, 120, 120), QColor(120, 180, 230), QColor(245, 205, 110), QColor(140, 200, 150)]
+    painter.save()
+    painter.translate(cx, cy)
+    painter.rotate(spin)
+    r = bw * 0.13
+    painter.setPen(Qt.PenStyle.NoPen)
+    for i in range(4):
+        painter.setBrush(cols[i])
+        painter.drawPolygon(QPolygonF([QPointF(0, 0), QPointF(r, -r * 0.35), QPointF(r * 0.7, r * 0.2)]))
+        painter.rotate(90)
+    painter.setBrush(QColor(90, 90, 100))
+    painter.drawEllipse(QPointF(0, 0), bw * 0.02, bw * 0.02)
+    painter.restore()
+
+
+def draw_donut(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
+    """甜甜圈 举着啃 中间是真空心(环形路径 不用背景色挖洞)"""
+    cx, cy = bw * 0.30, bh * 0.02
+    if stage == "munch":
+        cy += math.sin(t * 5) * bh * 0.02
+    R, ri = bw * 0.15, bw * 0.056
+    dough = QPainterPath()
+    dough.setFillRule(Qt.FillRule.OddEvenFill)
+    dough.addEllipse(QPointF(cx, cy), R, R)
+    dough.addEllipse(QPointF(cx, cy), ri, ri)
+    painter.setPen(QPen(QColor(190, 140, 90), max(1.0, bw * 0.008)))
+    painter.setBrush(QColor(222, 170, 110))
+    painter.drawPath(dough)
+    frost = QPainterPath()
+    frost.setFillRule(Qt.FillRule.OddEvenFill)
+    frost.addEllipse(QPointF(cx, cy - bh * 0.004), R * 0.96, R * 0.92)
+    frost.addEllipse(QPointF(cx, cy), ri * 1.2, ri * 1.2)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor(236, 130, 160))
+    painter.drawPath(frost)
+    for i, c in enumerate((QColor(120, 180, 230), QColor(245, 205, 110), QColor(140, 200, 150),
+                           QColor(255, 255, 255), QColor(232, 110, 130))):
+        ang = i * 1.3 + 0.5
+        sx, sy = cx + math.cos(ang) * R * 0.66, cy + math.sin(ang) * R * 0.66
+        painter.setPen(QPen(c, max(1.4, bw * 0.012)))
+        painter.drawLine(QPointF(sx - bw * 0.018, sy - bw * 0.01), QPointF(sx + bw * 0.018, sy + bw * 0.01))
+
+
 # 装扮注册表 worn 穿身上 ambient 撒周围 二者互斥
 COSTUME_LAYERS = {
     "sherlock": (draw_sherlock, None),
@@ -1273,6 +1421,12 @@ COSTUME_LAYERS = {
     "fireworks": (None, draw_fireworks),
     "yoyo": (None, draw_yoyo),
     "painting": (None, draw_painting),
+    "watering": (None, draw_watering),
+    "blocks": (None, draw_blocks),
+    "lollipop": (None, draw_lollipop),
+    "popcorn": (None, draw_popcorn),
+    "pinwheel": (None, draw_pinwheel),
+    "donut": (None, draw_donut),
 }
 COSTUMES = frozenset(COSTUME_LAYERS)
 WORN_COSTUMES = frozenset(name for name, (worn, _ambient) in COSTUME_LAYERS.items() if worn)
