@@ -418,6 +418,9 @@ class Agent:
     def _turn_context(self, query: str | None = None) -> str:
         """每轮现算的状态注记"""
         parts = [emotion.tone_hint(), prompts.time_hint()]
+        mood_reason = emotion.mood_note()  # 心情明显时附上"为什么" 让它说得出因
+        if mood_reason:
+            parts.append(mood_reason)
         from desktop_pet import somatic
         body = somatic.context()
         if body:

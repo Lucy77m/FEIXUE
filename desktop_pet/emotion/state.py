@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import json
 import threading
+import time
+from collections import Counter, deque
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 
@@ -101,6 +103,7 @@ class EmotionEngine:
     def __init__(self) -> None:
         self._lock = threading.RLock()
         self._state = self._load()
+        self._events: deque = deque(maxlen=16)  # 最近动情绪的事件(单调时刻, 事件名) 只在内存
         with self._lock:
             self._settle_decay()
             self._save()
@@ -122,6 +125,9 @@ class EmotionEngine:
             gain = dr * (1.0 - state.rapport) if dr > 0 else dr
             state.rapport = _clamp(state.rapport + gain, _RAPPORT_FLOOR, 1.0)
             state.updated_at = self._now()
+            # 留痕：能说出"为什么这心情"——但 interaction 每条消息都来 太碎 不记
+            if event in _APPRAISALS and event != "interaction":
+                self._events.append((time.monotonic(), event))
             self._save()
 
     def snapshot(self) -> tuple[float, float, float]:
@@ -139,6 +145,32 @@ class EmotionEngine:
 
         valence, arousal, rapport = self.snapshot()
         return _tone_hint(_state_name(valence, arousal), rapport)
+
+    def mood_note(self) -> str:
+        """心情明显偏离基线时 给一句'为什么'——最近一小时哪些事动了它 平淡就返回空串"""
+        valence, arousal, _ = self.snapshot()
+        if abs(valence - _BASELINE_VALENCE) < 0.18 and arousal < 0.55:
+            return ""  # 心情平淡 不必解释
+        now = time.monotonic()
+        with self._lock:
+            recent = [ev for ts, ev in self._events if now - ts <= 3600]
+        if not recent:
+            return ""
+        label = {
+            "praised": "they praised you", "scolded": "they scolded / criticized you",
+            "task_done": "a task went well", "task_failed": "a task failed",
+            "returned": "they came back after being away", "fed": "they fed you",
+            "hurt": "they were rough with you (flung you around)",
+        }
+        parts = []
+        for ev, c in Counter(recent).items():
+            name = label.get(ev)
+            if name:
+                parts.append(name + (f" ×{c}" if c > 1 else ""))
+        if not parts:
+            return ""
+        return ("[Why you feel this way — real things from the last hour that moved your mood; "
+                "if they ask what's up, you can be honest about these]: " + "; ".join(parts))
 
     def _decayed(self) -> _State:
         """算衰减后的状态副本"""
