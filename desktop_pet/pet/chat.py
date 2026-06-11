@@ -346,12 +346,12 @@ class SpeechText(QWidget):
             self.update()
 
     def begin_chunk(self) -> None:
-        """音频开始出声时启动本地打字机 sapi没有逐字进度 字幕自己走"""
+        """音频开始出声 进入音频驱动 文字只跟进度回调走
+        打字机不抢跑(比音频快会领先) 音频死了由advance兜底"""
         if not self._paced or not self._awaiting_start:
             return
         self._awaiting_start = False
-        if not self._synced and not self._type_timer.isActive():
-            self._type_timer.start(_TYPE_MS)
+        self._synced = True
 
     def set_progress(self, shown: int) -> None:
         """按音频播放进度显示文字 只进不退 免得和打字机打架闪字"""

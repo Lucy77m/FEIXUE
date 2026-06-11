@@ -454,6 +454,15 @@ class ControlPanel(QDialog):
         self._tts_rate.setValue(int(settings.tts_rate))
         self._tts_rate_label = QLabel(self._fmt_rate(settings.tts_rate))
         self._tts_rate.valueChanged.connect(lambda v: self._tts_rate_label.setText(self._fmt_rate(v)))
+        # 声音模型下载区 状态轮询
+        self._voice_dl_label = QLabel("")
+        self._voice_dl_btn = QPushButton(self._t("btn_voice_dl"), objectName="cancel")
+        self._voice_dl_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._voice_dl_btn.clicked.connect(self._on_voice_download)
+        self._voice_dl_timer = QTimer(self)
+        self._voice_dl_timer.timeout.connect(self._refresh_voice_status)
+        self._voice_dl_timer.start(600)
+        self._refresh_voice_status()
         self._proactive_level = _Segmented([(value, self._t(label_key)) for value, label_key in i18n.PROACTIVE_LABEL_KEYS])
         self._proactive_level.setCurrentData(settings.proactive_level)
         self._hk_summon = QKeySequenceEdit(QKeySequence(settings.hotkey_summon))
@@ -602,6 +611,31 @@ class ControlPanel(QDialog):
     def _on_preview(self) -> None:
         if self._on_preview_voice is not None:
             self._on_preview_voice(int(self._tts_rate.value()))
+
+    def _on_voice_download(self) -> None:
+        from desktop_pet import voice
+        voice.start_download(self._settings.proxy)
+        self._refresh_voice_status()
+
+    def _refresh_voice_status(self) -> None:
+        """轮询声音模型状态 更新标签和按钮"""
+        from desktop_pet import voice
+        st = voice.download_status()
+        if st["state"] == "ready":
+            self._voice_dl_label.setText(self._t("voice_dl_ready"))
+            self._voice_dl_btn.hide()
+        elif st["state"] == "downloading":
+            self._voice_dl_label.setText(self._t("voice_dl_ing").format(pct=int(st["pct"] * 100)))
+            self._voice_dl_btn.setEnabled(False)
+        elif st["state"] == "error":
+            self._voice_dl_label.setText(self._t("voice_dl_err").format(msg=st["msg"]))
+            self._voice_dl_btn.setEnabled(True)
+            self._voice_dl_btn.setText(self._t("btn_voice_retry"))
+            self._voice_dl_btn.show()
+        else:
+            self._voice_dl_label.setText(self._t("voice_dl_none"))
+            self._voice_dl_btn.setEnabled(True)
+            self._voice_dl_btn.show()
 
     def _section_block(self, title: str, value: QLabel) -> QFrame:
         card = QFrame(objectName="statusCard")
@@ -768,6 +802,11 @@ class ControlPanel(QDialog):
         body.addWidget(self._check_field(self._tts, "help_tts"))
         body.addWidget(self._check_field(self._sfx, "help_sfx"))
         body.addWidget(self._check_field(self._weather_cb, "help_weather"))
+        dl_row = QHBoxLayout()
+        dl_row.setSpacing(8)
+        dl_row.addWidget(self._voice_dl_label, 1)
+        dl_row.addWidget(self._voice_dl_btn)
+        body.addWidget(self._field("lbl_voice_model", dl_row, "help_voice_model"))
         rate_row = QHBoxLayout()
         rate_row.setSpacing(10)
         rate_row.addWidget(self._tts_rate, 1)

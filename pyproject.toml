@@ -21,6 +21,8 @@ dependencies = [
     "pywinauto>=0.6.9",
     # gpu加速 无gpu自动回退cpu
     "onnxruntime-directml>=1.24",
+    "kokoro-onnx>=0.5.0",
+    "misaki[zh]>=0.9.4",
 ]
 
 [dependency-groups]

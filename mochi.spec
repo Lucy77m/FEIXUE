@@ -28,6 +28,18 @@ datas += collect_data_files("justext")
 hiddenimports += collect_submodules("justext")
 # certifi证书
 datas += collect_data_files("certifi")
+# kokoro本地语音链 misaki注音 jieba词典 pypinyin数据 espeak底层库
+hiddenimports += collect_submodules("misaki") + ["kokoro_onnx", "phonemizer", "cn2an", "proces"]
+datas += collect_data_files("misaki")
+datas += collect_data_files("jieba")
+datas += collect_data_files("pypinyin")
+datas += collect_data_files("pypinyin_dict")
+datas += collect_data_files("cn2an")
+datas += collect_data_files("proces")
+binaries += collect_dynamic_libs("espeakng_loader")
+datas += collect_data_files("espeakng_loader")
+datas += collect_data_files("language_tags")
+datas += collect_data_files("segments")
 
 # 易漏的隐藏依赖
 hiddenimports += ["win32timezone", "comtypes", "comtypes.client", "comtypes.stream"]
