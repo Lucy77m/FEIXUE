@@ -1390,6 +1390,143 @@ def draw_donut(painter: QPainter, bw: float, bh: float, t: float, stage: str, st
         painter.drawLine(QPointF(sx - bw * 0.018, sy - bw * 0.01), QPointF(sx + bw * 0.018, sy + bw * 0.01))
 
 
+def draw_soda(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
+    """汽水 举杯 吸管喝 气泡往上冒"""
+    cx = bw * 0.30
+    top, bot = -bh * 0.14, bh * 0.30
+    wt = bw * 0.11
+    painter.setPen(QPen(QColor(150, 180, 200, 210), max(1.0, bw * 0.008)))
+    painter.setBrush(QColor(150, 205, 225, 150))
+    painter.drawPolygon(QPolygonF([QPointF(cx - wt, top), QPointF(cx + wt, top),
+                                   QPointF(cx + wt * 0.78, bot), QPointF(cx - wt * 0.78, bot)]))
+    painter.setBrush(QColor(220, 240, 250, 175))
+    painter.drawRect(QRectF(cx - wt * 0.2, top + bh * 0.04, wt * 0.5, wt * 0.5))
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor(255, 255, 255, 175))
+    for k in range(5):
+        ph = (t * 0.9 + k * 0.27) % 1.0
+        painter.drawEllipse(QPointF(cx - wt * 0.4 + k * wt * 0.2, bot - ph * (bot - top) * 0.8),
+                            bw * 0.012, bw * 0.012)
+    painter.setPen(QPen(QColor(232, 110, 120), max(1.4, bw * 0.014)))
+    painter.drawLine(QPointF(cx + wt * 0.3, top - bh * 0.16), QPointF(cx - wt * 0.1, bot - bh * 0.04))
+
+
+def draw_corn(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
+    """啃玉米 一排排啃掉"""
+    painter.save()
+    painter.translate(bw * 0.30, bh * 0.04)
+    painter.rotate(-25)
+    cw, ch = bw * 0.10, bh * 0.26
+    painter.setPen(QPen(QColor(90, 150, 80), max(1.0, bw * 0.007)))
+    painter.setBrush(QColor(132, 190, 112))
+    painter.drawPolygon(QPolygonF([QPointF(0, ch), QPointF(-cw * 1.2, ch + ch * 0.5), QPointF(cw * 0.2, ch + ch * 0.2)]))
+    painter.drawPolygon(QPolygonF([QPointF(0, ch), QPointF(cw * 1.2, ch + ch * 0.5), QPointF(-cw * 0.2, ch + ch * 0.2)]))
+    painter.setPen(QPen(QColor(220, 180, 70), max(1.0, bw * 0.007)))
+    painter.setBrush(QColor(248, 216, 96))
+    painter.drawRoundedRect(QRectF(-cw, -ch, cw * 2, ch * 2), cw * 0.7, cw * 0.7)
+    eaten = int(stage_p * 4) if stage == "bite" else 0
+    painter.setPen(QPen(QColor(214, 170, 60), max(0.7, bw * 0.004)))
+    painter.setBrush(QColor(252, 226, 120))
+    for ry in range(eaten, 7):
+        for rx in range(3):
+            painter.drawEllipse(QPointF(-cw * 0.55 + rx * cw * 0.55, -ch * 0.85 + ry * ch * 0.26), cw * 0.22, ch * 0.10)
+    painter.restore()
+
+
+def draw_sushi(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
+    """吃寿司 筷子夹起一贯"""
+    cx, cy = bw * 0.30, bh * 0.06
+    if stage == "eat":
+        cy -= bh * 0.12 * stage_p
+    painter.setPen(QPen(QColor(200, 195, 185), max(1.0, bw * 0.007)))
+    painter.setBrush(QColor(250, 248, 242))
+    painter.drawRoundedRect(QRectF(cx - bw * 0.13, cy, bw * 0.26, bh * 0.12), bw * 0.03, bw * 0.03)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor(248, 150, 110))
+    painter.drawRoundedRect(QRectF(cx - bw * 0.14, cy - bh * 0.05, bw * 0.28, bh * 0.08), bw * 0.03, bw * 0.03)
+    painter.setPen(QPen(QColor(255, 215, 190, 190), max(0.8, bw * 0.005)))
+    for k in range(2):
+        painter.drawLine(QPointF(cx - bw * 0.1, cy - bh * 0.035 + k * bh * 0.02),
+                         QPointF(cx + bw * 0.1, cy - bh * 0.04 + k * bh * 0.02))
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor(58, 66, 58))
+    painter.drawRect(QRectF(cx - bw * 0.03, cy - bh * 0.05, bw * 0.06, bh * 0.17))
+    painter.setPen(QPen(QColor(180, 130, 90), max(1.2, bw * 0.01)))
+    painter.drawLine(QPointF(cx - bw * 0.18, cy - bh * 0.20), QPointF(cx - bw * 0.02, cy + bh * 0.02))
+    painter.drawLine(QPointF(cx - bw * 0.12, cy - bh * 0.22), QPointF(cx + bw * 0.02, cy + bh * 0.02))
+
+
+def draw_rubik(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
+    """玩魔方 拧顶层"""
+    cx, cy = bw * 0.30, 0.0
+    s = bw * 0.10
+    cols = [QColor(232, 90, 90), QColor(245, 205, 110), QColor(120, 180, 230),
+            QColor(140, 200, 150), QColor(248, 248, 248), QColor(255, 150, 80)]
+    twist = math.sin(t * 3) * s * 0.5 if stage == "turn" else 0.0
+    for ry in range(3):
+        for rx in range(3):
+            x, y = (rx - 1) * s, (ry - 1) * s
+            if stage == "turn" and ry == 0:
+                x += twist
+            painter.setPen(QPen(QColor(40, 40, 45), max(1.0, bw * 0.007)))
+            painter.setBrush(cols[(rx + ry * 3) % len(cols)])
+            painter.drawRoundedRect(QRectF(cx + x - s * 0.46, cy + y - s * 0.46, s * 0.92, s * 0.92), s * 0.12, s * 0.12)
+
+
+def draw_magic(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
+    """变魔术 礼帽+魔杖 噗地冒星星"""
+    def spark(c, sz, col):
+        painter.setPen(QPen(col, max(1.0, sz * 0.3)))
+        for a in range(4):
+            ang = a * math.pi / 4
+            painter.drawLine(QPointF(c.x() - math.cos(ang) * sz, c.y() - math.sin(ang) * sz),
+                             QPointF(c.x() + math.cos(ang) * sz, c.y() + math.sin(ang) * sz))
+    hx = bw * 0.22
+    painter.setPen(QPen(QColor(40, 40, 50), max(1.0, bw * 0.008)))
+    painter.setBrush(QColor(58, 58, 70))
+    painter.drawRect(QRectF(hx - bw * 0.08, -bh * 0.16, bw * 0.16, bh * 0.20))
+    painter.drawRoundedRect(QRectF(hx - bw * 0.13, bh * 0.02, bw * 0.26, bh * 0.05), bw * 0.02, bw * 0.02)
+    painter.setBrush(QColor(200, 80, 90))
+    painter.drawRect(QRectF(hx - bw * 0.08, -bh * 0.02, bw * 0.16, bh * 0.035))
+    wx, wy = bw * 0.44, -bh * 0.12
+    painter.setPen(QPen(QColor(40, 40, 50), max(1.4, bw * 0.012)))
+    painter.drawLine(QPointF(wx - bw * 0.07, bh * 0.05), QPointF(wx, wy))
+    spark(QPointF(wx, wy), bw * 0.03, QColor(250, 215, 120))
+    if stage == "poof":
+        for sgn in range(6):
+            ang = sgn * math.pi / 3 + t
+            rr = bw * 0.06 + stage_p * bw * 0.22
+            spark(QPointF(hx + math.cos(ang) * rr, -bh * 0.14 + math.sin(ang) * rr),
+                  bw * 0.025, QColor(250, 215, 120, int(220 * (1 - stage_p))))
+
+
+def draw_knitting(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
+    """织毛衣 两针+织片+毛线团"""
+    cx, cy = bw * 0.30, bh * 0.06
+    painter.setPen(QPen(QColor(180, 110, 130), max(0.8, bw * 0.005)))
+    painter.setBrush(QColor(226, 140, 160))
+    painter.drawRoundedRect(QRectF(cx - bw * 0.10, cy - bh * 0.02, bw * 0.20, bh * 0.14), bw * 0.02, bw * 0.02)
+    painter.setPen(QPen(QColor(200, 120, 140, 170), max(0.6, bw * 0.004)))
+    for k in range(3):
+        painter.drawLine(QPointF(cx - bw * 0.08, cy + bh * 0.01 + k * bh * 0.04),
+                         QPointF(cx + bw * 0.08, cy + bh * 0.01 + k * bh * 0.04))
+    wob = math.sin(t * 4) * 6 if stage == "knit" else 0.0
+    painter.setPen(QPen(QColor(182, 152, 122), max(1.2, bw * 0.01)))
+    painter.save()
+    painter.translate(cx - bw * 0.06, cy - bh * 0.02)
+    painter.rotate(-35 + wob)
+    painter.drawLine(QPointF(0, 0), QPointF(0, -bh * 0.22))
+    painter.restore()
+    painter.save()
+    painter.translate(cx + bw * 0.06, cy - bh * 0.02)
+    painter.rotate(35 - wob)
+    painter.drawLine(QPointF(0, 0), QPointF(0, -bh * 0.22))
+    painter.restore()
+    painter.setPen(QPen(QColor(170, 78, 92), max(0.9, bw * 0.006)))
+    painter.setBrush(QColor(226, 128, 142))
+    painter.drawEllipse(QPointF(cx - bw * 0.01, cy + bh * 0.21), bw * 0.06, bw * 0.06)
+
+
 # 装扮注册表 worn 穿身上 ambient 撒周围 二者互斥
 COSTUME_LAYERS = {
     "sherlock": (draw_sherlock, None),
@@ -1427,6 +1564,12 @@ COSTUME_LAYERS = {
     "popcorn": (None, draw_popcorn),
     "pinwheel": (None, draw_pinwheel),
     "donut": (None, draw_donut),
+    "soda": (None, draw_soda),
+    "corn": (draw_corn, None),
+    "sushi": (None, draw_sushi),
+    "rubik": (None, draw_rubik),
+    "magic": (None, draw_magic),
+    "knitting": (None, draw_knitting),
 }
 COSTUMES = frozenset(COSTUME_LAYERS)
 WORN_COSTUMES = frozenset(name for name, (worn, _ambient) in COSTUME_LAYERS.items() if worn)

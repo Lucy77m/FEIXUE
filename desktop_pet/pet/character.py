@@ -217,6 +217,30 @@ _ACTIVITIES = {
         ("hold", 1.4, ""),
         ("munch", 5.0, "～"),
     ]),
+    "soda": ("soda", 0.0, "happy_wiggle", [
+        ("hold", 1.4, ""),
+        ("sip", 5.5, "～"),
+    ]),
+    "corn": ("corn", 0.0, "puff_up", [
+        ("hold", 1.4, ""),
+        ("bite", 5.0, "～"),
+    ]),
+    "sushi": ("sushi", 0.0, "happy_wiggle", [
+        ("pick", 2.0, "?"),
+        ("eat", 3.0, "～"),
+    ]),
+    "rubik": ("rubik", 0.0, "celebrate", [
+        ("hold", 1.4, ""),
+        ("turn", 6.0, "?"),
+    ]),
+    "magic": ("magic", 0.0, "celebrate", [
+        ("wave", 2.5, "～"),
+        ("poof", 2.0, "✦"),
+    ]),
+    "knitting": ("knitting", 0.0, "happy_wiggle", [
+        ("hold", 1.4, ""),
+        ("knit", 6.0, "～"),
+    ]),
 }
 _ACTIVITY_GAP = (150.0, 300.0)
 _TRAVEL = "__travel__"
