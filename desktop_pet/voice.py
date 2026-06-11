@@ -348,9 +348,10 @@ def speak(text: str) -> None:
 
 
 def speak_one(text: str, on_start=None, on_progress=None, on_done=None) -> None:
-    """念一句 带逐音节字幕跟随回调"""
-    cleaned = _clean(text) if _enabled else ""
-    if not _enabled or not cleaned:
+    """念一句 带逐音节字幕跟随回调
+    文本不再清洗 原样进合成器 时间戳字符位和气泡显示文本一一对齐
+    emoji和符号在合成端只当成小间隙 不发声但占字幕进度"""
+    if not _enabled or not (text or "").strip():
         for cb in (on_start, on_done):
             if cb is not None:
                 try:
@@ -358,7 +359,7 @@ def speak_one(text: str, on_start=None, on_progress=None, on_done=None) -> None:
                 except Exception:
                     pass
         return
-    _enqueue(cleaned, on_start, on_progress, on_done, _rate)
+    _enqueue(text[:600], on_start, on_progress, on_done, _rate)
 
 
 def preview(text: str, rate, on_done=None) -> None:

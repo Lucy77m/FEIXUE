@@ -354,13 +354,13 @@ class SpeechText(QWidget):
             self._type_timer.start(_TYPE_MS)
 
     def set_progress(self, shown: int) -> None:
-        """按音频播放进度显示文字"""
+        """按音频播放进度显示文字 只进不退 免得和打字机打架闪字"""
         if not self._paced:
             return
         self._awaiting_start = False
         self._synced = True
         self._type_timer.stop()
-        target = max(0, min(int(shown), len(self._full)))
+        target = max(self._shown, min(int(shown), len(self._full)))
         if target == self._shown and target < len(self._full):
             return
         self._shown = target
