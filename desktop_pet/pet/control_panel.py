@@ -441,11 +441,27 @@ class ControlPanel(QDialog):
         self._weather_cb = QCheckBox(self._t("cb_weather"))
         self._weather_cb.setChecked(settings.weather_enabled)
         self._weather_cb.setCursor(Qt.CursorShape.PointingHandCursor)
+        # 听觉 按住说话和唤醒词 模型按需下载
+        self._hear_cb = QCheckBox(self._t("cb_hear"))
+        self._hear_cb.setChecked(settings.hear_enabled)
+        self._hear_cb.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._wake_cb = QCheckBox(self._t("cb_wake"))
+        self._wake_cb.setChecked(settings.wake_enabled)
+        self._wake_cb.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._hear_dl_label = QLabel("")
+        self._hear_dl_btn = QPushButton(self._t("btn_hear_dl"), objectName="cancel")
+        self._hear_dl_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._hear_dl_btn.clicked.connect(self._on_hear_download)
+        self._hear_dl_timer = QTimer(self)
+        self._hear_dl_timer.timeout.connect(self._refresh_hear_status)
+        self._hear_dl_timer.start(600)
+        self._refresh_hear_status()
         self._proactive_level = _Segmented([(value, self._t(label_key)) for value, label_key in i18n.PROACTIVE_LABEL_KEYS])
         self._proactive_level.setCurrentData(settings.proactive_level)
         self._hk_summon = QKeySequenceEdit(QKeySequence(settings.hotkey_summon))
         self._hk_ask = QKeySequenceEdit(QKeySequence(settings.hotkey_ask))
         self._hk_quick = QKeySequenceEdit(QKeySequence(settings.hotkey_quick))
+        self._hk_talk = QKeySequenceEdit(QKeySequence(settings.hotkey_talk))
         self._hk_status_labels: dict = {}
 
     def _scroll_page(self, hint_text: str) -> tuple[QWidget, QVBoxLayout]:
@@ -580,6 +596,31 @@ class ControlPanel(QDialog):
     def _on_lang_clicked(self, lang: str) -> None:
         if self._on_set_language is not None:
             self._on_set_language(lang)
+
+    def _on_hear_download(self) -> None:
+        from desktop_pet import hearing
+        hearing.start_download(self._settings.proxy)
+        self._refresh_hear_status()
+
+    def _refresh_hear_status(self) -> None:
+        """轮询听觉模型状态 更新标签和按钮"""
+        from desktop_pet import hearing
+        st = hearing.download_status()
+        if st["state"] == "ready":
+            self._hear_dl_label.setText(self._t("hear_dl_ready"))
+            self._hear_dl_btn.hide()
+        elif st["state"] == "downloading":
+            self._hear_dl_label.setText(self._t("hear_dl_ing").format(pct=int(st["pct"] * 100)))
+            self._hear_dl_btn.setEnabled(False)
+        elif st["state"] == "error":
+            self._hear_dl_label.setText(self._t("hear_dl_err").format(msg=st["msg"]))
+            self._hear_dl_btn.setEnabled(True)
+            self._hear_dl_btn.setText(self._t("btn_hear_retry"))
+            self._hear_dl_btn.show()
+        else:
+            self._hear_dl_label.setText(self._t("hear_dl_none"))
+            self._hear_dl_btn.setEnabled(True)
+            self._hear_dl_btn.show()
 
     def _section_block(self, title: str, value: QLabel) -> QFrame:
         card = QFrame(objectName="statusCard")
@@ -744,6 +785,13 @@ class ControlPanel(QDialog):
         body.addWidget(self._check_field(self._proactive_enabled, "help_proactive"))
         body.addWidget(self._field("lbl_proactive_freq", self._proactive_level, "help_proactive_freq"))
         body.addWidget(self._check_field(self._weather_cb, "help_weather"))
+        body.addWidget(self._check_field(self._hear_cb, "help_hear"))
+        body.addWidget(self._check_field(self._wake_cb, "help_wake"))
+        hear_row = QHBoxLayout()
+        hear_row.setSpacing(8)
+        hear_row.addWidget(self._hear_dl_label, 1)
+        hear_row.addWidget(self._hear_dl_btn)
+        body.addWidget(self._field("lbl_hear_model", hear_row, "help_hear_model"))
         body.addWidget(self._build_hotkeys_block())
         body.addStretch(1)
         return page
@@ -757,6 +805,7 @@ class ControlPanel(QDialog):
         v.addWidget(self._hotkey_row("lbl_hk_summon", self._hk_summon, "summon"))
         v.addWidget(self._hotkey_row("lbl_hk_ask", self._hk_ask, "ask"))
         v.addWidget(self._hotkey_row("lbl_hk_quick", self._hk_quick, "quick"))
+        v.addWidget(self._hotkey_row("lbl_hk_talk", self._hk_talk, "talk"))
         help_l = QLabel(self._t("help_hotkeys"), objectName="help")
         help_l.setWordWrap(True)
         v.addWidget(help_l)
@@ -1075,6 +1124,9 @@ class ControlPanel(QDialog):
         s.hotkey_summon = self._hk_summon.keySequence().toString().split(",")[0].strip() or s.hotkey_summon
         s.hotkey_ask = self._hk_ask.keySequence().toString().split(",")[0].strip() or s.hotkey_ask
         s.hotkey_quick = self._hk_quick.keySequence().toString().split(",")[0].strip() or s.hotkey_quick
+        s.hotkey_talk = self._hk_talk.keySequence().toString().split(",")[0].strip() or s.hotkey_talk
+        s.hear_enabled = self._hear_cb.isChecked()
+        s.wake_enabled = self._wake_cb.isChecked()
         try:
             s.save()
         except Exception:

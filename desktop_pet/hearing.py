@@ -1,0 +1,385 @@
+# author: bdth
+# email: 2074055628@qq.com
+# 听觉 sensevoice本地识别 全程离线
+# 两种入口 按住热键说话(松开发送) 唤醒词"墨池"(说完静音自动发送)
+# 模型按需下载 没下载就完全沉默
+
+from __future__ import annotations
+
+import queue
+import threading
+import time
+
+from desktop_pet.settings import DATA_DIR
+
+HEAR_DIR = DATA_DIR / "hearing"
+_SR = 16000
+_CHUNK = 1600  # 100ms
+
+_DL_BASE = "https://github.com/dulaiduwang003/MOCHI/releases/download/models"
+_FILES = {  # 短名: (release文件名, 进度权重)
+    "sv_model": ("hear-sv-model.int8.onnx", 0.90),
+    "sv_tokens": ("hear-sv-tokens.txt", 0.01),
+    "vad": ("hear-vad.onnx", 0.01),
+    "kws_encoder": ("hear-kws-encoder.onnx", 0.05),
+    "kws_decoder": ("hear-kws-decoder.onnx", 0.02),
+    "kws_joiner": ("hear-kws-joiner.onnx", 0.005),
+    "kws_tokens": ("hear-kws-tokens.txt", 0.005),
+}
+DOWNLOAD_SIZE_HINT = "250MB"
+
+_WAKE_KEYWORD = "m ò ch í @墨池"
+_TALK_CAP_S = 25.0     # 单次说话硬上限
+_WAKE_IDLE_S = 6.0     # 唤醒后一直没人说话就收回
+_PARTIAL_EVERY = 0.5   # 部分识别刷新间隔
+
+_enabled = False
+_wake_on = False
+_shutdown = threading.Event()
+_loop_thread: "threading.Thread | None" = None
+_lock = threading.Lock()
+
+_talk_req = threading.Event()    # 热键按下
+_talk_end = threading.Event()    # 热键松开
+_audio_q: "queue.Queue" = queue.Queue()
+
+_recognizer = None
+_kws = None
+_vad_cfg = None
+
+# 回调由app注入 全在工作线程触发 注意转qt信号
+cb_partial = None   # (text) 说话中的实时文本
+cb_final = None     # (text) 一句定稿
+cb_state = None     # (state) idle/listening/wake_hit
+
+
+def _path(key: str):
+    return HEAR_DIR / _FILES[key][0]
+
+
+def is_ready() -> bool:
+    return all(_path(k).exists() for k in _FILES)
+
+
+# ── 下载 ──────────────────────────────────────────────────────
+
+_dl_lock = threading.Lock()
+_dl_state = {"state": "idle", "pct": 0.0, "msg": ""}
+
+
+def download_status() -> dict:
+    with _dl_lock:
+        st = dict(_dl_state)
+    if st["state"] != "downloading" and is_ready():
+        st["state"] = "ready"
+    return st
+
+
+def start_download(proxy: str = "") -> None:
+    with _dl_lock:
+        if _dl_state["state"] == "downloading":
+            return
+        _dl_state.update(state="downloading", pct=0.0, msg="")
+    if is_ready():
+        with _dl_lock:
+            _dl_state.update(state="idle", pct=0.0)
+        return
+    threading.Thread(target=_download, args=(proxy,), daemon=True, name="mochi-hear-dl").start()
+
+
+def _download(proxy: str) -> None:
+    try:
+        from desktop_pet.settings import build_http_client
+
+        HEAR_DIR.mkdir(parents=True, exist_ok=True)
+        done_w = 0.0
+        with build_http_client(proxy) as client:
+            for key, (name, weight) in _FILES.items():
+                dest = _path(key)
+                if dest.exists():
+                    done_w += weight
+                    continue
+                tmp = dest.with_suffix(dest.suffix + ".part")
+                with client.stream("GET", f"{_DL_BASE}/{name}", follow_redirects=True) as resp:
+                    resp.raise_for_status()
+                    total = int(resp.headers.get("content-length") or 0)
+                    got = 0
+                    with open(tmp, "wb") as fh:
+                        for chunk in resp.iter_bytes(1024 * 256):
+                            fh.write(chunk)
+                            got += len(chunk)
+                            frac = (got / total) if total else 0.0
+                            with _dl_lock:
+                                _dl_state["pct"] = min(0.999, done_w + weight * frac)
+                tmp.replace(dest)
+                done_w += weight
+        with _dl_lock:
+            _dl_state.update(state="idle", pct=1.0, msg="")
+    except Exception as e:
+        for key in _FILES:
+            part = _path(key).with_suffix(_path(key).suffix + ".part")
+            try:
+                part.unlink(missing_ok=True)
+            except OSError:
+                pass
+        with _dl_lock:
+            _dl_state.update(state="error", msg=str(e)[:120])
+
+
+# ── 开关 ──────────────────────────────────────────────────────
+
+def set_enabled(on: bool) -> None:
+    """听觉总开关 开了热键说话可用"""
+    global _enabled
+    _enabled = bool(on) and is_ready()
+    _kick()
+
+
+def set_wake_enabled(on: bool) -> None:
+    """唤醒词开关 开了麦克风常开跑关键词检测"""
+    global _wake_on
+    _wake_on = bool(on) and is_ready()
+    _kick()
+
+
+def start_talk() -> None:
+    """热键按下 开始听"""
+    if not _enabled:
+        return
+    _talk_end.clear()
+    _talk_req.set()
+    _kick()
+
+
+def stop_talk() -> None:
+    """热键松开 定稿发送"""
+    _talk_end.set()
+
+
+def _kick() -> None:
+    global _loop_thread
+    if not (_enabled or _wake_on):
+        return
+    with _lock:
+        if _loop_thread is not None and _loop_thread.is_alive():
+            return
+        _loop_thread = threading.Thread(target=_loop, daemon=True, name="mochi-hearing")
+        _loop_thread.start()
+
+
+def shutdown() -> None:
+    _shutdown.set()
+    _talk_end.set()
+
+
+# ── 模型加载 ───────────────────────────────────────────────────
+
+def _import_sherpa():
+    """sherpa不带ort dll 自己也不静态链 会按名找onnxruntime.dll
+    python包的ort是静态嵌在pyd里的 进程里没这个名字 windows就摸到system32的1.17老版本炸掉
+    所以按全路径把包里1.24的dll先载进来占住名字"""
+    import ctypes
+    import os
+
+    import onnxruntime
+    dll = os.path.join(os.path.dirname(onnxruntime.__file__), "capi", "onnxruntime.dll")
+    if os.path.exists(dll):
+        try:
+            ctypes.WinDLL(dll)
+        except OSError:
+            pass
+    import sherpa_onnx
+    return sherpa_onnx
+
+
+def _load_recognizer():
+    global _recognizer
+    if _recognizer is None:
+        sherpa_onnx = _import_sherpa()
+        _recognizer = sherpa_onnx.OfflineRecognizer.from_sense_voice(
+            model=str(_path("sv_model")),
+            tokens=str(_path("sv_tokens")),
+            num_threads=2,
+            use_itn=True,
+            language="auto",
+        )
+    return _recognizer
+
+
+def _load_kws():
+    global _kws
+    if _kws is None:
+        sherpa_onnx = _import_sherpa()
+        kw_file = HEAR_DIR / "keywords.txt"
+        kw_file.write_text(_WAKE_KEYWORD + "\n", encoding="utf-8")
+        _kws = sherpa_onnx.KeywordSpotter(
+            tokens=str(_path("kws_tokens")),
+            encoder=str(_path("kws_encoder")),
+            decoder=str(_path("kws_decoder")),
+            joiner=str(_path("kws_joiner")),
+            keywords_file=str(kw_file),
+            max_active_paths=4,
+            keywords_score=2.0,
+            keywords_threshold=0.2,
+            num_trailing_blanks=1,
+            num_threads=1,
+            provider="cpu",
+        )
+    return _kws
+
+
+def _new_vad():
+    sherpa_onnx = _import_sherpa()
+    global _vad_cfg
+    if _vad_cfg is None:
+        cfg = sherpa_onnx.VadModelConfig()
+        cfg.silero_vad.model = str(_path("vad"))
+        cfg.silero_vad.min_silence_duration = 0.9   # 静音这么久算说完
+        cfg.silero_vad.min_speech_duration = 0.2
+        cfg.sample_rate = _SR
+        _vad_cfg = cfg
+    return sherpa_onnx.VoiceActivityDetector(_vad_cfg, buffer_size_in_seconds=_TALK_CAP_S + 5)
+
+
+def _decode(samples) -> str:
+    import numpy as np
+    rec = _load_recognizer()
+    s = rec.create_stream()
+    s.accept_waveform(_SR, np.asarray(samples, dtype=np.float32))
+    rec.decode_stream(s)
+    return (s.result.text or "").strip()
+
+
+# ── 主循环 ─────────────────────────────────────────────────────
+
+def _emit(cb, *args) -> None:
+    if cb is not None:
+        try:
+            cb(*args)
+        except Exception:
+            pass
+
+
+def _loop() -> None:
+    """采音线程外的消费线程 状态机 唤醒检测和说话采集"""
+    import numpy as np
+    import sounddevice as sd
+
+    stream = None
+    ks = None
+    try:
+        def _on_audio(indata, frames, t, status):
+            try:
+                _audio_q.put_nowait(indata[:, 0].copy())
+            except Exception:
+                pass
+
+        while not _shutdown.is_set():
+            if not (_enabled or _wake_on):
+                break  # 全关了 线程退出 麦克风释放
+            if stream is None:
+                stream = sd.InputStream(samplerate=_SR, channels=1, dtype="float32",
+                                        blocksize=_CHUNK, callback=_on_audio)
+                stream.start()
+
+            # 等事件: 热键说话 或 唤醒词命中
+            talking_src = None
+            if _talk_req.is_set():
+                _talk_req.clear()
+                talking_src = "hotkey"
+            elif _wake_on:
+                try:
+                    chunk = _audio_q.get(timeout=0.2)
+                except queue.Empty:
+                    continue
+                kws = _load_kws()
+                if ks is None:
+                    ks = kws.create_stream()
+                ks.accept_waveform(_SR, chunk)
+                while kws.is_ready(ks):
+                    kws.decode_stream(ks)
+                    r = kws.get_result(ks)
+                    if r:
+                        kws.reset_stream(ks)
+                        talking_src = "wake"
+                        _emit(cb_state, "wake_hit")
+                        break
+                if talking_src is None:
+                    continue
+            else:
+                # 只开了热键 没在说 闲等
+                try:
+                    _audio_q.get(timeout=0.2)
+                except queue.Empty:
+                    pass
+                continue
+
+            # ── 采集一句 ──
+            _drain(_audio_q)
+            _emit(cb_state, "listening")
+            buf: list = []
+            vad = _new_vad() if talking_src == "wake" else None
+            spoke = False
+            t0 = time.monotonic()
+            last_partial = 0.0
+            final_text = ""
+            while not _shutdown.is_set():
+                if talking_src == "hotkey" and _talk_end.is_set():
+                    break
+                try:
+                    chunk = _audio_q.get(timeout=0.3)
+                except queue.Empty:
+                    chunk = None
+                now = time.monotonic()
+                if chunk is not None:
+                    buf.append(chunk)
+                    if vad is not None:
+                        vad.accept_waveform(chunk)
+                        if not vad.empty():
+                            spoke = True  # 出了完整语音段 说明说完静音了
+                            break
+                        if vad.is_speech_detected():
+                            spoke = True
+                if now - t0 > (_TALK_CAP_S if spoke or talking_src == "hotkey" else _WAKE_IDLE_S):
+                    break  # 说太久 或 唤醒后一直没开口
+                # 实时部分识别
+                if buf and now - last_partial >= _PARTIAL_EVERY:
+                    last_partial = now
+                    try:
+                        partial = _decode(np.concatenate(buf))
+                        if partial:
+                            _emit(cb_partial, partial)
+                    except Exception:
+                        pass
+            if buf:
+                try:
+                    final_text = _decode(np.concatenate(buf))
+                except Exception:
+                    final_text = ""
+            if final_text:
+                _emit(cb_final, final_text)  # 先定稿再idle ui按这个顺序收尾
+            _emit(cb_state, "idle")
+            _talk_end.clear()
+            if ks is not None:
+                ks = None  # 唤醒流重建 防残留
+    except Exception:
+        _emit(cb_state, "idle")
+    finally:
+        if stream is not None:
+            try:
+                stream.stop()
+                stream.close()
+            except Exception:
+                pass
+        _drain(_audio_q)
+        global _loop_thread
+        with _lock:
+            _loop_thread = None
+
+
+def _drain(q) -> None:
+    try:
+        while True:
+            q.get_nowait()
+    except queue.Empty:
+        pass

@@ -47,9 +47,10 @@ class GlobalHotkeys(QObject):
     summon = Signal()
     ask_selection = Signal()
     quick_rewrite = Signal()
+    talk_pressed = Signal()
     status = Signal(object)
 
-    _ACTIONS = ("summon", "ask", "quick")
+    _ACTIONS = ("summon", "ask", "quick", "talk")
 
     def __init__(self, keys: dict) -> None:
         super().__init__()
@@ -111,7 +112,8 @@ class GlobalHotkeys(QObject):
             self._status = status
             self.status.emit(dict(status))
             sigs: dict[str, Callable] = {
-                "summon": self.summon.emit, "ask": self.ask_selection.emit, "quick": self.quick_rewrite.emit,
+                "summon": self.summon.emit, "ask": self.ask_selection.emit,
+                "quick": self.quick_rewrite.emit, "talk": self.talk_pressed.emit,
             }
             msg = wintypes.MSG()
             while True:

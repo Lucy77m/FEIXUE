@@ -17,7 +17,7 @@ from PySide6.QtCore import QObject, QPoint, QThread, QTimer, Signal, Slot, qInst
 from PySide6.QtGui import QColor, QCursor, QFont, QPalette
 from PySide6.QtWidgets import QApplication
 
-from desktop_pet import i18n, journal, occasions, persona, presence, stats
+from desktop_pet import hearing, i18n, journal, occasions, persona, presence, stats
 from desktop_pet.audit import audit
 from desktop_pet.companions.feeding_ctrl import FeedingCtrl
 from desktop_pet.companions.playtime import Playtime
@@ -370,6 +370,9 @@ class PetApp(QObject):
     request_confirm = Signal(str)
     request_rewrite = Signal(str)
     request_clip_alchemy = Signal(str, str)
+    _hear_partial = Signal(str)
+    _hear_final = Signal(str)
+    _hear_state = Signal(str)
 
     def __init__(self) -> None:
         _install_qt_message_filter()
@@ -483,8 +486,19 @@ class PetApp(QObject):
             "summon": self._settings.hotkey_summon,
             "ask": self._settings.hotkey_ask,
             "quick": self._settings.hotkey_quick,
+            "talk": self._settings.hotkey_talk,
         })
         self._hotkey_status: dict = {}
+        # 听写浮条和按住说话的松键轮询
+        from desktop_pet.pet.hear_ui import HearBar
+        self._hearbar = HearBar()
+        self._hear_got_final = False
+        self._talk_release_timer = QTimer(self)
+        self._talk_release_timer.setInterval(50)
+        self._talk_release_timer.timeout.connect(self._poll_talk_release)
+        hearing.cb_partial = self._hear_partial.emit
+        hearing.cb_final = self._hear_final.emit
+        hearing.cb_state = self._hear_state.emit
         self._connect()
 
     def _connect(self) -> None:
@@ -501,6 +515,10 @@ class PetApp(QObject):
         self._pet.bind_speaking(lambda: self._speech.is_speaking or self._lecturing)
         self._input.submitted.connect(self._worker.handle)
         self._input.submitted.connect(self._on_submit)
+        self._hotkeys.talk_pressed.connect(self._on_talk_hotkey)
+        self._hear_partial.connect(self._on_hear_partial)
+        self._hear_final.connect(self._on_hear_final)
+        self._hear_state.connect(self._on_hear_state)
         self._worker.reply_ready.connect(self._on_reply)
         self._worker.proactive_reply.connect(self._on_proactive_reply)
         self._worker.busy_changed.connect(self._on_busy)
@@ -728,6 +746,51 @@ class PetApp(QObject):
         self.request_clip_alchemy.emit(kind, text)
 
     @Slot(str, object)
+    # ── 听觉 按住说话和唤醒词 ──────────────────────────────
+
+    @Slot()
+    def _on_talk_hotkey(self) -> None:
+        if not self._settings.hear_enabled or not hearing.is_ready():
+            return
+        hearing.start_talk()
+        self._talk_release_timer.start()
+
+    def _poll_talk_release(self) -> None:
+        """轮询按住说话的主键 松开即定稿"""
+        import ctypes
+        from desktop_pet.hotkeys import parse_combo
+        parsed = parse_combo(self._settings.hotkey_talk)
+        vk = parsed[1] if parsed else 0
+        if not vk or not (ctypes.windll.user32.GetAsyncKeyState(vk) & 0x8000):
+            self._talk_release_timer.stop()
+            hearing.stop_talk()
+
+    @Slot(str)
+    def _on_hear_state(self, state: str) -> None:
+        if state == "listening":
+            self._hear_got_final = False
+            self._hearbar.begin()
+        elif state == "wake_hit":
+            self._wake()
+        elif state == "idle":
+            if self._hear_got_final:
+                self._hear_got_final = False
+            else:
+                self._hearbar.dismiss()  # 没听清/空说 静静收起
+
+    @Slot(str)
+    def _on_hear_partial(self, text: str) -> None:
+        self._hearbar.set_text(text)
+
+    @Slot(str)
+    def _on_hear_final(self, text: str) -> None:
+        """一句定稿 当成打字输入走完整对话链路"""
+        self._hear_got_final = True
+        self._hearbar.finish(text)
+        self._wake()
+        self._worker.handle(text, None)
+        self._on_submit(text)
+
     def _on_submit(self, _text: str, _attachments: object = None) -> None:
         try:
             emotion.apply("interaction")
@@ -1450,6 +1513,8 @@ class PetApp(QObject):
     def _apply_settings_live(self) -> None:
         i18n.set_language(self._settings.ui_language)
         self._tray.retranslate()
+        hearing.set_enabled(self._settings.hear_enabled)
+        hearing.set_wake_enabled(self._settings.hear_enabled and self._settings.wake_enabled)
         sampler.set_enabled(self._settings.clip_sampler or self._settings.clip_alchemy)
         try:
             self._sensors._check_weather()  # 天气开关切换后立即生效(关→收伞 开→即查) 不必等2小时
@@ -1461,6 +1526,7 @@ class PetApp(QObject):
             "summon": self._settings.hotkey_summon,
             "ask": self._settings.hotkey_ask,
             "quick": self._settings.hotkey_quick,
+            "talk": self._settings.hotkey_talk,
         })
         if self._input.isVisible():
             self._input.setPlaceholderText(i18n.t("input_placeholder"))
@@ -1515,6 +1581,10 @@ class PetApp(QObject):
             except Exception:
                 pass
         self._hotkeys.stop()
+        try:
+            hearing.shutdown()
+        except Exception:
+            pass
         if self._worker.is_running:
             self._worker.cancel()
         self._confirm_event.set()
@@ -1542,6 +1612,8 @@ class PetApp(QObject):
 
     def run(self) -> int:
         stats.mark_first_seen()
+        hearing.set_enabled(self._settings.hear_enabled)
+        hearing.set_wake_enabled(self._settings.hear_enabled and self._settings.wake_enabled)
         self._pet.express("neutral")
         self._thread.start()
         self._tray.show()

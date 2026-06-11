@@ -28,6 +28,11 @@ datas += collect_data_files("justext")
 hiddenimports += collect_submodules("justext")
 # certifi证书
 datas += collect_data_files("certifi")
+# 听觉链 sherpa-onnx原生库 sounddevice带的portaudio
+binaries += collect_dynamic_libs("sherpa_onnx")
+datas += collect_data_files("sherpa_onnx")
+datas += collect_data_files("sounddevice")
+hiddenimports += ["sherpa_onnx", "sounddevice"]
 
 # 易漏的隐藏依赖
 hiddenimports += ["win32timezone", "comtypes", "comtypes.client", "comtypes.stream"]
