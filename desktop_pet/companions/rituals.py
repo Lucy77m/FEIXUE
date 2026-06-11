@@ -41,7 +41,7 @@ class Rituals(QObject):
         today = datetime.now().date().isoformat()
         if stats.get_note("forecast") != today:
             stats.set_note("forecast", today)
-            self._host._pet.react("yawn")
+            self._host._feed_react("yawn")
             val, _aro, rapport = emotion.snapshot()
             if val >= 0.25:
                 key = "forecast_sunny"
@@ -80,7 +80,7 @@ class Rituals(QObject):
             emotion.apply("praised")
             selector.set_emotion(*emotion.snapshot())
             somatic.note(agent_prompts.SOMA_CAKE_BLOWN)
-            QTimer.singleShot(900, lambda: self._host._pet.react("celebrate"))
+            QTimer.singleShot(900, lambda: self._host._feed_react("celebrate"))
             QTimer.singleShot(1100, lambda: self._host._feed_pop(i18n.t("cake_blow")))
             QTimer.singleShot(2600, lambda: self._host._pet.set_cake(False))
 
@@ -89,7 +89,7 @@ class Rituals(QObject):
         if self._host._entered and self._host._pet.isVisible() and not getattr(self, "_farewell_done", False):
             # 走之前挥个手说晚安 再真正退
             self._farewell_done = True
-            self._host._pet.react("wave")
+            self._host._feed_react("wave")
             line = ""
             try:
                 today = datetime.now().date().isoformat()
@@ -114,7 +114,7 @@ class Rituals(QObject):
             return
         self._focus_until = time.time() + _FOCUS_MINUTES * 60
         self._focus_timer.start(_FOCUS_MINUTES * 60 * 1000)
-        self._host._pet.perform("read")
+        self._host._feed_perform("read")
         somatic.set_state("focus", agent_prompts.SOMA_FOCUS_STATE)
         self._host._feed_pop(i18n.t("focus_start").format(m=_FOCUS_MINUTES))
 
@@ -124,7 +124,7 @@ class Rituals(QObject):
         self._focus_until = 0.0
         somatic.set_state("focus", None)
         somatic.note(agent_prompts.SOMA_FOCUS_DONE)
-        self._host._pet.react("celebrate")
+        self._host._feed_react("celebrate")
         emotion.apply("task_done")
         selector.set_emotion(*emotion.snapshot())
         self._host._feed_pop(i18n.t("focus_done").format(m=_FOCUS_MINUTES))

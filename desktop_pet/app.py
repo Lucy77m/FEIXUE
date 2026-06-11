@@ -938,9 +938,21 @@ class PetApp(QObject):
         self._confirm_event.set()
 
     def _feed_pop(self, text: str) -> None:
-        if self._meeting_mode or not self._shown:
-            return  # 开会静音 / 关机隐藏时 主动气泡全咽下去
+        if self._meeting_mode or not self._shown or self._engaged():
+            return  # 开会 / 关机 / 忙于任务或对话时 主动气泡全咽下去 不打断
         self._thought.pop(text, self._pet)
+
+    def _feed_react(self, name: str) -> None:
+        """伴生的自发小动作 —— 忙/对话/关机/开会时不放，免得打断思考姿势"""
+        if self._meeting_mode or not self._shown or self._engaged():
+            return
+        self._pet.react(name)
+
+    def _feed_perform(self, name: str) -> None:
+        """伴生的自发表演 —— 同上，忙时不打断"""
+        if self._meeting_mode or not self._shown or self._engaged():
+            return
+        self._pet.perform(name)
 
     @Slot(bool)
     def _on_busy(self, busy: bool) -> None:

@@ -62,12 +62,12 @@ class Watchers(QObject):
             if time.time() - t["started"] < _BGWATCH_MIN_RUNTIME_S:
                 continue
             if t["returncode"] == 0:
-                self._host._pet.react("celebrate")
+                self._host._feed_react("celebrate")
                 self._host._feed_pop(i18n.t("bgwatch_ok").format(id=t["id"]))
                 emotion.apply("task_done")
                 selector.set_emotion(*emotion.snapshot())
             else:
-                self._host._pet.react("droop")
+                self._host._feed_react("droop")
                 self._host._feed_pop(i18n.t("bgwatch_fail").format(id=t["id"], code=t["returncode"]))
                 if not self._host._worker.is_running:
                     self._host.request_message.emit(agent_prompts.BGWATCH_ANALYZE_MSG.format(
@@ -95,7 +95,7 @@ class Watchers(QObject):
         self._clip_treasures.popleft()
         self._last_giveback = now
         snippet = text.strip().replace("\n", " ")[:60]
-        self._host._pet.react("peek")
+        self._host._feed_react("peek")
         self._host.request_message.emit(agent_prompts.GIVEBACK_MSG.format(
             hours=f"{age_h:.0f}", kind=kind, snippet=snippet))
         return True

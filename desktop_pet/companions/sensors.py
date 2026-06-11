@@ -198,7 +198,7 @@ class Sensors(QObject):
             if self._late_popped_date != today and presence.idle_seconds() < _AWAY_S:
                 self._late_popped_date = today
                 streak = stats.mark_late_night()
-                self._host._pet.react("yawn")
+                self._host._feed_react("yawn")
                 if streak >= 3:
                     self._host._feed_pop(i18n.t("late_night_streak").format(n=streak))
                 else:
@@ -213,7 +213,7 @@ class Sensors(QObject):
                 and now - self._snuggle_last > _SNUGGLE_COOLDOWN_S
                 and not self._host._engaged() and not self._host._pet.is_asleep):
             self._snuggle_last = now
-            self._host._pet.react("snuggle")
+            self._host._feed_react("snuggle")
             self._host._feed_pop(i18n.t("snuggle_warm"))
         # 机器真闲了五分钟 拿毛线球出来玩
         self._cpu_idle_n = self._cpu_idle_n + 1 if cpu < 15 else 0
@@ -221,7 +221,7 @@ class Sensors(QObject):
                 and not self._host._engaged() and not self._host._pet.is_asleep):
             self._yarn_last = now
             self._cpu_idle_n = 0
-            self._host._pet.perform("yarn")
+            self._host._feed_perform("yarn")
 
     def _check_downloads(self) -> None:
         """盯下载目录 新文件落地就提一嘴"""
@@ -255,7 +255,7 @@ class Sensors(QObject):
 
     @Slot(str)
     def _on_dl_found(self, name: str) -> None:
-        self._host._pet.react("perk_up")
+        self._host._feed_react("perk_up")
         self._host._feed_pop(i18n.t("dl_done").format(name=name[:36]))
 
     def _check_mic(self) -> None:

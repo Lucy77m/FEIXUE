@@ -164,7 +164,7 @@ class Playtime(QObject):
         tail, self._tail = self._tail, None
         pos = tail.pos() if tail is not None else None
         self._hs_reveal(pos)
-        self._host._pet.react("celebrate")
+        self._host._feed_react("celebrate")
         emotion.apply("praised")
         selector.set_emotion(*emotion.snapshot())
         somatic.note(agent_prompts.SOMA_HS_FOUND)
@@ -215,12 +215,12 @@ class Playtime(QObject):
         scr = self._host._app.primaryScreen().availableGeometry()
         ball.throw_from_top(scr, self._host._pet.frameGeometry())
         self._ball = ball
-        self._host._pet.react("perk_up")
+        self._host._feed_react("perk_up")
 
     @Slot()
     def _on_ball_caught(self) -> None:
         self._ball = None
-        self._host._pet.react("jump_spin")
+        self._host._feed_react("jump_spin")
         emotion.apply("praised")
         selector.set_emotion(*emotion.snapshot())
         somatic.note(agent_prompts.SOMA_BALL)
@@ -229,7 +229,7 @@ class Playtime(QObject):
     @Slot()
     def _on_ball_stopped(self) -> None:
         self._ball = None
-        self._host._pet.react("peek")
+        self._host._feed_react("peek")
 
     def maybe_perch(self) -> bool:
         """偶尔跳上前台窗口顶上待着 窗口一动摔下来"""
@@ -255,7 +255,7 @@ class Playtime(QObject):
             x = left + int((right - left) * 0.30) - self._host._pet.width() // 2
             y = top - int(self._host._pet.height() * 0.72)
             self._host._pet.move(x, y)
-            self._host._pet.react("peek")
+            self._host._feed_react("peek")
             self._host._feed_pop(i18n.t("perch_up"))
             self._perch_timer.start(700)
             QTimer.singleShot(180_000, self._perch_done)  # 最多蹲三分钟
@@ -285,7 +285,7 @@ class Playtime(QObject):
         self._perch_hwnd = 0
         self._perch_timer.stop()
         self._host._pet._start_toss(random.uniform(-120, 120), 60.0)
-        QTimer.singleShot(1400, lambda: self._host._pet.react("puff_up"))
+        QTimer.singleShot(1400, lambda: self._host._feed_react("puff_up"))
         QTimer.singleShot(1700, lambda: self._host._feed_pop(i18n.t("perch_fall")))
 
     def _perch_done(self) -> None:
@@ -293,7 +293,7 @@ class Playtime(QObject):
             return
         self._perch_hwnd = 0
         self._perch_timer.stop()
-        self._host._pet.react("stretch")
+        self._host._feed_react("stretch")
 
     def _check_bugs(self) -> None:
         """定时扫temp 垃圾堆大了生一只虫"""
@@ -332,7 +332,7 @@ class Playtime(QObject):
         bug.spawn_near(geo.center().x() + side * (geo.width() // 2 + 70),
                        min(geo.bottom() + 10, screen.bottom() - 80), screen)
         self._bug = bug
-        self._host._pet.react("double_take")
+        self._host._feed_react("double_take")
         self._host._feed_pop(i18n.t("bug_spotted").format(size=feeding.human_size(size)))
 
     @Slot()
@@ -355,7 +355,7 @@ class Playtime(QObject):
         stats.add_eaten(freed, 0)  # 算它吃的 但不算文件投喂数
         emotion.apply("fed")
         selector.set_emotion(*emotion.snapshot())
-        self._host._pet.react("celebrate")
+        self._host._feed_react("celebrate")
         somatic.note(agent_prompts.SOMA_BUG.format(n=count, size=feeding.human_size(freed)))
         self._host._feed_pop(i18n.t("bug_squished_msg").format(n=count, size=feeding.human_size(freed)))
 
