@@ -1375,6 +1375,7 @@ class PetApp(QObject):
             "experiences": _safe(lambda: store.recent_experiences(10), []),
             "env": _safe(store.env_items, []),
             "skills": _safe(skills.count, 0),
+            "journal": _safe(lambda: journal.diary(20), []),
             "rapport": rapport,
             "days": st["days"],
             "interactions": st["interactions"],

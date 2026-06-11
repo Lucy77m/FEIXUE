@@ -628,6 +628,9 @@ class ControlPanel(QDialog):
         body.addWidget(self._section_block(self._t("bond_prefs"), self._bond_prefs))
         self._bond_exp = QLabel("—")
         body.addWidget(self._section_block(self._t("bond_exp"), self._bond_exp))
+        self._bond_diary = QLabel("—")
+        self._bond_diary.setWordWrap(True)
+        body.addWidget(self._section_block(self._t("bond_diary"), self._bond_diary))
         body.addStretch(1)
 
         if self._on_reset is not None:
@@ -662,6 +665,12 @@ class ControlPanel(QDialog):
         self._bond_prefs.setText("\n".join(pref_lines) if pref_lines else self._t("bond_empty"))
         exps = s.get("experiences") or []
         self._bond_exp.setText("\n".join(f"· {e}" for e in exps) if exps else self._t("bond_empty"))
+        diary = s.get("journal") or []
+        if diary:
+            entries = [f"{(d.get('when') or '').strip()}　{(d.get('text') or '').strip()}".strip() for d in diary]
+            self._bond_diary.setText("\n\n".join(e for e in entries if e))
+        else:
+            self._bond_diary.setText(self._t("bond_diary_empty"))
 
     def _build_docs_page(self) -> QWidget:
         page, body = self._scroll_page(self._t("hint_docs"))
