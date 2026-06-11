@@ -265,6 +265,30 @@ _ACTIVITIES = {
         ("toss", 6.0, "✦"),
         ("done", 1.5, "!"),
     ]),
+    "lantern": ("lantern", 0.0, "happy_wiggle", [
+        ("hold", 1.4, ""),
+        ("light", 6.0, "✦"),
+    ]),
+    "cottoncandy": ("cottoncandy", 0.0, "happy_wiggle", [
+        ("hold", 1.4, ""),
+        ("eat", 5.5, "～"),
+    ]),
+    "burger": ("burger", 0.0, "puff_up", [
+        ("hold", 1.4, ""),
+        ("munch", 5.0, "～"),
+    ]),
+    "noodles": ("noodles", 0.0, "happy_wiggle", [
+        ("hold", 1.4, ""),
+        ("slurp", 6.0, "～"),
+    ]),
+    "tea": ("tea", 0.0, "happy_wiggle", [
+        ("hold", 1.4, ""),
+        ("sip", 6.0, "～"),
+    ]),
+    "marshmallow": ("marshmallow", 0.0, "puff_up", [
+        ("hold", 1.4, ""),
+        ("roast", 5.5, "✦"),
+    ]),
 }
 _ACTIVITY_GAP = (150.0, 300.0)
 _TRAVEL = "__travel__"
