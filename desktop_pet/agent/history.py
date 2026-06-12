@@ -71,17 +71,59 @@ class HistoryMixin:
         if start > 1:
             dropped = self._messages[1:start]
             del self._messages[1:start]
-            self._compress_history(dropped)
+            # 裁剪立刻生效保证请求合规 摘要丢后台 不堵当前这轮
+            self._queue_compression(dropped)
 
-    def _compress_history(self, dropped: list[dict]) -> None:
-        """裁掉的对话压成备忘滚动合并"""
+    def _queue_compression(self, dropped: list[dict]) -> None:
+        """被裁段排队等后台摘要 已有worker在跑就只入队 它会自己续上"""
         transcript = _render_transcript(dropped)
         if not transcript:
             return
+        with self._compress_lock:
+            self._pending_compress.append(transcript)
+            if self._compress_busy:
+                return  # worker还在 队列它会接着消化
+            self._compress_busy = True
+        try:
+            threading.Thread(target=self._compress_worker, daemon=True, name="mochi-compress").start()
+        except RuntimeError:
+            # 起不了线程就退回同步做 别把被裁内容丢了
+            with self._compress_lock:
+                self._compress_busy = False
+            self._compress_worker()
+
+    def _compress_worker(self) -> None:
+        """后台把队列里的被裁段滚进备忘 一次取空再续 只有这里写_compressed"""
+        while True:
+            with self._compress_lock:
+                if not self._pending_compress:
+                    self._compress_busy = False
+                    return
+                batch = self._pending_compress
+                self._pending_compress = []
+                prior = self._compressed
+                gen = self._compress_gen
+            new_summary = self._summarize(prior, batch)
+            with self._compress_lock:
+                # 摘要期间换了话题或清了记忆 这份就作废 别拿旧内容盖掉新空白
+                if gen != self._compress_gen:
+                    self._compress_busy = False
+                    return
+                self._compressed = new_summary[:_SUMMARY_MAX_CHARS]
+
+    def _reset_compressed(self) -> None:
+        """清空摘要并作废在途任务 换话题/遗忘/隔夜翻篇调用"""
+        with self._compress_lock:
+            self._compressed = ""
+            self._pending_compress = []
+            self._compress_gen += 1
+
+    def _summarize(self, prior: str, batch: list[str]) -> str:
+        """把既有摘要和这批被裁对话揉成新备忘 失败就给prior补一句残缺说明"""
         source = ""
-        if self._compressed:
-            source += "[更早的既有摘要——合并进新备忘]\n" + self._compressed + "\n\n"
-        source += "[本次被裁剪的对话]\n" + transcript
+        if prior:
+            source += "[更早的既有摘要——合并进新备忘]\n" + prior + "\n\n"
+        source += "[本次被裁剪的对话]\n" + "\n\n".join(batch)
         model = (getattr(self._settings, "subagent_model", "") or "").strip() or self._settings.model
         content = ""
         try:
@@ -99,11 +141,9 @@ class HistoryMixin:
             content = ""
         content = _strip_think_leak(content)
         if content:
-            self._compressed = content[:_SUMMARY_MAX_CHARS]
-        else:
-            note = "(有一段更早的对话因超长被丢弃，且摘要生成失败，细节已不可考。)"
-            if note not in self._compressed:
-                self._compressed = (self._compressed + "\n" + note).strip()[:_SUMMARY_MAX_CHARS]
+            return content
+        note = "(有一段更早的对话因超长被丢弃，且摘要生成失败，细节已不可考。)"
+        return prior if note in prior else (prior + "\n" + note).strip()
 
     def _save_session(self) -> None:
         """会话落盘 system消息不存"""

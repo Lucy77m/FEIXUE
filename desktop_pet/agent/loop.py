@@ -73,6 +73,10 @@ class Agent(HistoryMixin, ToolHandlersMixin, SubagentsMixin, DutiesMixin):
         self._shell = shell.new_session()
         self._python = pycode.new_runner()
         self._compressed = ""
+        self._compress_lock = threading.Lock()
+        self._pending_compress: list[str] = []  # 待摘要的被裁段 后台串行消化
+        self._compress_busy = False
+        self._compress_gen = 0  # 换话题/遗忘会自增 在途摘要发现代差变了就丢弃不回写
         self._risk_approval = False
         self._known_files: dict[str, float] = {}
         self._messages: list[dict] = [self._system_message()]
@@ -119,7 +123,7 @@ class Agent(HistoryMixin, ToolHandlersMixin, SubagentsMixin, DutiesMixin):
                 wipe()
             except Exception:
                 pass
-        self._compressed = ""
+        self._reset_compressed()
         self._known_files.clear()
         self._clear_session_file()
         self._messages = [self._system_message()]
@@ -128,7 +132,7 @@ class Agent(HistoryMixin, ToolHandlersMixin, SubagentsMixin, DutiesMixin):
 
     def new_topic(self) -> None:
         """只清当前对话 长期记忆保留"""
-        self._compressed = ""
+        self._reset_compressed()
         self._known_files.clear()
         self._clear_session_file()
         self._messages = [self._system_message()]
@@ -305,7 +309,7 @@ class Agent(HistoryMixin, ToolHandlersMixin, SubagentsMixin, DutiesMixin):
         # 隔25分钟以上自动翻篇
         if (self._depth == 0 and self._last_active
                 and now - self._last_active > _FRESH_AFTER and len(self._messages) > 1):
-            self._compressed = ""
+            self._reset_compressed()
             self._known_files.clear()
             self._messages = [self._system_message()]
         self._last_active = now
