@@ -68,6 +68,9 @@ MUST_RISK = [
     "Remove-ItemProperty -Path HKCU:\\X -Name Y",
     'shutil.rmtree("./build")',
     r"Remove-Item .\dist -Recurse -Force",   # 删除动词带递归
+    r'Remove-Item "$env:TEMP\..\Documents" -Recurse -Force',  # 想从temp爬出去 不豁免
+    r"Remove-Item $env:TEMP\a.msi -Force; rm -rf D:\data",    # 串联命令里第二个删的不是temp
+    r"Remove-Item C:\Users\me\notes.txt -Force",              # 非temp带force 照弹
 ]
 
 
@@ -79,7 +82,21 @@ MUST_NOT_RISK = [
     "Remove-Item single_file.txt",           # 无递归无强制
     "ls -la",
     "git commit -m fix",
+    # 删的全是临时目录里自己的东西 下载清理重试这种高频动作不该弹
+    r'Remove-Item "$env:TEMP\OpenJDK21.msi" -Force -ErrorAction SilentlyContinue',  # 装jdk真实误伤案例
+    r"Remove-Item $env:TEMP\jdk21_extract -Recurse -Force",   # temp里递归清理解压目录
+    r"del /q %TEMP%\setup.msi",                               # cmd风格 flag在前路径在后
+    "rm -rf /tmp/build",                                      # unix临时目录
 ]
+
+
+def test_risky_delete_wording():
+    """文案照实说 只有force别说递归 有递归才说递归"""
+    from desktop_pet.executor.safety import check_risky
+    only_force = check_risky(r"Remove-Item C:\Users\me\notes.txt -Force")
+    assert only_force is not None and "递归" not in only_force, only_force
+    recurse = check_risky(r"Remove-Item .\dist -Recurse -Force")
+    assert recurse is not None and "递归" in recurse, recurse
 
 
 @pytest.mark.parametrize("cmd", MUST_RISK)

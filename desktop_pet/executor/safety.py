@@ -63,6 +63,43 @@ _RISKY: tuple[tuple[re.Pattern[str], str], ...] = (
 # git rm --cached 算白名单 兜底前先抠掉
 _GIT_RM_CACHED = re.compile(r"\bgit\s+rm\b[^\n|;&]*--cached\b", re.I)
 
+# 临时目录前缀 删除目标都在这里面就不值得打断用户
+_TEMP_TARGET = re.compile(
+    r"""^["']?(?:
+        \$env:te?mp\b
+        | %te?mp%
+        | /tmp(?:/|["']?$)
+        | (?:[a-z]:)?[\\/](?:users[\\/][^\\/]+[\\/])?appdata[\\/]local[\\/]temp\b
+    )""",
+    re.I | re.X,
+)
+# 每个删除动词到本条子命令结束的参数段
+_DEL_ARGS = re.compile(r"\b(?:remove-item|ri|rd|rmdir|del|rm)\b([^\n;|&]*)", re.I)
+# 递归类flag 单独判出来给文案用 黏连组要求r和f同串避免-force里的r误中
+_RECURSE_FLAG = re.compile(r"(?:/s\b|-recurse\b|-r\b|-[fvdi]*r[fvdi]*\b)", re.I)
+
+
+def _deletes_only_temp(text: str) -> bool:
+    """所有删除动词的目标都落在临时目录里才True 拿不准一律False
+    agent下载清理重试是高频动作 删自己放进temp的东西每次都弹高危
+    会把用户训练成无脑点确认 那才是真正毁掉安全层的事"""
+    found = False
+    for m in _DEL_ARGS.finditer(text):
+        target = None
+        for tok in m.group(1).split():
+            if tok.startswith("-") or (tok.startswith("/") and len(tok) <= 2):
+                continue  # powershell的-flag 或 cmd的/s这种单字符开关 unix路径比2长不受误伤
+            target = tok
+            break
+        if target is None:
+            return False
+        if ".." in target:
+            return False  # 路径遍历想从temp爬出去 不豁免
+        if not _TEMP_TARGET.match(target):
+            return False
+        found = True
+    return found
+
 
 def check_risky(text: str) -> str | None:
     """软警告 命中返回中文原因 已 block 的不重复警告"""
@@ -71,8 +108,13 @@ def check_risky(text: str) -> str | None:
     for pattern, reason in _RISKY:
         if pattern.search(text):
             return reason
-    # 兜底 删除动词加递归强制就提醒
+    # 兜底 删除动词加递归强制就提醒 目标全在temp的清理动作除外
     stripped = _GIT_RM_CACHED.sub(" ", text)
     if _DELETE_VERB.search(stripped) and _RECURSE_OR_FORCE.search(stripped):
-        return "递归 / 强制删除文件或目录"
+        if _deletes_only_temp(stripped):
+            return None
+        # 文案照实说 没有递归就别吓唬人说递归
+        if _RECURSE_FLAG.search(stripped):
+            return "递归删除文件或目录"
+        return "强制删除文件"
     return None
