@@ -149,6 +149,26 @@ def _native_hwnd(ctrl) -> int:
         return 0
 
 
+# 这些控件值得把当前内容读出来 让agent看见框里已有什么 不是只看标签
+_VALUE_KINDS = {"Edit", "ComboBox", "Document", "Spinner"}
+_VALUE_CAP = 80
+
+
+def _read_value(ctrl, kind: str) -> str:
+    """读输入类控件的当前值 给agent看清框里残留了什么 读不到返回空串"""
+    if kind not in _VALUE_KINDS:
+        return ""
+    try:
+        pattern = ctrl.GetValuePattern()
+        if pattern is not None:
+            val = (pattern.Value or "").strip()
+            if val:
+                return val[:_VALUE_CAP]
+    except Exception:
+        pass
+    return ""
+
+
 def _do_scan(title: str | None) -> tuple[list[dict], bool]:
     """在UIA线程扫一遍 旧token先全释放再发新的 控件存进注册表只留token出去"""
     global _next_token
@@ -186,6 +206,7 @@ def _do_scan(title: str | None) -> tuple[list[dict], bool]:
                 "token": token, "kind": kind, "name": name,
                 "rect_abs": box, "center_abs": center,
                 "invokable": kind in _INVOKABLE_KINDS, "hwnd": _native_hwnd(ctrl),
+                "value": _read_value(ctrl, kind),
             })
             if len(out) >= _MAX_ELEMENTS:
                 state["truncated"] = True
@@ -220,6 +241,24 @@ def _do_set_value(ctrl, text: str) -> bool:
         if pattern is not None:
             pattern.SetValue(text)
             return True
+    except Exception:
+        pass
+    return False
+
+
+def _do_scroll_into_view(ctrl) -> bool:
+    """把控件滚进可视区 长列表里目标在屏外时先滚出来才点得到
+    ScrollItemPattern最直接 退而求其次用SetFocus也常能带动滚动"""
+    try:
+        pattern = ctrl.GetScrollItemPattern()
+        if pattern is not None:
+            pattern.ScrollIntoView()
+            return True
+    except Exception:
+        pass
+    try:
+        ctrl.SetFocus()
+        return True
     except Exception:
         pass
     return False
@@ -266,5 +305,17 @@ def set_value(token: int, text: str) -> bool:
     def job() -> bool:
         ctrl = _registry.get(token)
         return _do_set_value(ctrl, text) if ctrl is not None else False
+
+    return bool(_call(job))
+
+
+def scroll_into_view(token: int) -> bool:
+    """按token把控件滚进可视区"""
+    if not token:
+        return False
+
+    def job() -> bool:
+        ctrl = _registry.get(token)
+        return _do_scroll_into_view(ctrl) if ctrl is not None else False
 
     return bool(_call(job))

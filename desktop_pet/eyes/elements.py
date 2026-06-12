@@ -166,6 +166,7 @@ def screen_elements(region: str = "") -> tuple[bytes, str]:
             "rect_abs": e["rect_abs"], "center_abs": e["center_abs"],
             "token": e["token"], "invokable": e["invokable"],
             "hwnd": e["hwnd"] or top_hwnd,  # hwnd扫描时已在UIA线程算好
+            "value": e.get("value", ""),  # 框里已有的内容 让agent看清残留
         })
         idx += 1
     for o in ocr_els:
@@ -213,7 +214,10 @@ def screen_elements(region: str = "") -> tuple[bytes, str]:
         nm = (el["name"][:46] if el["name"] else "(icon)")
         nmkey = el["name"].strip()
         dup = f"  ⚠同名×{name_counts[nmkey]}" if nmkey and name_counts[nmkey] > 1 else ""
-        lines.append(f'[{el["idx"]}] {el["kind"]} 「{nm}」 {tag}{dup}')
+        val = el.get("value", "")
+        # 框里已有内容就亮出来 提示agent这字段非空 要改先清
+        cur = f'  ▷现含「{val[:40]}」' if val and val != nmkey else ""
+        lines.append(f'[{el["idx"]}] {el["kind"]} 「{nm}」 {tag}{dup}{cur}')
     text = "\n".join(lines)
     if any(c > 1 for c in name_counts.values()):
         text += ("\n(⚠ marked elements SHARE a name — pick by on-screen position / surrounding context. "
@@ -241,6 +245,14 @@ def act_element(index: int, action: str = "click", text: str = "", mode: str = "
     mode = (mode or "auto").lower()
     oob = (f"([{index}] 「{name}」 的坐标 ({ax}, {ay}) 落在屏幕外，没点——"
            "元素编号可能已过期，重新 screen_elements 取最新编号再来)")
+
+    if action == "scroll":
+        # 把控件滚进可视区 长列表目标在屏外时先滚出来 滚完编号会变要重扫
+        if el.get("token") and uia.scroll_into_view(el["token"]):
+            return (f'scrolled [{index}] 「{name}」 into view via accessibility — '
+                    're-run screen_elements to get fresh numbers, then act on it')
+        return (f'(couldn\'t scroll [{index}] 「{name}」 into view — it has no accessibility scroll '
+                'support. Try scroll(dx,dy) on the list area by coordinate instead)')
 
     if action == "type":
         # 优先uia set_value直接改控件值

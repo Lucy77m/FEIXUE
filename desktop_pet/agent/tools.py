@@ -299,13 +299,14 @@ TOOLS = [
     _function(
         "act_element",
         "Act on a numbered element from the most recent screen_elements result. "
-        "action: click (default) / double / right / type (type needs text). Re-run screen_elements first if the screen changed. "
+        "action: click (default) / double / right / type (type needs text) / scroll (bring an off-screen list item into view, then re-run screen_elements). Re-run screen_elements first if the screen changed. "
+        "screen_elements shows a field's CURRENT content as ▷现含「...」 — if a box already holds text, clear it before typing (action=type replaces the whole value). "
         "By default (mode=auto) it avoids the user's real mouse: accessibility invoke → synthetic window messages (work even on covered windows), and only falls back to a real click when message delivery itself fails. "
         "It AUTO-VERIFIES: after the action it re-checks the screen and the result says whether anything actually changed. If it reports '⚠ NOTHING changed' (common when games/custom UIs ignore synthetic input), retry with mode=real; only trust '✓ verified' as actually done. "
         "mode=ghost: NEVER touch the real mouse, report failure instead (user asked not to interfere). mode=real: skip ghost, click for real (use after a verified no-effect ghost attempt).",
         {
             "index": {"type": "integer", "description": "the element number from screen_elements"},
-            "action": {"type": "string", "enum": ["click", "double", "right", "type"], "description": "default click"},
+            "action": {"type": "string", "enum": ["click", "double", "right", "type", "scroll"], "description": "default click"},
             "text": {"type": "string", "description": "text to type when action=type"},
             "mode": {"type": "string", "enum": ["auto", "ghost", "real"], "description": "auto (default): no-cursor first, real mouse only if delivery fails; ghost: never touch the real mouse; real: real mouse directly"},
         },
