@@ -11,7 +11,7 @@ from datetime import datetime
 from difflib import SequenceMatcher
 from pathlib import Path
 
-from desktop_pet.memory.embed import cosine, embed_texts, pack, unpack
+from desktop_pet.memory.embed import cosine, cosine_batch, embed_texts, pack, unpack
 from desktop_pet.settings import DATA_DIR
 
 _MEMORY_DIR = DATA_DIR / "memory"
@@ -285,12 +285,9 @@ class MemoryStore:
         rows = self._conn.execute(
             "SELECT id, embedding FROM experiences ORDER BY id DESC LIMIT ?", (_DEDUP_SCAN,)
         ).fetchall()
+        sims = cosine_batch(vector, [blob for _id, blob in rows])  # numpy批量 一次算完
         demoted = 0
-        for row_id, blob in rows:
-            old = unpack(blob)
-            if old is None or len(old) != len(vector):
-                continue
-            sim = cosine(vector, old)
+        for (row_id, _blob), sim in zip(rows, sims):
             if _RELATED_COSINE <= sim < _DEDUP_COSINE:
                 self._conn.execute(
                     "UPDATE experiences SET salience = MAX(0.05, salience * ?) WHERE id = ?",

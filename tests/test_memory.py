@@ -136,6 +136,20 @@ def test_overflow_prunes_least_salient(mem, monkeypatch):
     assert any("第六条" in c for c in contents)
 
 
+def test_cosine_batch_matches_scalar():
+    from desktop_pet.memory.embed import cosine, cosine_batch, pack
+    q = _unit(1.0, 0.2, 0.0)
+    vecs = [_unit(1.0, 0.0, 0.0), _unit(0.0, 1.0, 0.0), _unit(0.5, 0.5, 0.5)]
+    blobs = [pack(v) for v in vecs] + [None, b""]  # 混进空blob
+    out = cosine_batch(q, blobs)
+    assert len(out) == len(blobs)
+    for v, got in zip(vecs, out[:3]):
+        assert got == pytest.approx(cosine(q, v), abs=1e-5)
+    assert out[3] == 0.0 and out[4] == 0.0  # 空blob给0
+    # 维度不符也给0不炸
+    assert cosine_batch(q, [pack([1.0, 2.0])]) == [0.0]
+
+
 def test_dedup_still_works(mem):
     mem.remember("我平时用npm管包", salience=0.3)
     out = mem.remember("我平时用npm管包", salience=0.8)

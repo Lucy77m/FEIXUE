@@ -72,6 +72,40 @@ def cosine(a: list[float], b: list[float]) -> float:
     return dot / (na * nb) if na and nb else 0.0
 
 
+def cosine_batch(query_vec: list[float], blobs: list[bytes | None]) -> list[float]:
+    """一次算query对一批blob的余弦 维度不符或空blob给0 有numpy走矩阵没有退逐条
+    返回长度与blobs一致 顺序对齐 调用方拿去和阈值比"""
+    dim = len(query_vec)
+    n = len(blobs)
+    try:
+        import numpy as np
+
+        sims = [0.0] * n
+        idxs, vecs = [], []
+        for i, b in enumerate(blobs):
+            if not b:
+                continue
+            v = np.frombuffer(b, dtype=np.float32)
+            if v.shape[0] == dim:
+                idxs.append(i)
+                vecs.append(v)
+        if not idxs:
+            return sims
+        mat = np.vstack(vecs)
+        q = np.asarray(query_vec, dtype=np.float32)
+        denom = np.linalg.norm(mat, axis=1) * float(np.linalg.norm(q))
+        batch = np.divide(mat @ q, denom, out=np.zeros(len(idxs), dtype=np.float32), where=denom > 0)
+        for j, i in enumerate(idxs):
+            sims[i] = float(batch[j])
+        return sims
+    except Exception:
+        out = []
+        for b in blobs:
+            v = unpack(b)
+            out.append(cosine(query_vec, v) if (v is not None and len(v) == dim) else 0.0)
+        return out
+
+
 def rank_by_cosine(query_vec: list[float], blobs: list[bytes | None], k: int) -> list[int]:
     """按余弦挑最相近的k条下标"""
     dim = len(query_vec)
