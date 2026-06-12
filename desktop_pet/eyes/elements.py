@@ -164,8 +164,8 @@ def screen_elements(region: str = "") -> tuple[bytes, str]:
         elements.append({
             "idx": idx, "source": "uia", "kind": e["kind"], "name": e["name"],
             "rect_abs": e["rect_abs"], "center_abs": e["center_abs"],
-            "ctrl": e["ctrl"], "invokable": e["invokable"],
-            "hwnd": uia.native_hwnd(e["ctrl"]) or top_hwnd,
+            "token": e["token"], "invokable": e["invokable"],
+            "hwnd": e["hwnd"] or top_hwnd,  # hwnd扫描时已在UIA线程算好
         })
         idx += 1
     for o in ocr_els:
@@ -175,7 +175,7 @@ def screen_elements(region: str = "") -> tuple[bytes, str]:
         elements.append({
             "idx": idx, "source": "ocr", "kind": "text", "name": o["text"],
             "rect_abs": o["rect_abs"], "center_abs": o["center_abs"],
-            "ctrl": None, "invokable": False, "hwnd": top_hwnd,
+            "token": 0, "invokable": False, "hwnd": top_hwnd,
         })
         idx += 1
     # 第三路视觉检测补自绘窗口的可点区域
@@ -189,7 +189,7 @@ def screen_elements(region: str = "") -> tuple[bytes, str]:
             "idx": idx, "source": "icon", "kind": "icon",
             "name": _label_for_icon(rect_abs, ocr_els),
             "rect_abs": rect_abs, "center_abs": center_abs,
-            "ctrl": None, "invokable": False, "hwnd": top_hwnd,
+            "token": 0, "invokable": False, "hwnd": top_hwnd,
         })
         idx += 1
 
@@ -244,7 +244,7 @@ def act_element(index: int, action: str = "click", text: str = "", mode: str = "
 
     if action == "type":
         # 优先uia set_value直接改控件值
-        if mode != "real" and el["ctrl"] is not None and uia.set_value(el["ctrl"], text):
+        if mode != "real" and el.get("token") and uia.set_value(el["token"], text):
             return f'typed into [{index}] 「{name}」 via accessibility (replaced old value, no cursor)'
         if mode == "ghost":  # ghost不降级到真键盘
             return (f"[couldn't type into [{index}] 「{name}」 in ghost mode — it has no accessibility "
@@ -264,7 +264,7 @@ def act_element(index: int, action: str = "click", text: str = "", mode: str = "
 
     if mode != "real":
         # 无光标点击 先uia invoke再ghost
-        if action in ("click", "invoke") and el["ctrl"] is not None and uia.invoke(el["ctrl"]):
+        if action in ("click", "invoke") and el.get("token") and uia.invoke(el["token"]):
             outcome = f'invoked [{index}] {el["kind"]} 「{name}」 via accessibility (no cursor moved)'
             cursorless = True
         elif ghost.bg_click(el.get("hwnd", 0), ax, ay, kind):
