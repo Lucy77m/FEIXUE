@@ -34,7 +34,7 @@
 Mochi is two things at once:
 
 - 🐾 **A desktop pet with a life of its own** — drawn entirely in code (no sprite assets whatsoever). It blinks, follows your cursor with its eyes, daydreams and hums, goes fishing and sips coffee, plays catch and hide-and-seek; it fans itself when the machine runs hot, puts up an umbrella in the rain, hunts down garbage bugs when junk piles up, eats files you drop on it, and brings out a cake on anniversaries. Ignore it and it finds its own fun; leave and it dozes off; now and then it strikes up a conversation on its own.
-- 🧠 **A local Agent that can drive your whole computer** — plug in your own LLM (any OpenAI-compatible endpoint) and it can see the screen, click windows, move the mouse and keyboard, run commands, write code, read and write files, search the web, remember things, and look stuff up; it can also **read its replies aloud, watch your screen on a timer, run tests after it edits code, fan out a team of sub-agents in parallel, remind you on a daily/weekly schedule, and even take orders remotely from your phone**… turning "chatting with an AI" into "having the AI do it for you."
+- 🧠 **A local Agent that can drive your whole computer** — plug in your own LLM (any OpenAI-compatible endpoint) and it can see the screen, click windows, move the mouse and keyboard, run commands, write code, read and write files, search the web, remember things, and look stuff up; it can also **read its replies aloud, watch your screen on a timer, run tests after it edits code, fan out a team of sub-agents in parallel, and remind you on a daily/weekly schedule**… turning "chatting with an AI" into "having the AI do it for you."
 
 It carries persistent **emotions and rapport**, and slowly grows a **self-portrait (personality evolution)** as you spend time together — so it's "the same one," not a chat box that resets every time.
 
@@ -72,7 +72,7 @@ Mochi acts on your machine with **the same privileges you have** — running arb
 | **Skills** | Save proven approaches as reusable skills and call them directly next time (Voyager-style "stronger the more it's used") |
 | **Orchestration & Extensions** | MCP connectors, deterministic sub-agent orchestration (**fan out in parallel** / chain into a **pipeline**, with structured returns), long tasks offloaded to the background (listable, stoppable anytime) |
 | **Confirmation Guardrails** | Pops an "execute / don't execute" panel before irreversible / high-risk operations — it only proceeds once you click |
-| **Scheduling & Remote** | Timed reminders / scheduled tasks, with **daily · weekly · every-X** recurrence; falls back to a **system tray notification** when hidden or behind a fullscreen game so nothing is missed; and a **file-inbox remote trigger** (sync it via cloud storage from your phone; off by default, opens no network port) |
+| **Scheduling** | Timed reminders / scheduled tasks, with **daily · weekly · every-X** recurrence; falls back to a **system tray notification** when hidden or behind a fullscreen game so nothing is missed |
 
 ### 🐾 Companionship With Warmth
 
@@ -101,7 +101,7 @@ Mochi acts on your machine with **the same privileges you have** — running arb
 ### ⌨️ Handy Interaction
 
 - **Global Hotkeys**: `Ctrl + Alt + S` summons the input box anywhere; `Ctrl + Alt + A` asks it about selected text directly; `Ctrl + Shift + Q` rewrites selected text in place ("quick rewrite," auto-replacing it)
-- **Control Panel**: configure the endpoint / model parameters / reply language / capability toggles / proactive frequency (Quiet · Normal · Chatty) / TTS voice & speed / remote-trigger toggle / one-click "wipe memory, like a newborn"
+- **Control Panel**: configure the endpoint / model parameters / reply language / capability toggles / proactive frequency (Quiet · Normal · Chatty) / TTS voice & speed / one-click "wipe memory, like a newborn"
 
 ---
 
@@ -139,7 +139,6 @@ desktop_pet/
 ├─ stats.py          # Lightweight companionship stats: first-met time + cumulative interactions
 ├─ clipsampler.py · clipclass.py   # Clipboard-alchemy backend: sampling + local classification (error/foreign-language/code/link) + dedup & throttle
 ├─ watcher.py        # Scheduled screen-watching (session-level, e.g. watch your game)
-├─ remote.py         # Remote trigger (file inbox, off by default)
 ├─ usage.py          # Token usage metering: cumulative input / output / cache hits, persisted per day
 ├─ updater.py        # Version update check: queries the latest GitHub release and compares with local
 └─ hotkeys.py · skills.py · mcp_hub.py · settings.py · audit.py · i18n.py
@@ -224,7 +223,6 @@ A continuous valence / arousal mood + slowly accumulating rapport, persisted to 
 - **Read-aloud (TTS)**: `voice.py` speaks replies — online Edge neural voices (multiple zh-CN voices) or a local SAPI offline voice; with TTS on, each sentence "locks" the bubble in sync with the audio, emoji and blackboard content aren't read, and on exit it stops speaking and tears down COM/audio cleanly (so a hard exit doesn't pop an "application error").
 - **Scheduled screen-watching**: `watcher.py` — on the interval you set, it screenshots the active window, analyzes it against the focus you gave (e.g. your game situation) and reports; session-level (not persisted, ends on restart), and on result it re-checks state so it won't intrude after power-off / stop / mid-conversation, and won't burn a cycle on a transient capture failure.
 - **Engineering discipline**: `executor/devtools.py` provides `review_diff` (view the uncommitted diff, scopable to a file/subdir) / `run_tests` (auto-detect pytest · npm, own 5-min timeout, kills the whole process tree on timeout); the system prompt has a "when working in a code repo" section — look before you leap, small surgical edits, **run tests / self-check the diff after editing**, branch first on a default branch, confirm before irreversible git.
-- **Remote trigger**: `remote.py` — when enabled it polls `data/inbox/*.json`, running `{"task":...}` in the background or having it `{"say":...}` a line, then archiving into `inbox/done/`. **Files only, opens no network port**; off by default; to avoid reading a half-synced cloud file it waits until the mtime has been stable for a few seconds, and polls on a background thread so the UI never freezes.
 - **Hiding / entrance**: dragged to a screen edge it shrinks into a corner and occasionally peeks out; every launch picks a random entrance animation and never repeats the previous one; once in a while it "wormholes" — cracking open a wormhole in place, spinning inward, teleporting while the window is invisible, and popping out elsewhere on the screen.
 - **Holidays / companionship**: `occasions.py` recognizes Gregorian holidays + the birthday you set and, on the day, gives the model a fitting "hook" so it brings them up naturally rather than offering a canned greeting; `stats.py` quietly tracks first-meeting time and cumulative interactions — the basis for "how long we've known each other."
 - **Companion behaviors (companions/)**: five "little machines," each minding its own patch, all wrapped in presence / busy / rapport / cooldown gating —

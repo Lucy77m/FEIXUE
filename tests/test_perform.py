@@ -10,7 +10,8 @@ from PySide6.QtWidgets import QApplication
 if QApplication.instance() is None:
     QApplication([])
 
-from desktop_pet.pet.character import _ACTIVITIES, BlobPet
+from desktop_pet.pet.activities import _ACTIVITIES
+from desktop_pet.pet.character import BlobPet
 
 NAME = list(_ACTIVITIES)[0]
 

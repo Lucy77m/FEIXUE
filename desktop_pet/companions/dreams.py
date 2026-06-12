@@ -1,6 +1,6 @@
 # author: bdth
 # email: 2074055628@qq.com
-# 做梦伴生 —— 主人离开、它睡着够久，就把高显著记忆揉成一个梦，攒着等你回来迷迷糊糊提一嘴
+# 做梦伴生 主人离开它睡着够久 就把高显著记忆揉成一个梦 攒着等你回来迷迷糊糊提一嘴
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import time
 
 from PySide6.QtCore import QObject, QTimer
 
-from desktop_pet import presence  # noqa: F401  (保留：将来按在场细分触发)
+from desktop_pet import presence  # noqa: F401  先留着 将来按在场细分触发
 from desktop_pet.agent import prompts as agent_prompts
 from desktop_pet.emotion.state import emotion
 
@@ -18,7 +18,7 @@ _RAPPORT_GATE = 0.4        # 还不熟就不做关于你的梦
 
 
 class Dreams(QObject):
-    """睡着够久 → 触发后台做梦(走 worker)；醒来/回来时把梦交给打招呼用一次。只在内存。"""
+    """睡着够久就让worker后台做一个梦 醒来或回来时交给打招呼用一次 只在内存"""
 
     def __init__(self, host) -> None:
         super().__init__()
@@ -50,7 +50,7 @@ class Dreams(QObject):
     def _tick(self) -> None:
         pet = self._host._pet
         if not pet.isVisible() or not pet.is_asleep:
-            # 醒着 / 不在场景：重置这觉的计时
+            # 醒着或不在场景 重置这觉的计时
             self._asleep_since = 0.0
             self._dreamed_this_sleep = False
             return

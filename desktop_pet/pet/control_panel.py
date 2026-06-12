@@ -240,6 +240,7 @@ class ControlPanel(QDialog):
             ("tab_docs", self._build_docs_page),
             ("tab_connect", self._build_connect_page),
             ("tab_chat", self._build_chat_page),
+            ("tab_interact", self._build_interact_page),
             ("tab_perm", self._build_perm_page),
             ("tab_about", self._build_about_page),
         ]
@@ -421,9 +422,6 @@ class ControlPanel(QDialog):
         self._clip_alchemy = QCheckBox(self._t("cb_clip_alchemy"))
         self._clip_alchemy.setChecked(settings.clip_alchemy)
         self._clip_alchemy.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._remote = QCheckBox(self._t("cb_remote"))
-        self._remote.setChecked(settings.remote_inbox)
-        self._remote.setCursor(Qt.CursorShape.PointingHandCursor)
         self._temperature = QSlider(Qt.Orientation.Horizontal)
         self._temperature.setRange(0, 200)
         self._temperature.setValue(int(round(settings.temperature * 100)))
@@ -785,6 +783,13 @@ class ControlPanel(QDialog):
         body.addWidget(self._check_field(self._proactive_enabled, "help_proactive"))
         body.addWidget(self._field("lbl_proactive_freq", self._proactive_level, "help_proactive_freq"))
         body.addWidget(self._check_field(self._weather_cb, "help_weather"))
+        body.addStretch(1)
+        return page
+
+    def _build_interact_page(self) -> QWidget:
+        """召唤和语音这类输入方式 跟性格表现分开放"""
+        page, body = self._scroll_page(self._t("hint_interact"))
+        body.addWidget(self._build_hotkeys_block())
         body.addWidget(self._check_field(self._hear_cb, "help_hear"))
         body.addWidget(self._check_field(self._wake_cb, "help_wake"))
         hear_row = QHBoxLayout()
@@ -792,7 +797,6 @@ class ControlPanel(QDialog):
         hear_row.addWidget(self._hear_dl_label, 1)
         hear_row.addWidget(self._hear_dl_btn)
         body.addWidget(self._field("lbl_hear_model", hear_row, "help_hear_model"))
-        body.addWidget(self._build_hotkeys_block())
         body.addStretch(1)
         return page
 
@@ -848,7 +852,6 @@ class ControlPanel(QDialog):
         body.addWidget(self._check_field(self._watch, "help_watch"))
         body.addWidget(self._check_field(self._clip_sampler, "help_clip_sampler"))
         body.addWidget(self._check_field(self._clip_alchemy, "help_clip_alchemy"))
-        body.addWidget(self._check_field(self._remote, "help_remote"))
         body.addWidget(self._build_gui_model_block())
         body.addStretch(1)
         return page
@@ -1119,7 +1122,6 @@ class ControlPanel(QDialog):
         s.watch_screen = self._watch.isChecked()
         s.clip_sampler = self._clip_sampler.isChecked()
         s.clip_alchemy = self._clip_alchemy.isChecked()
-        s.remote_inbox = self._remote.isChecked()
         # 多段只取第一段当热键 录空保留原值
         s.hotkey_summon = self._hk_summon.keySequence().toString().split(",")[0].strip() or s.hotkey_summon
         s.hotkey_ask = self._hk_ask.keySequence().toString().split(",")[0].strip() or s.hotkey_ask

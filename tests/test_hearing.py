@@ -144,7 +144,7 @@ def test_wake_word_full_path(monkeypatch):
     for c in _load_chunks():
         hearing._audio_q.put(c)
     assert _wait(lambda: "wake_hit" in states), "唤醒词没命中"
-    # 唤醒后接着说的内容 + 足够静音让vad收尾
+    # 唤醒后接着说的内容 再补足够静音让vad收尾
     for c in _load_chunks() + _silence(2.0):
         hearing._audio_q.put(c)
     assert _wait(lambda: bool(finals)), "唤醒采集没出定稿"

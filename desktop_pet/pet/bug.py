@@ -115,7 +115,7 @@ class BugWindow(QWidget):
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if self._squish < 0:
             self._squish = 0.0
-            # 随机一批溅墨参数 方向避开正上(往两侧和下溅更像被拍)
+            # 随机一批溅墨参数 方向避开正上 往两侧和下溅更像被拍
             self._splats = [
                 (random.uniform(0, math.tau), random.uniform(26, 64),
                  random.uniform(2.0, 4.2), random.uniform(0, 360))

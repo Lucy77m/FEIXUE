@@ -9,7 +9,7 @@ import random
 from PySide6.QtCore import QPoint, QRect
 
 from desktop_pet.pet.behaviors.easing import ease_in, ease_out
-from desktop_pet.pet.character import BLOB_HALF_H, BLOB_HALF_W
+from desktop_pet.pet.blob_defs import BLOB_HALF_H, BLOB_HALF_W
 
 _EDGE_SNAP = 48.0  # 离边48px内才触发贴边
 _HIDE_SHOW = 14.0  # 藏好后仍露出的量

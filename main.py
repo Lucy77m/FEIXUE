@@ -41,7 +41,7 @@ def _set_dpi_aware() -> None:
 _enable_faulthandler()
 _set_dpi_aware()
 
-from desktop_pet.app import PetApp
+from desktop_pet.app.core import PetApp
 
 
 def main() -> int:

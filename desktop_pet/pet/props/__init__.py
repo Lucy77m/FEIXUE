@@ -1,0 +1,3 @@
+# author: bdth
+# email: 2074055628@qq.com
+# 桌宠道具服装的矢量绘制包 按主题分模块 注册表在registry 用谁直接从对应模块导

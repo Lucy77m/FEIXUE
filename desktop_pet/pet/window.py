@@ -21,7 +21,8 @@ from desktop_pet.emotion.tags import (
 )
 from desktop_pet.pet.behavior import selector
 from desktop_pet.pet.behaviors import Category
-from desktop_pet.pet.character import BLOB_HALF_H, BLOB_HALF_W, BlobPet
+from desktop_pet.pet.blob_defs import BLOB_HALF_H, BLOB_HALF_W
+from desktop_pet.pet.character import BlobPet
 from desktop_pet.pet.entrance import Entrance
 from desktop_pet.pet.fx import make_floating, raise_topmost
 from desktop_pet.pet.hideout import Hideout
@@ -86,7 +87,7 @@ class PetWindow(QWidget):
         self._timer.start(1000 // _FPS)
 
         self._topmost_timer = QTimer(self)
-        self._topmost_timer.timeout.connect(lambda: raise_topmost(self))
+        self._topmost_timer.timeout.connect(lambda: self.isVisible() and raise_topmost(self))
         self._topmost_timer.start(1500)
 
         self._entrance: Entrance | None = None

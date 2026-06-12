@@ -92,7 +92,7 @@ The safety guardrail has unit tests (`tests/test_safety.py`, run with `uv run --
 2. The **control panel** (Endpoint / Chat / Permissions / About — four pages);
 3. The **audit log** `data/logs/audit-YYYYMMDD.jsonl` (use `Get-Content` to view the latest lines).
 
-Walkthrough coverage: basic conversation and expressions, command actions (perform / skits), idle behavior, interruption, proactive messages, holiday / birthday awareness and companionship stats, memory and episodic journal, global hotkeys (incl. quick rewrite), clipboard and windows, control panel, reminders and scheduling (incl. recurrence / system notifications), TTS voice & sentence-sync, scheduled screen-watching, task-list panel, sub-agent orchestration, remote trigger, thinking animation, blackboard and images, reflection gating; plus companion behaviors: feeding (drag files / protected-path blocking / docs into the knowledge base), squishing garbage bugs for a real cleanup, play (throw ball / hide-and-seek / windowsill perch / tickle / ink footprints), machine & weather mimicry, meeting-mute, rituals (morning forecast / anniversary cake / Pomodoro / goodbye wave), background-task watching & clipboard giveback, body-sensation injection.
+Walkthrough coverage: basic conversation and expressions, command actions (perform / skits), idle behavior, interruption, proactive messages, holiday / birthday awareness and companionship stats, memory and episodic journal, global hotkeys (incl. quick rewrite), clipboard and windows, control panel, reminders and scheduling (incl. recurrence / system notifications), TTS voice & sentence-sync, scheduled screen-watching, task-list panel, sub-agent orchestration, thinking animation, blackboard and images, reflection gating; plus companion behaviors: feeding (drag files / protected-path blocking / docs into the knowledge base), squishing garbage bugs for a real cleanup, play (throw ball / hide-and-seek / windowsill perch / tickle / ink footprints), machine & weather mimicry, meeting-mute, rituals (morning forecast / anniversary cake / Pomodoro / goodbye wave), background-task watching & clipboard giveback, body-sensation injection.
 
 **Common Troubleshooting**:
 
@@ -112,7 +112,6 @@ Mochi **can execute arbitrary commands and code on your machine, control the mou
 - The control panel lets you **turn off capabilities by group** (Internet / Control / Command execution), downgrading privileges for scenarios you're unsure about.
 - **Irreversible / high-risk operations go through the `confirm` panel**, popping "execute / don't execute" and waiting for your nod before acting.
 - The **safety guardrail** (`executor/safety.py`) only hard-blocks an **extremely small, high-precision set of catastrophic, irreversible** operations (formatting disks, `diskpart` / `remove-partition`, `reg delete HKLM /f`, recursive force-deletes against bare drive roots / system directories, etc.); it deliberately doesn't sandbox and doesn't block ordinary file deletion — it's a "full-access" buddy, not an assistant locked in a cage.
-- **Remote trigger is off by default**: the file inbox (`remote.py`) is disabled by default and **only reads local files — it listens on no network port**; once enabled, a `task` dropped into `inbox/` runs in the background with full privileges, so only turn it on for devices / clouds you trust.
 - **Deletion boundary of feeding / garbage bugs**: when you drag files to feed Mochi, ordinary files / junk go **to the Recycle Bin** (`FOF_ALLOWUNDO` — recoverable, not a hard delete); **protected paths** (system dirs, `Program Files`, the home directory and its first-level subdirectories themselves, drive roots, the data dir) are recognized and refused, as are executables like `.exe / .bat / .ps1 / .dll`; anything over 200MB or a whole directory **asks for confirmation first**. Documents are only read into the knowledge base — **the original is not deleted**. Squishing a garbage bug cleans expired files in the system temp dir **older than 7 days** — that step is a real delete (not the Recycle Bin), and in-use files are skipped automatically.
 - Configuration such as the API Key, and memory / knowledge base / logs are all **stored locally**; the "wipe memory" button erases it all in one click (including the self-portrait, returning to the factory base color).
 
@@ -124,7 +123,7 @@ Everything lives in `data/` (in-project during development, moved to `%APPDATA%\
 
 | File | Content |
 | --- | --- |
-| `settings.json` | Endpoint / model / language / capability toggles / proactive frequency / TTS voice & speed / remote-trigger toggle |
+| `settings.json` | Endpoint / model / language / capability toggles / proactive frequency / TTS voice & speed |
 | `emotion.json` | valence / arousal / rapport + timestamp |
 | `persona.json` | Self-portrait (personality evolution layer) |
 | `stats.json` | Companionship stats: first-met time + cumulative interaction count + amount fed / late-night days / per-ritual dedup markers |
@@ -136,6 +135,5 @@ Everything lives in `data/` (in-project during development, moved to `%APPDATA%\
 | `memory/memory.db` | Long-term memory (SQLite) |
 | `docs.db` | Knowledge-base chunks + embeddings |
 | `skills/` | Self-built skill code + registry |
-| `inbox/` | Remote-trigger inbox (off by default; archived into `inbox/done/` after processing) |
 | `logs/audit-*.jsonl` · `logs/crash.log` | Audit log (by day) + crash stack dump |
 | `mcp.json` | MCP connector configuration (optional) |

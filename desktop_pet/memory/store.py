@@ -301,8 +301,8 @@ class MemoryStore:
             for i, (content, blob, sal) in enumerate(rows):
                 vec = unpack(blob)
                 sim = cosine(query_vec, vec) if (vec is not None and len(vec) == len(query_vec)) else 0.0
-                recency = i / (n - 1)  # 0旧→1新
-                # 语义为主 显著性次之 新近兜底——情感重的记忆更容易浮上来
+                recency = i / (n - 1)  # 越新越接近1
+                # 语义为主 显著性次之 新近兜底 情感重的记忆更容易浮上来
                 score = 0.6 * sim + 0.3 * float(sal or 0.5) + 0.1 * recency
                 scored.append((score, content))
             scored.sort(key=lambda s: s[0], reverse=True)
@@ -376,7 +376,7 @@ class MemoryStore:
             experiences = [content for (content,) in recent][::-1]  # 翻回正序
             label = "Recent experiences:"
         env_facts = self.recall_env(query or "")
-        # 核心记忆常驻——形成性时刻，不被当轮召回冲掉，去重已展示的
+        # 核心记忆常驻 形成性时刻不被当轮召回冲掉 去重已展示的
         core = [c for c in self.core_memories(2) if c not in experiences]
         takes = self.opinions(4)
         if not prefs and not experiences and not env_facts and not core and not takes:

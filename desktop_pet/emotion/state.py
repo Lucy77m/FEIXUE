@@ -103,7 +103,7 @@ class EmotionEngine:
     def __init__(self) -> None:
         self._lock = threading.RLock()
         self._state = self._load()
-        self._events: deque = deque(maxlen=16)  # 最近动情绪的事件(单调时刻, 事件名) 只在内存
+        self._events: deque = deque(maxlen=16)  # 最近动情绪的事件 存单调时刻和事件名 只在内存
         with self._lock:
             self._settle_decay()
             self._save()
@@ -125,7 +125,7 @@ class EmotionEngine:
             gain = dr * (1.0 - state.rapport) if dr > 0 else dr
             state.rapport = _clamp(state.rapport + gain, _RAPPORT_FLOOR, 1.0)
             state.updated_at = self._now()
-            # 留痕：能说出"为什么这心情"——但 interaction 每条消息都来 太碎 不记
+            # 留痕是为了能说出为什么这心情 但interaction每条消息都来 太碎 不记
             if event in _APPRAISALS and event != "interaction":
                 self._events.append((time.monotonic(), event))
             self._save()

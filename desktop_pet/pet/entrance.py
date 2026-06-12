@@ -10,7 +10,7 @@ import random
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 
-from desktop_pet.pet.character import BLOB_HALF_H
+from desktop_pet.pet.blob_defs import BLOB_HALF_H
 from desktop_pet.settings import DATA_DIR
 
 ENTRANCE_KINDS = ("drop", "fade_pop", "slide", "rise", "door", "teleport", "parachute")

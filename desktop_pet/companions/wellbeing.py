@@ -1,7 +1,7 @@
 # author: bdth
 # email: 2074055628@qq.com
-# 数字陪伴伴生 读前台窗口判专注/漂着 心流时身体安静且不打扰 —— 它替你感受你这一天的质地
-# 注意：前台窗口标题读取(GetWindowText)在前台窗口卡死时会阻塞，所以采样一律走 daemon 线程，绝不在 UI 线程裸调
+# 数字陪伴伴生 读前台窗口判专注还是漂着 心流时身体安静且不打扰 它替你感受你这一天的质地
+# 注意前台窗口标题读取在前台窗口卡死时会阻塞 所以采样一律走daemon线程 绝不在UI线程裸调
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ _DRIFT_MINUTES = 35.0     # 媒体类窗口连续这么久算漂着
 _ACTIVE_IDLE_S = 90.0     # 超过这空闲当人不在键盘前 不判心流
 _OFF_GRACE = 2            # 离开专注类窗口几次轮询后才退心流 防短暂alt-tab抖动
 
-# 标题关键词分类（小写子串匹配，宁可漏判不要误判）
+# 标题关键词分类 小写子串匹配 宁可漏判不要误判
 _WORK_CUES = (
     "visual studio", "vs code", "vscode", " - code", "pycharm", "intellij", " idea",
     "sublime text", "neovim", " - cursor", "windsurf", "rider", "goland", "clion", "webstorm",
@@ -33,7 +33,7 @@ _DRIFT_CUES = (
 
 
 def _classify(title: str) -> str:
-    """前台窗口标题归类 work/drift/other"""
+    """前台窗口标题归成 work drift other 三类"""
     t = title.lower()
     if not t:
         return "other"
@@ -45,9 +45,9 @@ def _classify(title: str) -> str:
 
 
 class Wellbeing(QObject):
-    """读前台窗口的质地 → 身体状态。心流=安静不打扰，漂着=陪着但不说教。只读、不落盘、不外发。"""
+    """读前台窗口的质地映射成身体状态 心流就安静不打扰 漂着就陪着但不说教 只读不落盘不外发"""
 
-    _sampled = Signal(str, float)  # (前台标题, 空闲秒数) —— 线程采完发回主线程
+    _sampled = Signal(str, float)  # 前台标题和空闲秒数 线程采完发回主线程
 
     def __init__(self, host) -> None:
         super().__init__()
@@ -74,11 +74,11 @@ class Wellbeing(QObject):
         self._set_drift(False)
 
     def in_flow(self) -> bool:
-        """app 主动门控查这个：专注时一切打扰都让路"""
+        """app 主动门控查这个 专注时一切打扰都让路"""
         return self._flow
 
     def _tick(self) -> None:
-        """UI 线程：只做轻量门控判断，可能阻塞的窗口读取丢线程"""
+        """UI线程只做轻量门控判断 可能阻塞的窗口读取丢线程"""
         if self._busy:
             return
         pet = self._host._pet
@@ -92,7 +92,7 @@ class Wellbeing(QObject):
         threading.Thread(target=self._probe, daemon=True, name="mochi-wellbeing").start()
 
     def _probe(self) -> None:
-        """daemon 线程：读前台窗口标题（前台卡死时 GetWindowText 会阻塞，绝不能在 UI 线程做）+ 空闲时长"""
+        """daemon线程读前台窗口标题和空闲时长 前台卡死时这个调用会阻塞 绝不能在UI线程做"""
         try:
             title = presence.foreground_window_title()
             idle = presence.idle_seconds()
@@ -104,16 +104,16 @@ class Wellbeing(QObject):
 
     @Slot(str, float)
     def _on_sampled(self, title: str, idle: float) -> None:
-        """UI 线程：拿到采样结果跑状态机"""
+        """回到UI线程 拿采样结果跑状态机"""
         now = time.monotonic()
         cat = _classify(title)
-        if cat != self._cat:  # 换了类别 停留计时重置（这就是迟滞）
+        if cat != self._cat:  # 换了类别 停留计时重置 这就是迟滞
             self._cat = cat
             self._since = now
         dwell_min = (now - self._since) / 60.0
         active = idle < _ACTIVE_IDLE_S
 
-        # 心流：专注类窗口 + 停留够久 + 人在键盘前
+        # 心流要同时满足 专注类窗口 停留够久 人在键盘前
         if cat == "work" and active and dwell_min >= _FLOW_MINUTES:
             self._off_streak = 0
             self._set_flow(True)
@@ -125,7 +125,7 @@ class Wellbeing(QObject):
                 if self._off_streak >= _OFF_GRACE:
                     self._set_flow(False)
 
-        # 漂着：媒体类窗口 + 长时间 + 人在；只让身体蔫一下，不弹任何话（克制）
+        # 漂着是媒体类窗口耗了很久且人在 只让身体蔫一下 不弹任何话 克制
         self._set_drift(cat == "drift" and active and dwell_min >= _DRIFT_MINUTES)
 
     def _set_flow(self, on: bool) -> None:

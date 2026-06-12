@@ -21,7 +21,8 @@ def t(key: str, lang: str | None = None) -> str:
 
 _STRINGS: dict[str, dict[str, str]] = {
     "中文": {
-        "tab_connect": "接口", "tab_chat": "对话", "tab_perm": "权限", "tab_about": "关于",
+        "tab_connect": "接口", "tab_chat": "对话", "tab_interact": "交互", "tab_perm": "权限", "tab_about": "关于",
+        "hint_interact": "怎么唤它 怎么对它说话——全局热键和语音都在这。",
         "save": "保存", "cancel": "取消", "saved_ok": "已应用 ✓", "save_failed": "保存失败 ✗",
         "hint_connect": "连接到你的大模型服务——Mochi 的大脑就在这里。",
         "tab_docs": "知识库",
@@ -87,7 +88,6 @@ _STRINGS: dict[str, dict[str, str]] = {
         "cb_watch": "看屏帮手（偶尔瞄一眼，发现你卡住就主动凑上来）", "help_watch": "默认关。开启后空闲时会偶尔截当前窗口图、判断你是不是卡住/报错，需要才出声提议帮忙（至少隔 10 分钟，且需同时开「操控」）。它会看到你的屏幕。",
         "cb_clip_sampler": "剪贴板感知（认得你复制的是报错/外文/代码）", "help_clip_sampler": "默认关。开启后只在本机内存里对你复制的文本做轻量分类，绝不上传、不落盘、不进对话历史；是「剪贴板炼金术」和让它对话时知道你刚复制了啥的底座。",
         "cb_clip_alchemy": "剪贴板炼金术（复制到报错/外文就顺手帮你处理）", "help_clip_alchemy": "默认关。开启后（需先开「剪贴板感知」）你一复制到报错/外文/代码，空闲时它会主动用一两句解释/翻译/说明，省得你再问。会触发一次模型调用。",
-        "cb_remote": "远程触发（文件收件箱）", "help_remote": "默认关。开启后它会轮询 data/inbox/ 目录，你往里丢一个 json（{\"task\":\"...\"} 让它去办，或 {\"say\":\"...\"} 让它说一句）就会被执行。用 OneDrive/坚果云同步该目录，手机上丢文件即可远程指挥它。⚠️ task 会以完整权限后台执行——只在你信任的设备/网盘上开。不开任何网络端口。",
         "media_save_title": "保存", "media_save_filter": "文件 (*{suffix});;所有文件 (*.*)",
         "tab_home": "主页", "hint_home": "Mochi 的状态一览。开机让它出现，关机收起它(程序仍在后台)。",
         "home_state": "状态", "home_mood": "心情", "home_memory": "记忆", "home_proactive": "主动消息", "home_interface": "接口", "home_intimacy": "亲密度",
@@ -234,7 +234,8 @@ _STRINGS: dict[str, dict[str, str]] = {
         "att_pasted_image": "粘贴的图片",
     },
     "English": {
-        "tab_connect": "Connection", "tab_chat": "Chat", "tab_perm": "Permissions", "tab_about": "About",
+        "tab_connect": "Connection", "tab_chat": "Chat", "tab_interact": "Controls", "tab_perm": "Permissions", "tab_about": "About",
+        "hint_interact": "How you summon it and talk to it — hotkeys and voice live here.",
         "save": "Save", "cancel": "Cancel", "saved_ok": "Applied ✓", "save_failed": "Save failed ✗",
         "hint_connect": "Connect your LLM service — this is Mochi's brain.",
         "tab_docs": "Knowledge",
@@ -300,7 +301,6 @@ _STRINGS: dict[str, dict[str, str]] = {
         "cb_watch": "Screen helper (glances over, offers help if you seem stuck)", "help_watch": "Off by default. When on, while idle it occasionally screenshots the active window to tell if you're stuck / hit an error, and speaks up only if you might want help (≥10 min apart; also needs 'Control' on). It will see your screen.",
         "cb_clip_sampler": "Clipboard sense (knows if you copied an error / foreign text / code)", "help_clip_sampler": "Off by default. Only lightly classifies your copied text in local memory — never uploaded, never saved, never put in chat history. It's the base for Clipboard Alchemy and for letting it know what you just copied.",
         "cb_clip_alchemy": "Clipboard alchemy (copy an error / foreign text and it just helps)", "help_clip_alchemy": "Off by default (needs Clipboard sense on). When you copy an error / foreign text / code, it proactively explains/translates in a line or two while idle, so you don't have to ask. Triggers one model call.",
-        "cb_remote": "Remote trigger (file inbox)", "help_remote": "Off by default. When on, it polls the data/inbox/ folder — drop a json there ({\"task\":\"...\"} to make it do something, or {\"say\":\"...\"} to have it say a line) and it runs. Sync that folder with OneDrive/Dropbox to trigger it from your phone. ⚠️ a task runs in the background with full privileges — only enable on devices/clouds you trust. Opens no network port.",
         "media_save_title": "Save", "media_save_filter": "Files (*{suffix});;All files (*.*)",
         "tab_home": "Home", "hint_home": "Mochi's status at a glance. Power on shows it, off hides it (app stays in the background).",
         "home_state": "Status", "home_mood": "Mood", "home_memory": "Memory", "home_proactive": "Proactive", "home_interface": "Interface", "home_intimacy": "closeness",
@@ -449,7 +449,8 @@ _STRINGS: dict[str, dict[str, str]] = {
         "att_pasted_image": "Pasted image",
     },
     "日本語": {
-        "tab_connect": "接続", "tab_chat": "会話", "tab_perm": "権限", "tab_about": "概要",
+        "tab_connect": "接続", "tab_chat": "会話", "tab_interact": "操作", "tab_perm": "権限", "tab_about": "概要",
+        "hint_interact": "呼び出し方と話しかけ方——ホットキーと音声はここ。",
         "save": "保存", "cancel": "キャンセル", "saved_ok": "適用しました ✓", "save_failed": "保存に失敗 ✗",
         "hint_connect": "あなたのLLMサービスに接続——Mochiの頭脳です。",
         "tab_docs": "ナレッジ",
@@ -515,7 +516,6 @@ _STRINGS: dict[str, dict[str, str]] = {
         "cb_watch": "画面ヘルパー（時々覗いて、詰まってたら声をかける）", "help_watch": "既定オフ。オンにすると待機中に時々アクティブウィンドウを撮って詰まり/エラーを判断し、必要そうな時だけ声をかけます（10分以上間隔・「操作」も必要）。画面が見えます。",
         "cb_clip_sampler": "クリップボード感知（コピーが エラー/外国語/コード か分かる）", "help_clip_sampler": "既定オフ。コピーした文字をローカルメモリで軽く分類するだけ——アップロード・保存・会話履歴入りは一切なし。「クリップボード錬金術」やコピー内容の把握の土台です。",
         "cb_clip_alchemy": "クリップボード錬金術（エラー/外国語をコピーすると手伝う）", "help_clip_alchemy": "既定オフ（先に「クリップボード感知」が必要）。エラー/外国語/コードをコピーすると、待機中に一言二言で解説/翻訳してくれます。モデル呼び出しが1回発生します。",
-        "cb_remote": "リモート起動（ファイル受信箱）", "help_remote": "既定オフ。オンにすると data/inbox/ を監視し、json（{\"task\":\"...\"}で実行、{\"say\":\"...\"}で一言）を置くと処理します。OneDrive 等でこのフォルダを同期すればスマホから遠隔操作できます。⚠️ task はフル権限でバックグラウンド実行——信頼できる端末/クラウドでのみオンに。ネットワークポートは一切開きません。",
         "media_save_title": "保存", "media_save_filter": "ファイル (*{suffix});;すべてのファイル (*.*)",
         "tab_home": "ホーム", "hint_home": "Mochi の状態一覧。起動で表示、シャットダウンで隠す（アプリは常駐）。",
         "home_state": "状態", "home_mood": "気分", "home_memory": "記憶", "home_proactive": "自発発話", "home_interface": "接続", "home_intimacy": "親密度",

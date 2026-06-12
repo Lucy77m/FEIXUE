@@ -17,7 +17,7 @@ _SR = 16000
 _CHUNK = 1600  # 100ms
 
 _DL_BASE = "https://github.com/dulaiduwang003/MOCHI/releases/download/models"
-_FILES = {  # 短名: (release文件名, 进度权重)
+_FILES = {  # 键是短名 值是release文件名和进度权重
     "sv_model": ("hear-sv-model.int8.onnx", 0.90),
     "sv_tokens": ("hear-sv-tokens.txt", 0.01),
     "vad": ("hear-vad.onnx", 0.01),
@@ -53,13 +53,13 @@ _warming = False
 # 回调由app注入 全在工作线程触发 注意转qt信号
 cb_partial = None   # (text) 说话中的实时文本
 cb_final = None     # (text) 一句定稿
-cb_state = None     # (state) idle/listening/wake_hit
-cb_tick = None      # (remaining_s) 采集中剩余秒数 给浮条画倒计时
-cb_busy = None      # app注入 返回True=正在思考执行任务 热键和唤醒词都无视
-cb_wake_block = None  # app注入 返回True=只屏蔽唤醒词(开会等) 热键仍可用
+cb_state = None     # 回调收状态名 idle listening wake_hit 三种
+cb_tick = None      # 回调收采集中剩余秒数 给浮条画倒计时
+cb_busy = None      # app注入 返回True表示正在思考执行任务 热键和唤醒词都无视
+cb_wake_block = None  # app注入 返回True只屏蔽唤醒词 比如开会 热键仍可用
 
 _capturing = False  # 正在采集一句 防热键重入
-_STALL_S = 5.0      # 麦克风这么久没出声当它死了(系统休眠回来) 重开
+_STALL_S = 5.0      # 麦克风这么久没出声当它死了 多半是系统休眠回来 重开
 
 
 def _app_busy() -> bool:
@@ -343,7 +343,7 @@ def _loop() -> None:
                 stream.start()
                 last_audio = time.monotonic()
 
-            # 等事件: 热键说话 或 唤醒词命中
+            # 等事件 热键说话或唤醒词命中
             talking_src = None
             if _talk_req.is_set():
                 _talk_req.clear()
@@ -473,7 +473,7 @@ def _loop() -> None:
         _capturing = False  # 异常中途退出也不能卡死下一次按键
         with _lock:
             _loop_thread = None
-        # 退出的瞬间开关又被打开(快速切设置) 自己再拉起来 不然听觉静默失效
+        # 退出的瞬间开关又被打开 比如快速切设置 自己再拉起来 不然听觉静默失效
         if not _shutdown.is_set() and (_enabled or _wake_on):
             _kick()
 

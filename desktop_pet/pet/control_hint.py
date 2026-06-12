@@ -1,6 +1,6 @@
 # author: bdth
 # email: 2074055628@qq.com
-# 操作提示浮层 —— agent 借用鼠标/键盘操作电脑时弹出，让用户清楚现在是它在动手（全权但透明）
+# 操作提示浮层 agent借用鼠标键盘操作电脑时弹出 让用户清楚现在是它在动手 全权但透明
 
 from __future__ import annotations
 
@@ -30,14 +30,14 @@ _STYLE = """
 
 
 class ControlHint(QWidget):
-    """顶部居中的小徽标，agent 操作鼠标/键盘期间显示。点击穿透、不抢焦点、对截图隐形。"""
+    """顶部居中的小徽标 agent操作鼠标键盘期间显示 点击穿透 不抢焦点 对截图隐形"""
 
     def __init__(self) -> None:
         super().__init__()
         make_floating(self)
-        # 点击穿透——绝不挡住 agent 或用户要点的东西
+        # 点击穿透 绝不挡住agent或用户要点的东西
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        # 不抢焦点——尤其 agent 正在敲键盘时，浮层弹出不能截走输入焦点
+        # 不抢焦点 尤其agent正在敲键盘时 浮层弹出不能截走输入焦点
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
 
         card = QFrame(objectName="card")

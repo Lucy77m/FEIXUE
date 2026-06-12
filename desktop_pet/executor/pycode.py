@@ -62,7 +62,7 @@ while True:
         continue
     _buf = io.StringIO()
     try:
-        # stderr 也要进缓冲：库的 warning/logging 默认走 stderr，否则这些输出会整段消失
+        # stderr也要进缓冲 库的warning和logging默认走stderr 不收的话这些输出会整段消失
         with redirect_stdout(_buf), redirect_stderr(_buf):
             exec(_code, _ns)
     except BaseException:

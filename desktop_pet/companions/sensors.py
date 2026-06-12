@@ -285,7 +285,7 @@ class Sensors(QObject):
                     try:
                         with winreg.OpenKey(root, sub) as k:
                             stop, _ = winreg.QueryValueEx(k, "LastUsedTimeStop")
-                            if int(stop) == 0:  # 还没停 = 正在用
+                            if int(stop) == 0:  # 还没停就是正在用
                                 in_use = True
                                 break
                     except OSError:
@@ -343,7 +343,7 @@ class Sensors(QObject):
         if self._weather_busy or not self._host._settings.allow_web:
             return
         if not getattr(self._host._settings, "weather_enabled", False):
-            if self._weather_kind:  # 关掉了就把残留的伞/雪收走
+            if self._weather_kind:  # 关掉了就把残留的伞和雪收走
                 self._weather_ready.emit("")
             return
         self._weather_busy = True
