@@ -25,6 +25,25 @@ _DEDUP_COSINE = 0.92  # 向量去重阈值
 _DEDUP_RATIO = 0.86   # 没向量退字面相似度的阈值
 _DEDUP_SCAN = 600     # 去重只回扫最近600条
 
+_RELATED_COSINE = 0.80   # 同主题但不到重复的带宽下沿 新信息进来旧条目降权
+_SUPERSEDE_FACTOR = 0.6  # 被顶掉的旧条目显著性打的折
+_SUPERSEDE_MAX = 2       # 一次最多降权几条 防误伤一大片
+_MAX_EXPERIENCES = 1500  # 经验表容量上限 超了裁显著性最低的老条目
+_RECALL_BONUS = 0.01     # 被真召回一次显著性回一点血
+_RECALL_SIM_GATE = 0.5   # 相似度过这条线才算真命中 才给强化
+_KEYWORD_BOOST = 0.08    # query原词出现在内容里的加分
+
+
+def _effective_salience(sal: float, last_seen: str, now: datetime) -> float:
+    """显著性随冷落时间半衰 越重要的记忆半衰期越长
+    形成性记忆几个月才掉一半 鸡毛蒜皮几周就沉底 被召回会刷新last_seen回血"""
+    try:
+        age_days = max(0.0, (now - datetime.fromisoformat(last_seen)).total_seconds() / 86400.0)
+    except (ValueError, TypeError):
+        return sal
+    tau = 14.0 + 76.0 * sal  # 半衰期14~90天随显著性走
+    return sal * 0.5 ** (age_days / tau)
+
 
 def _read_json(path: Path, default):
     """读json 缺失或损坏退default"""
@@ -41,24 +60,33 @@ def _now() -> str:
 
 
 class MemoryStore:
-    def __init__(self) -> None:
-        _MEMORY_DIR.mkdir(parents=True, exist_ok=True)
+    def __init__(self, db_path: Path | None = None) -> None:
+        path = db_path or _DB_PATH
+        path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
         # 连接跨线程共享 靠rlock串行
-        self._conn = sqlite3.connect(_DB_PATH, check_same_thread=False)
+        self._conn = sqlite3.connect(path, check_same_thread=False)
         self._create_schema()
         self._migrate_columns()
         self._migrate_legacy_json()
 
     def _migrate_columns(self) -> None:
-        """老库补 salience 列 已有就跳过"""
+        """老库补列 已有就跳过"""
         with self._lock:
             cols = {row[1] for row in self._conn.execute("PRAGMA table_info(experiences)")}
             if "salience" not in cols:
                 self._conn.execute(
                     "ALTER TABLE experiences ADD COLUMN salience REAL NOT NULL DEFAULT 0.5"
                 )
-                self._conn.commit()
+            if "last_seen" not in cols:
+                # 旧条目的last_seen用写入时间垫底
+                self._conn.execute("ALTER TABLE experiences ADD COLUMN last_seen TEXT")
+                self._conn.execute("UPDATE experiences SET last_seen = ts WHERE last_seen IS NULL")
+            if "recall_count" not in cols:
+                self._conn.execute(
+                    "ALTER TABLE experiences ADD COLUMN recall_count INTEGER NOT NULL DEFAULT 0"
+                )
+            self._conn.commit()
 
     def _create_schema(self) -> None:
         with self._lock:
@@ -229,22 +257,59 @@ class MemoryStore:
         self, content: str, *, ts: str, confidence: float, source: str,
         vector: list[float] | None, salience: float = 0.5,
     ) -> bool:
-        """插一条经验 重复就原地更新返回False；复现的记忆显著性取 max(越提越粘)"""
+        """插一条经验 重复就原地更新返回False 复现的记忆显著性取max越提越粘
+        同主题的旧条目降权加速淡出 表满裁掉最不重要的"""
         duplicate_id = self._find_duplicate(content, vector)
         blob = pack(vector) if vector else None
         if duplicate_id is not None:
             self._conn.execute(
                 "UPDATE experiences SET content = ?, ts = ?, confidence = ?, embedding = ?, "
-                "salience = MAX(salience, ?) WHERE id = ?",
-                (content, ts, confidence, blob, salience, duplicate_id),
+                "salience = MAX(salience, ?), last_seen = ? WHERE id = ?",
+                (content, ts, confidence, blob, salience, ts, duplicate_id),
             )
             return False
+        self._supersede_related(vector)
         self._conn.execute(
-            "INSERT INTO experiences(content, ts, confidence, source, embedding, salience) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (content, ts, confidence, source, blob, salience),
+            "INSERT INTO experiences(content, ts, confidence, source, embedding, salience, last_seen) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (content, ts, confidence, source, blob, salience, ts),
         )
+        self._prune_overflow()
         return True
+
+    def _supersede_related(self, vector: list[float] | None) -> None:
+        """新信息落地时给同主题旧条目打折 它们大概率被新的顶掉了
+        注意这不是严格的矛盾判定 只是语义相近 所以只降权不删 错了还能靠召回回血"""
+        if vector is None:
+            return
+        rows = self._conn.execute(
+            "SELECT id, embedding FROM experiences ORDER BY id DESC LIMIT ?", (_DEDUP_SCAN,)
+        ).fetchall()
+        demoted = 0
+        for row_id, blob in rows:
+            old = unpack(blob)
+            if old is None or len(old) != len(vector):
+                continue
+            sim = cosine(vector, old)
+            if _RELATED_COSINE <= sim < _DEDUP_COSINE:
+                self._conn.execute(
+                    "UPDATE experiences SET salience = MAX(0.05, salience * ?) WHERE id = ?",
+                    (_SUPERSEDE_FACTOR, row_id),
+                )
+                demoted += 1
+                if demoted >= _SUPERSEDE_MAX:
+                    return
+
+    def _prune_overflow(self) -> None:
+        """超容量就裁 显著性最低且最老的先走 召回扫表的成本也被这个上限锁死"""
+        total = self._conn.execute("SELECT COUNT(*) FROM experiences").fetchone()[0]
+        excess = int(total) - _MAX_EXPERIENCES
+        if excess > 0:
+            self._conn.execute(
+                "DELETE FROM experiences WHERE id IN "
+                "(SELECT id FROM experiences ORDER BY salience ASC, id ASC LIMIT ?)",
+                (excess,),
+            )
 
     def _find_duplicate(self, content: str, vector: list[float] | None) -> int | None:
         """找近似条目返回id 先向量再字面"""
@@ -285,35 +350,57 @@ class MemoryStore:
         return [str(r[0]) for r in rows]
 
     def recall_relevant(self, query: str, k: int = _INJECT) -> list[str]:
-        """挑跟query最相关的k条经验 综合 语义×显著性×新近 排序 逐级兜底"""
+        """挑跟query最相关的k条经验 语义x有效显著性x新近 加原词命中分 逐级兜底
+        有效显著性带遗忘曲线 被真召回的当场回血刷新冷落计时"""
         with self._lock:
             rows = self._conn.execute(
-                "SELECT content, embedding, salience FROM experiences ORDER BY id"
+                "SELECT id, content, embedding, salience, last_seen FROM experiences ORDER BY id"
             ).fetchall()
         if not rows:
             return []
         if len(rows) <= k:
-            return [r[0] for r in rows]  # 条数不够全给
+            return [r[1] for r in rows]  # 条数不够全给
         n = len(rows)
+        now = datetime.now()
         query_vec = self._query_vector(query)
         if query_vec is not None:
-            scored: list[tuple[float, str]] = []
-            for i, (content, blob, sal) in enumerate(rows):
+            terms = [t for t in query.lower().split() if len(t) >= 2]
+            scored: list[tuple[float, float, int, str]] = []
+            for i, (rid, content, blob, sal, last_seen) in enumerate(rows):
                 vec = unpack(blob)
                 sim = cosine(query_vec, vec) if (vec is not None and len(vec) == len(query_vec)) else 0.0
+                eff = _effective_salience(float(sal or 0.5), last_seen or "", now)
                 recency = i / (n - 1)  # 越新越接近1
-                # 语义为主 显著性次之 新近兜底 情感重的记忆更容易浮上来
-                score = 0.6 * sim + 0.3 * float(sal or 0.5) + 0.1 * recency
-                scored.append((score, content))
+                low = content.lower()
+                kw = _KEYWORD_BOOST if any(t in low for t in terms) else 0.0
+                # 语义为主 衰减后的显著性次之 新近兜底 query原词额外加一脚
+                score = 0.55 * sim + 0.30 * eff + 0.15 * recency + kw
+                scored.append((score, sim, rid, content))
             scored.sort(key=lambda s: s[0], reverse=True)
-            return [c for _, c in scored[:k]]
-        # 向量没走通退子串 命中里再按显著性排
+            top = scored[:k]
+            # 真命中的强化 相似度过线才算 防无关query也乱回血
+            hit_ids = [rid for _score, sim, rid, _c in top if sim >= _RECALL_SIM_GATE]
+            if hit_ids:
+                stamp = _now()
+                with self._lock:
+                    self._conn.executemany(
+                        "UPDATE experiences SET last_seen = ?, recall_count = recall_count + 1, "
+                        "salience = MIN(1.0, salience + ?) WHERE id = ?",
+                        [(stamp, _RECALL_BONUS, rid) for rid in hit_ids],
+                    )
+                    self._conn.commit()
+            return [c for _score, _sim, _rid, c in top]
+        # 向量没走通退子串 命中里再按衰减后显著性排
         needle = query.lower()
-        hits = [(float(sal or 0.5), content) for content, _blob, sal in rows if needle in content.lower()]
+        hits = [
+            (_effective_salience(float(sal or 0.5), last_seen or "", now), content)
+            for _rid, content, _blob, sal, last_seen in rows
+            if needle in content.lower()
+        ]
         if hits:
             hits.sort(key=lambda s: s[0], reverse=True)
             return [c for _, c in hits[:k]]
-        return [content for content, _blob, _sal in rows[-k:]]
+        return [content for _rid, content, _blob, _sal, _ls in rows[-k:]]
 
     def core_memories(self, n: int = 3, floor: float = 0.75) -> list[str]:
         """取显著性最高的几条核心记忆——塑造"它是谁"的形成性时刻"""
