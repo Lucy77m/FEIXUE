@@ -12,6 +12,7 @@ from difflib import SequenceMatcher
 from pathlib import Path
 
 from desktop_pet.memory.embed import cosine, cosine_batch, embed_texts, pack, unpack
+from desktop_pet.memory.hybrid import fts_query, rrf_fuse
 from desktop_pet.settings import DATA_DIR
 
 _MEMORY_DIR = DATA_DIR / "memory"
@@ -30,8 +31,10 @@ _SUPERSEDE_FACTOR = 0.6  # 被顶掉的旧条目显著性打的折
 _SUPERSEDE_MAX = 2       # 一次最多降权几条 防误伤一大片
 _MAX_EXPERIENCES = 1500  # 经验表容量上限 超了裁显著性最低的老条目
 _RECALL_BONUS = 0.01     # 被真召回一次显著性回一点血
-_RECALL_SIM_GATE = 0.5   # 相似度过这条线才算真命中 才给强化
-_KEYWORD_BOOST = 0.08    # query原词出现在内容里的加分
+_RECALL_POOL = 30        # 两路各召回这么多候选 再RRF融合精排到k
+_HYBRID_W_REL = 0.60     # 融合相关性的权重 语义和字面都进这一项
+_HYBRID_W_SAL = 0.25     # 衰减后显著性的权重
+_HYBRID_W_REC = 0.15     # 新近度的权重
 
 _CLUSTER_COSINE = 0.80   # 成簇下沿 同主题的几个侧面才揉 不到这条不算一簇
 _CLUSTER_MIN = 3         # 至少这么多条才值得合并成一条概括
@@ -76,6 +79,59 @@ class MemoryStore:
         self._create_schema()
         self._migrate_columns()
         self._migrate_legacy_json()
+        self._fts = False
+        self._setup_fts()
+
+    def _setup_fts(self) -> None:
+        """给经验内容建trigram全文索引 triggers自动跟主表同步增删改
+        UPDATE只盯content列 显著性回血改其它列不会白白重建索引
+        这个sqlite没编译FTS5就退化纯向量 仍能用 不报错"""
+        try:
+            with self._lock:
+                self._conn.execute(
+                    "CREATE VIRTUAL TABLE IF NOT EXISTS experiences_fts USING fts5("
+                    "content, content='experiences', content_rowid='id', tokenize='trigram')"
+                )
+                self._conn.executescript(
+                    """
+                    CREATE TRIGGER IF NOT EXISTS experiences_ai AFTER INSERT ON experiences BEGIN
+                        INSERT INTO experiences_fts(rowid, content) VALUES (new.id, new.content);
+                    END;
+                    CREATE TRIGGER IF NOT EXISTS experiences_ad AFTER DELETE ON experiences BEGIN
+                        INSERT INTO experiences_fts(experiences_fts, rowid, content) VALUES('delete', old.id, old.content);
+                    END;
+                    CREATE TRIGGER IF NOT EXISTS experiences_au AFTER UPDATE OF content ON experiences BEGIN
+                        INSERT INTO experiences_fts(experiences_fts, rowid, content) VALUES('delete', old.id, old.content);
+                        INSERT INTO experiences_fts(rowid, content) VALUES (new.id, new.content);
+                    END;
+                    """
+                )
+                # 老库回填 FTS空但主表有货就整体重建一次索引
+                fts_n = self._conn.execute("SELECT count(*) FROM experiences_fts").fetchone()[0]
+                exp_n = self._conn.execute("SELECT count(*) FROM experiences").fetchone()[0]
+                if fts_n == 0 and exp_n > 0:
+                    self._conn.execute("INSERT INTO experiences_fts(experiences_fts) VALUES('rebuild')")
+                self._conn.commit()
+            self._fts = True
+        except sqlite3.OperationalError:
+            self._fts = False
+
+    def _fts_search(self, query: str, pool: int) -> list[int]:
+        """字面路 trigram召回一批id 按bm25排 没FTS或没有效查询词返回空"""
+        if not self._fts:
+            return []
+        match = fts_query(query)
+        if not match:
+            return []
+        try:
+            with self._lock:
+                rows = self._conn.execute(
+                    "SELECT rowid FROM experiences_fts WHERE experiences_fts MATCH ? "
+                    "ORDER BY bm25(experiences_fts) LIMIT ?", (match, pool)
+                ).fetchall()
+            return [int(r[0]) for r in rows]
+        except sqlite3.OperationalError:
+            return []
 
     def _migrate_columns(self) -> None:
         """老库补列 已有就跳过"""
@@ -430,8 +486,9 @@ class MemoryStore:
         return [str(r[0]) for r in rows]
 
     def recall_relevant(self, query: str, k: int = _INJECT) -> list[str]:
-        """挑跟query最相关的k条经验 语义x有效显著性x新近 加原词命中分 逐级兜底
-        有效显著性带遗忘曲线 被真召回的当场回血刷新冷落计时"""
+        """混合召回 向量语义和trigram字面两路各取候选 RRF融合 再叠衰减显著性和新近精排
+        字面路语言无关零依赖 专补向量漏掉的精确词 文件名报错码英文术语数字
+        断网拿不到向量时单靠字面路仍能召回 被真命中的当场回血刷新冷落计时"""
         with self._lock:
             rows = self._conn.execute(
                 "SELECT id, content, embedding, salience, last_seen FROM experiences ORDER BY id"
@@ -442,45 +499,56 @@ class MemoryStore:
             return [r[1] for r in rows]  # 条数不够全给
         n = len(rows)
         now = datetime.now()
+        meta = {  # id到内容 衰减显著性 新近度
+            rid: (content, _effective_salience(float(sal or 0.5), last_seen or "", now), i / (n - 1))
+            for i, (rid, content, _blob, sal, last_seen) in enumerate(rows)
+        }
+        ids = [rid for rid, *_ in rows]
+
+        # 向量路 余弦排名取候选池
+        vec_rank: list[int] = []
         query_vec = self._query_vector(query)
         if query_vec is not None:
-            terms = [t for t in query.lower().split() if len(t) >= 2]
-            scored: list[tuple[float, float, int, str]] = []
-            for i, (rid, content, blob, sal, last_seen) in enumerate(rows):
-                vec = unpack(blob)
-                sim = cosine(query_vec, vec) if (vec is not None and len(vec) == len(query_vec)) else 0.0
-                eff = _effective_salience(float(sal or 0.5), last_seen or "", now)
-                recency = i / (n - 1)  # 越新越接近1
-                low = content.lower()
-                kw = _KEYWORD_BOOST if any(t in low for t in terms) else 0.0
-                # 语义为主 衰减后的显著性次之 新近兜底 query原词额外加一脚
-                score = 0.55 * sim + 0.30 * eff + 0.15 * recency + kw
-                scored.append((score, sim, rid, content))
-            scored.sort(key=lambda s: s[0], reverse=True)
-            top = scored[:k]
-            # 真命中的强化 相似度过线才算 防无关query也乱回血
-            hit_ids = [rid for _score, sim, rid, _c in top if sim >= _RECALL_SIM_GATE]
-            if hit_ids:
-                stamp = _now()
-                with self._lock:
-                    self._conn.executemany(
-                        "UPDATE experiences SET last_seen = ?, recall_count = recall_count + 1, "
-                        "salience = MIN(1.0, salience + ?) WHERE id = ?",
-                        [(stamp, _RECALL_BONUS, rid) for rid in hit_ids],
-                    )
-                    self._conn.commit()
-            return [c for _score, _sim, _rid, c in top]
-        # 向量没走通退子串 命中里再按衰减后显著性排
-        needle = query.lower()
-        hits = [
-            (_effective_salience(float(sal or 0.5), last_seen or "", now), content)
-            for _rid, content, _blob, sal, last_seen in rows
-            if needle in content.lower()
-        ]
-        if hits:
-            hits.sort(key=lambda s: s[0], reverse=True)
-            return [c for _, c in hits[:k]]
-        return [content for _rid, content, _blob, _sal, _ls in rows[-k:]]
+            sims = cosine_batch(query_vec, [blob for _id, _c, blob, _s, _l in rows])
+            order = sorted(range(len(ids)), key=lambda i: sims[i], reverse=True)
+            vec_rank = [ids[i] for i in order[:_RECALL_POOL] if sims[i] > 0.0]
+
+        # 字面路 trigram按bm25排名取候选池
+        fts_rank = self._fts_search(query, _RECALL_POOL)
+
+        if not vec_rank and not fts_rank:
+            # 两路都空 退子串再退最近 这条多半是没配嵌入且无字面命中
+            needle = query.lower()
+            hits = [(meta[rid][1], meta[rid][0]) for rid in ids if needle in meta[rid][0].lower()]
+            if hits:
+                hits.sort(key=lambda s: s[0], reverse=True)
+                return [c for _s, c in hits[:k]]
+            return [meta[rid][0] for rid in ids[-k:]]
+
+        # RRF融合两路 再用衰减显著性和新近度调制 取top-k
+        fused = rrf_fuse([vec_rank, fts_rank])
+        m = len(fused)
+        scored = []
+        for pos, rid in enumerate(fused):
+            content, eff, recency = meta[rid]
+            rel = 1.0 - pos / m  # 融合名次转0~1相关性
+            final = _HYBRID_W_REL * rel + _HYBRID_W_SAL * eff + _HYBRID_W_REC * recency
+            scored.append((final, rid, content))
+        scored.sort(key=lambda s: s[0], reverse=True)
+        top = scored[:k]
+
+        # 真召回到的强化 都是两路捞出来的 给回血刷新计时
+        hit_ids = [rid for _f, rid, _c in top]
+        if hit_ids:
+            stamp = _now()
+            with self._lock:
+                self._conn.executemany(
+                    "UPDATE experiences SET last_seen = ?, recall_count = recall_count + 1, "
+                    "salience = MIN(1.0, salience + ?) WHERE id = ?",
+                    [(stamp, _RECALL_BONUS, rid) for rid in hit_ids],
+                )
+                self._conn.commit()
+        return [c for _f, _rid, c in top]
 
     def core_memories(self, n: int = 3, floor: float = 0.75) -> list[str]:
         """取显著性最高的几条核心记忆——塑造"它是谁"的形成性时刻"""

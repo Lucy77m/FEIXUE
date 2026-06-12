@@ -8,7 +8,8 @@ import sqlite3
 import threading
 from pathlib import Path
 
-from desktop_pet.memory.embed import embed_texts, pack, rank_by_cosine
+from desktop_pet.memory.embed import cosine_batch, embed_texts, pack
+from desktop_pet.memory.hybrid import fts_query, rrf_fuse
 from desktop_pet.settings import DATA_DIR
 
 _DB_PATH = DATA_DIR / "docs.db"
@@ -18,6 +19,7 @@ _MAX_FILE = 600_000
 _MAX_CHUNKS = 4000
 _EMBED_BATCH = 32
 _RECALL_K = 5
+_RECALL_POOL = 30      # 两路各召回这么多候选 再RRF融合
 _TEXT_EXT = frozenset(
     {".txt", ".md", ".rst", ".py", ".js", ".ts", ".json", ".yaml", ".yml", ".toml",
      ".html", ".csv", ".tex", ".log", ".ini", ".cfg", ".java", ".go", ".rs", ".c",
@@ -125,6 +127,57 @@ class DocStore:
                 "idx INTEGER NOT NULL, content TEXT NOT NULL, embedding BLOB)"
             )
             self._conn.commit()
+        self._fts = False
+        self._setup_fts()
+
+    def _setup_fts(self) -> None:
+        """给chunk内容建trigram全文索引 triggers跟chunks表同步 没FTS5就退化纯向量
+        和记忆库同一套路 字面路语言无关零依赖 补向量漏掉的精确词"""
+        try:
+            with self._lock:
+                self._conn.execute(
+                    "CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5("
+                    "content, content='chunks', content_rowid='id', tokenize='trigram')"
+                )
+                self._conn.executescript(
+                    """
+                    CREATE TRIGGER IF NOT EXISTS chunks_ai AFTER INSERT ON chunks BEGIN
+                        INSERT INTO chunks_fts(rowid, content) VALUES (new.id, new.content);
+                    END;
+                    CREATE TRIGGER IF NOT EXISTS chunks_ad AFTER DELETE ON chunks BEGIN
+                        INSERT INTO chunks_fts(chunks_fts, rowid, content) VALUES('delete', old.id, old.content);
+                    END;
+                    CREATE TRIGGER IF NOT EXISTS chunks_au AFTER UPDATE OF content ON chunks BEGIN
+                        INSERT INTO chunks_fts(chunks_fts, rowid, content) VALUES('delete', old.id, old.content);
+                        INSERT INTO chunks_fts(rowid, content) VALUES (new.id, new.content);
+                    END;
+                    """
+                )
+                fts_n = self._conn.execute("SELECT count(*) FROM chunks_fts").fetchone()[0]
+                ch_n = self._conn.execute("SELECT count(*) FROM chunks").fetchone()[0]
+                if fts_n == 0 and ch_n > 0:
+                    self._conn.execute("INSERT INTO chunks_fts(chunks_fts) VALUES('rebuild')")
+                self._conn.commit()
+            self._fts = True
+        except sqlite3.OperationalError:
+            self._fts = False
+
+    def _fts_search(self, query: str, pool: int) -> list[int]:
+        """字面路 trigram召回一批chunk id 按bm25排"""
+        if not self._fts:
+            return []
+        match = fts_query(query)
+        if not match:
+            return []
+        try:
+            with self._lock:
+                rows = self._conn.execute(
+                    "SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH ? "
+                    "ORDER BY bm25(chunks_fts) LIMIT ?", (match, pool)
+                ).fetchall()
+            return [int(r[0]) for r in rows]
+        except sqlite3.OperationalError:
+            return []
 
     def ingest(self, path: str) -> str:
         """文件或目录入库 目录递归收并跳过忽略目录"""
@@ -177,22 +230,36 @@ class DocStore:
         return len(chunks)
 
     def recall(self, query: str, k: int = _RECALL_K) -> str:
-        """语义召回 向量没结果退回子串匹配"""
+        """混合召回 向量语义和trigram字面两路RRF融合 断网或没命中逐级兜底
+        字面路语言无关 专补向量漏的精确词 文件名报错码英文术语数字"""
         query = (query or "").strip()
         if not query:
             return "(no search query given)"
         with self._lock:
-            rows = self._conn.execute("SELECT source, content, embedding FROM chunks").fetchall()
+            rows = self._conn.execute("SELECT id, source, content, embedding FROM chunks").fetchall()
         if not rows:
             return "(the knowledge base is empty — ingest some documents first with ingest_docs)"
+        by_id = {cid: (source, content) for cid, source, content, _b in rows}
+        ids = [cid for cid, *_ in rows]
+
+        # 向量路 余弦排名取候选池
+        vec_rank: list[int] = []
         vectors = embed_texts([query])
         query_vec = vectors[0] if vectors else None
         if query_vec is not None:
-            idxs = rank_by_cosine(query_vec, [blob for _, _, blob in rows], k)
-            if idxs:
-                return "\n\n".join(f"【{Path(rows[i][0]).name}】\n{rows[i][1]}" for i in idxs)
-        needle = query.lower()  # 子串匹配兜底
-        hits = [(s, c) for s, c, _ in rows if needle in c.lower()]
+            sims = cosine_batch(query_vec, [blob for _i, _s, _c, blob in rows])
+            order = sorted(range(len(ids)), key=lambda i: sims[i], reverse=True)
+            vec_rank = [ids[i] for i in order[:_RECALL_POOL] if sims[i] > 0.0]
+
+        # 字面路 trigram按bm25
+        fts_rank = self._fts_search(query, _RECALL_POOL)
+
+        if vec_rank or fts_rank:
+            fused = rrf_fuse([vec_rank, fts_rank])[:k]
+            return "\n\n".join(f"【{Path(by_id[cid][0]).name}】\n{by_id[cid][1]}" for cid in fused)
+
+        needle = query.lower()  # 两路都空退子串
+        hits = [(s, c) for _i, s, c, _b in rows if needle in c.lower()]
         if not hits:
             return "(nothing relevant found in the knowledge base)"
         return "\n\n".join(f"【{Path(s).name}】\n{c}" for s, c in hits[:k])

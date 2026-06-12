@@ -238,3 +238,95 @@ def test_consolidation_needs_min_size(mem_theme):
         mem_theme.remember(t, salience=0.4)
     n = mem_theme.consolidate(lambda texts: "不该被调用")
     assert n == 0
+
+
+# 混合召回 字面路用真实的FTS不需要假向量 这组验证trigram补向量的盲区
+@pytest.fixture()
+def mem_novec(tmp_path, monkeypatch):
+    # 嵌入全失败 模拟断网或没配embed 只剩字面路 验证hybrid的降级仍能召回
+    monkeypatch.setattr(store_mod, "embed_texts", lambda texts: None)
+    return MemoryStore(tmp_path / "nv.db")
+
+
+def _seed(mem, items):
+    for t in items:
+        mem.remember(t, salience=0.5)
+
+
+def test_fts_recall_without_vectors(mem_novec):
+    # 没有向量 全靠trigram字面召回 多语言一锅烩
+    _seed(mem_novec, [
+        "用户上周遇到登录bug还没修",
+        "user really hates writing unit tests",
+        "エラーコード404一直出现",
+        "config.yaml 的路径配置错了",
+        "周末一起去爬山看日出",
+        "订单号 ORD12345 退款卡住了",
+        "他喜欢喝手冲咖啡",
+    ])
+    # 英文术语 向量漏的 字面精确命中
+    out = mem_novec.recall_relevant("writing tests", k=2)
+    assert any("unit tests" in c for c in out), out
+    # 报错码
+    out = mem_novec.recall_relevant("404 エラー", k=2)
+    assert any("404" in c for c in out), out
+    # 文件名
+    out = mem_novec.recall_relevant("config.yaml 在哪", k=2)
+    assert any("config.yaml" in c for c in out), out
+    # 订单号这种精确标识符 向量最容易漂走 字面稳命中
+    out = mem_novec.recall_relevant("ORD12345 怎么了", k=2)
+    assert any("ORD12345" in c for c in out), out
+
+
+def test_fts_catches_what_vector_misses(tmp_path, monkeypatch):
+    # 向量给每条互不相同但都与query等距偏远的方向 模拟语义漂移区分不开
+    # 关键 不能用同一个向量 否则会被去重合并成一条 这里彼此低余弦避开去重
+    vmap = {
+        "项目里到处都是 TODO 注释": _unit(1.0, 0.0, 0.0),
+        "今天心情不错": _unit(0.0, 1.0, 0.0),
+        "那个 NullPointerException 又抛了": _unit(0.0, 0.0, 1.0),
+        "中午吃了拉面": _unit(1.0, 1.0, 0.0),
+        "记得续费域名": _unit(0.0, 1.0, 1.0),
+        "NullPointerException 在哪": _unit(1.0, 1.0, 1.0),  # query 与上面都不近
+    }
+    monkeypatch.setattr(store_mod, "embed_texts",
+                        lambda texts: [vmap.get(t, _unit(1.0, 1.0, 1.0)) for t in texts])
+    mem = MemoryStore(tmp_path / "d.db")
+    _seed(mem, list(vmap)[:5])
+    assert mem.count() == 5, "互不相同的向量不该被去重合并"
+    # 向量对各条都半温不火区分不开 字面路靠NullPointerException精确命中救场
+    out = mem.recall_relevant("NullPointerException 在哪", k=2)
+    assert any("NullPointer" in c for c in out), f"字面路该把精确异常名捞回来 实际{out}"
+
+
+def test_hybrid_reinforces_recalled(mem_novec):
+    _seed(mem_novec, ["登录bug还没修复", "天气很好适合出门", "买了新键盘",
+                      "周一开会要准备材料", "晚上看了部电影"])
+    before = mem_novec._conn.execute(
+        "SELECT recall_count FROM experiences WHERE content LIKE '%登录bug%'").fetchone()[0]
+    mem_novec.recall_relevant("登录bug", k=2)
+    after = mem_novec._conn.execute(
+        "SELECT recall_count FROM experiences WHERE content LIKE '%登录bug%'").fetchone()[0]
+    assert after == before + 1, "字面召回命中也该回血"
+
+
+def test_fts_triggers_sync_on_delete(mem_novec):
+    _seed(mem_novec, ["独特标记内容alpha", "独特标记内容beta", "独特标记内容gamma",
+                      "无关内容一", "无关内容二", "无关内容三"])
+    # 删掉alpha那条 FTS索引该跟着删 不再召回
+    mem_novec.forget("alpha")
+    out = mem_novec.recall_relevant("alpha", k=3)
+    assert not any("alpha" in c for c in out), "删除后FTS不该再召回 triggers没同步"
+
+
+def test_fts_backfill_on_existing_db(tmp_path, monkeypatch):
+    # 老库场景 先建库塞数据 再重开 验证FTS对历史数据回填了
+    monkeypatch.setattr(store_mod, "embed_texts", lambda texts: None)
+    db = tmp_path / "old.db"
+    m1 = MemoryStore(db)
+    _seed(m1, ["历史数据里的 KeyError 报错", "其它无关一", "其它无关二", "其它无关三"])
+    m1._conn.close()
+    # 重开 _setup_fts 应回填历史
+    m2 = MemoryStore(db)
+    out = m2.recall_relevant("KeyError", k=2)
+    assert any("KeyError" in c for c in out), "重开后历史数据该被FTS回填能召回"
