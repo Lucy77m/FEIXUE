@@ -149,6 +149,30 @@ class DutiesMixin:
             return ""
         return text[:200]
 
+    def consolidate_memory(self) -> int:
+        """夜间记忆合并 把成簇的零碎经验各揉成一条高阶概括 返回揉成了几条
+        聚类store自己做 这里只提供给每簇做概括的LLM回调"""
+        return store.consolidate(self._summarize_cluster)
+
+    def _summarize_cluster(self, texts: list[str]) -> str:
+        """一簇同主题经验揉成一句概括 模型判定不成簇会回NONE 这里据此弃掉"""
+        try:
+            resp = self._client().chat.completions.create(
+                model=self._settings.model,
+                messages=[
+                    {"role": "system", "content": prompts.CONSOLIDATE_SYSTEM},
+                    {"role": "user", "content": prompts.consolidate_nudge(texts)},
+                ],
+                timeout=_BACKGROUND_TIMEOUT,
+            )
+            self._meter_response(resp)
+            text = _strip_think_leak((resp.choices[0].message.content or "").strip())
+        except Exception:
+            return ""
+        if not text or text.strip().upper().lstrip("[").startswith("NONE"):
+            return ""  # 模型判定这几条没共同主题 不强揉
+        return text[:300]
+
     def explore_topic(self, topic: str) -> str:
         from desktop_pet.agent.loop import Agent
         worker = Agent(self._settings, depth=self._depth + 1)

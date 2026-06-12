@@ -33,6 +33,13 @@ _RECALL_BONUS = 0.01     # 被真召回一次显著性回一点血
 _RECALL_SIM_GATE = 0.5   # 相似度过这条线才算真命中 才给强化
 _KEYWORD_BOOST = 0.08    # query原词出现在内容里的加分
 
+_CLUSTER_COSINE = 0.80   # 成簇下沿 同主题的几个侧面才揉 不到这条不算一簇
+_CLUSTER_MIN = 3         # 至少这么多条才值得合并成一条概括
+_CLUSTER_MAX = 8         # 一簇最多收几条 给LLM的料有上限
+_CLUSTER_RUNS = 2        # 一次consolidation最多揉几簇 控LLM调用数
+_CLUSTER_SCAN = 400      # 只在最近这么多条未合并经验里找簇
+_CONSOLIDATED_DEMOTE = 0.5  # 被揉进概括的原始条目显著性打的折
+
 
 def _effective_salience(sal: float, last_seen: str, now: datetime) -> float:
     """显著性随冷落时间半衰 越重要的记忆半衰期越长
@@ -85,6 +92,11 @@ class MemoryStore:
             if "recall_count" not in cols:
                 self._conn.execute(
                     "ALTER TABLE experiences ADD COLUMN recall_count INTEGER NOT NULL DEFAULT 0"
+                )
+            if "consolidated" not in cols:
+                # 已被夜间合并揉进概括的原始条目标1 不再参与下次聚类
+                self._conn.execute(
+                    "ALTER TABLE experiences ADD COLUMN consolidated INTEGER NOT NULL DEFAULT 0"
                 )
             self._conn.commit()
 
@@ -307,6 +319,77 @@ class MemoryStore:
                 "(SELECT id FROM experiences ORDER BY salience ASC, id ASC LIMIT ?)",
                 (excess,),
             )
+
+    def _find_clusters(self) -> list[list[tuple[int, str]]]:
+        """在未合并经验里贪心找紧致的语义簇 每簇是同一主题的几个侧面
+        和去重不同 这里不是近义重复 是要把分散的touchpoint揉成一条更高阶的事实"""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, content, embedding FROM experiences "
+                "WHERE consolidated = 0 AND embedding IS NOT NULL "
+                "ORDER BY id DESC LIMIT ?", (_CLUSTER_SCAN,)
+            ).fetchall()
+        items = [(rid, content, unpack(blob)) for rid, content, blob in rows]
+        items = [(rid, c, v) for rid, c, v in items if v is not None]
+        if len(items) < _CLUSTER_MIN:
+            return []
+        used: set[int] = set()
+        clusters: list[list[tuple[int, str]]] = []
+        for seed_id, seed_c, seed_v in items:
+            if seed_id in used:
+                continue
+            sims = cosine_batch(seed_v, [pack(v) for _i, _c, v in items])
+            members = []
+            for (rid, content, _v), sim in zip(items, sims):
+                if rid in used:
+                    continue
+                if sim >= _CLUSTER_COSINE:  # 含种子自身 sim=1
+                    members.append((rid, content))
+                    if len(members) >= _CLUSTER_MAX:
+                        break
+            if len(members) >= _CLUSTER_MIN:
+                clusters.append(members)
+                used.update(rid for rid, _c in members)
+                if len(clusters) >= _CLUSTER_RUNS:
+                    break
+        return clusters
+
+    def consolidate(self, summarize) -> int:
+        """夜间合并 把成簇的零碎经验揉成更高阶概括 summarize是注入的LLM回调
+        聚类和落库在锁内 LLM和嵌入在锁外做 返回揉成了几条"""
+        clusters = self._find_clusters()
+        if not clusters:
+            return 0
+        count = 0
+        for members in clusters:
+            texts = [c for _id, c in members]
+            try:
+                summary = (summarize(texts) or "").strip()
+            except Exception:
+                summary = ""
+            if not summary:
+                continue
+            vecs = embed_texts([summary])
+            vector = vecs[0] if vecs else None
+            blob = pack(vector) if vector else None
+            member_ids = [rid for rid, _c in members]
+            with self._lock:
+                # 概括以高显著性入库 来源标consolidation 自带last_seen
+                self._conn.execute(
+                    "INSERT INTO experiences(content, ts, confidence, source, embedding, salience, last_seen) "
+                    "VALUES (?, ?, 1.0, 'consolidation', ?, 0.7, ?)",
+                    (summary, _now(), blob, _now()),
+                )
+                # 原始条目标记已合并并降权 留着但沉底 具体细节偶尔还用得上
+                qmarks = ",".join("?" * len(member_ids))
+                self._conn.execute(
+                    f"UPDATE experiences SET consolidated = 1, salience = salience * ? "
+                    f"WHERE id IN ({qmarks})",
+                    (_CONSOLIDATED_DEMOTE, *member_ids),
+                )
+                self._conn.commit()
+            count += 1
+        return count
 
     def _find_duplicate(self, content: str, vector: list[float] | None) -> int | None:
         """找近似条目返回id 先向量再字面"""

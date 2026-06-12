@@ -150,6 +150,18 @@ class AgentWorker(QObject):
                 self.dream_ready.emit(text)
         threading.Thread(target=work, daemon=True, name="mochi-dream").start()
 
+    @Slot()
+    def consolidate(self) -> None:
+        # 睡着时后台把成簇零碎记忆揉成高阶概括 不出声 没簇就静默no-op
+        def work() -> None:
+            try:
+                n = self._agent.consolidate_memory()
+                if n:
+                    audit.system("memory consolidated", merged=n)
+            except Exception as exc:
+                audit.system("consolidate failed", error=repr(exc))
+        threading.Thread(target=work, daemon=True, name="mochi-consolidate").start()
+
     @Slot(str)
     def peek_screen(self, trigger: str = "") -> None:
         def work() -> None:

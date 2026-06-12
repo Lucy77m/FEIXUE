@@ -67,3 +67,6 @@ class Dreams(QObject):
             return
         self._dreamed_this_sleep = True
         self._host.request_dream.emit()  # 后台揉个梦 不出声
+        # 同一觉里顺手做记忆合并 把这阵子攒的同主题零碎揉成高阶概括
+        # 自限的 揉过的标记掉 要等新的相关记忆攒够才再成簇 没簇就静默
+        self._host.request_consolidate.emit()

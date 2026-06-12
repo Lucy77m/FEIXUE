@@ -156,3 +156,85 @@ def test_dedup_still_works(mem):
     assert "updated" in out or "similar" in out
     assert mem.count() == 1
     assert _row(mem, "npm管包")[0] == pytest.approx(0.8), "重复写入显著性取max"
+
+
+# 记忆合并 一簇同主题且互不重复的经验 两两余弦落在related带[0.80,0.92)里
+# 不能太像 否则remember时被当重复合掉 三个偏移0.32在yz面120度分开 两两cos约0.86
+_THEME_VECS = {
+    "周一要交方案 时间紧": _unit(1.0, 0.32, 0.0),
+    "又熬夜赶活到两点": _unit(1.0, -0.16, 0.277),
+    "压力大 这周没睡好": _unit(1.0, -0.16, -0.277),
+    "周末去爬山很开心": _unit(0.0, 0.0, 1.0),  # 不相干 不该进簇
+}
+
+
+@pytest.fixture()
+def mem_theme(tmp_path, monkeypatch):
+    def fake_embed(texts):
+        out = []
+        for t in texts:
+            v = _THEME_VECS.get(t)
+            out.append(v if v is not None else _unit(0.5, 0.5, 0.5))  # 概括也给个向量
+        return out
+    monkeypatch.setattr(store_mod, "embed_texts", fake_embed)
+    return MemoryStore(tmp_path / "t.db")
+
+
+def test_consolidation_merges_theme(mem_theme):
+    for t in _THEME_VECS:
+        mem_theme.remember(t, salience=0.4)
+    # 确认三条赶工两两落在related带里 成簇但不会在remember时被当重复合掉
+    vs = [_THEME_VECS[t] for t in list(_THEME_VECS)[:3]]
+    for i in range(3):
+        for j in range(i + 1, 3):
+            sim = sum(x * y for x, y in zip(vs[i], vs[j]))
+            assert store_mod._CLUSTER_COSINE <= sim < store_mod._DEDUP_COSINE, f"{i},{j} sim={sim}"
+    assert mem_theme.count() == 4, "四条都该独立存下来 没被去重合并"
+
+    calls = {"n": 0}
+    def summarize(texts):
+        calls["n"] += 1
+        assert all("爬山" not in t for t in texts), "不相干的不该进簇"
+        return "主人最近在高压赶工期 常熬夜没睡好"
+    n = mem_theme.consolidate(summarize)
+    assert n == 1, "三条赶工该揉成一簇"
+    assert calls["n"] == 1
+    # 概括以高显著性入库
+    summ = _row(mem_theme, "高压赶工")
+    assert summ is not None and summ[0] == pytest.approx(0.7)
+    # 原始三条被标记consolidated并降权 具体显著性supersede也插过手 只断言降了和标记到位
+    done = mem_theme._conn.execute(
+        "SELECT COUNT(*) FROM experiences WHERE consolidated = 1").fetchone()[0]
+    assert done == 3
+    assert _row(mem_theme, "周一要交方案")[0] < 0.4, "原始条目该被降权沉底"
+    # 不相干的那条没被动
+    assert mem_theme._conn.execute(
+        "SELECT consolidated FROM experiences WHERE content LIKE '%爬山%'").fetchone()[0] == 0
+
+
+def test_consolidation_idempotent(mem_theme):
+    for t in _THEME_VECS:
+        mem_theme.remember(t, salience=0.4)
+    mem_theme.consolidate(lambda texts: "概括一")
+    # 再跑一次 原始条目已标consolidated 不该再成簇
+    n2 = mem_theme.consolidate(lambda texts: "不该被调用")
+    assert n2 == 0, "揉过的不该重复揉"
+
+
+def test_consolidation_respects_none(mem_theme):
+    for t in _THEME_VECS:
+        mem_theme.remember(t, salience=0.4)
+    # summarize回空串模拟模型判NONE 该簇放弃 原始条目不标记
+    n = mem_theme.consolidate(lambda texts: "")
+    assert n == 0
+    done = mem_theme._conn.execute(
+        "SELECT COUNT(*) FROM experiences WHERE consolidated = 1").fetchone()[0]
+    assert done == 0, "没揉成就不该标记 留待下次"
+
+
+def test_consolidation_needs_min_size(mem_theme):
+    # 只放两条赶工 不够CLUSTER_MIN(3) 不成簇
+    for t in list(_THEME_VECS)[:2]:
+        mem_theme.remember(t, salience=0.4)
+    n = mem_theme.consolidate(lambda texts: "不该被调用")
+    assert n == 0

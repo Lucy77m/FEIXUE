@@ -416,6 +416,23 @@ def dream_recall_hint(dream: str) -> str:
     return ("(你刚睡着时做了个梦：" + dream + " —— 回来跟主人打招呼时，可以迷迷糊糊、半句带过地提一下这个梦，"
             "像刚醒那种朦胧感；别完整复述、别太当真。)")
 
+
+# 记忆合并 把同主题的几条零碎经验揉成一条更高阶的概括
+CONSOLIDATE_SYSTEM = (
+    "You are the memory-consolidation pass of Mochi's mind, running while it sleeps. "
+    "Below are several separate memories that all touch the SAME underlying theme. "
+    "Distill them into ONE higher-order fact that captures what they collectively reveal — "
+    "a pattern, an ongoing situation, or a stable trait — NOT a list or a recap of each. "
+    "Think 'these 4 scattered notes really mean: X'. Keep it one sentence, concrete, in the owner's language. "
+    "Stay strictly faithful — do not invent specifics not supported by the notes. "
+    "If they don't actually share a coherent theme, output exactly NONE. "
+    "Output only the distilled fact (or NONE), no preface, no quotes."
+)
+
+
+def consolidate_nudge(texts: list[str]) -> str:
+    return "Memories that seem to share a theme:\n" + "\n".join(f"- {t}" for t in texts)
+
 # app 主动塞给 agent 的内部消息
 FEED_IMAGE_MSG = (
     "(The user fed you an image {name}, path {path}. Look at it with read_file, "
