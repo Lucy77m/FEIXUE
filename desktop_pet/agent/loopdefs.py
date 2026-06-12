@@ -69,5 +69,10 @@ _HISTORY_TOKEN_BUDGET = 24_000
 
 _REQUEST_TIMEOUT = httpx.Timeout(connect=8.0, read=90.0, write=30.0, pool=8.0)
 _BACKGROUND_TIMEOUT = 45.0
-_MAX_RETRIES = 1
+_MAX_RETRIES = 0          # SDK内置重试关掉 退避策略由_complete显式接管
+
+# 瞬时错误退避 限流和5xx和网络抖动才退避 400/401/404快速失败不退
+_RETRY_MAX = 3            # 主调用最多额外重试几次
+_RETRY_BASE_S = 1.0       # 首次退避基准 之后翻倍
+_RETRY_CAP_S = 16.0       # 单次退避上限
 

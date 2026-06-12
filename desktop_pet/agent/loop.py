@@ -9,7 +9,14 @@ import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from openai import BadRequestError, OpenAI
+from openai import (
+    APIConnectionError,
+    APITimeoutError,
+    BadRequestError,
+    InternalServerError,
+    OpenAI,
+    RateLimitError,
+)
 
 from desktop_pet import i18n, journal, persona
 from desktop_pet.agent import prompts
@@ -33,6 +40,9 @@ from desktop_pet.agent.loopdefs import (
     _PLAN_TOOL,
     _REFLECT_MIN_CHARS,
     _REQUEST_TIMEOUT,
+    _RETRY_BASE_S,
+    _RETRY_CAP_S,
+    _RETRY_MAX,
     _RUN_CANCELLED,
     _SHELL_TOOLS,
     _SPAWN_TOOL,
@@ -56,6 +66,25 @@ from desktop_pet.memory.store import store
 from desktop_pet.settings import AUTONOMY_BUDGETS, Settings, build_http_client
 from desktop_pet.skills import skills
 from desktop_pet.usage import meter as usage_meter
+
+# 这些是值得等一等再试的瞬时错误 限流 5xx 网络抖动 超时
+# 不含 400 参数错 401 鉴权 404 模型名错 那些重试多少次都一样 该快速失败
+_TRANSIENT_ERRORS = (RateLimitError, InternalServerError, APITimeoutError, APIConnectionError)
+
+
+def _retry_after_seconds(exc: Exception) -> float | None:
+    """从限流响应头里抠 Retry-After 服务端让等多久就等多久 抠不到返回None"""
+    resp = getattr(exc, "response", None)
+    headers = getattr(resp, "headers", None)
+    if not headers:
+        return None
+    raw = headers.get("retry-after") or headers.get("Retry-After")
+    if not raw:
+        return None
+    try:
+        return max(0.0, float(raw))
+    except (TypeError, ValueError):
+        return None
 
 
 class Agent(HistoryMixin, ToolHandlersMixin, SubagentsMixin, DutiesMixin):
@@ -533,7 +562,7 @@ class Agent(HistoryMixin, ToolHandlersMixin, SubagentsMixin, DutiesMixin):
         if not self._strip_stream_options:
             params["stream_options"] = {"include_usage": True}
         try:
-            stream = self._client().chat.completions.create(**params)
+            stream = self._create_stream(params)
         except BadRequestError as exc:
             # 非标参数400就逐个剥掉重试 错误消息点名的先剥 剥光还炸才抛
             order = [("extra_body", "_strip_extra_body"),
@@ -549,7 +578,7 @@ class Agent(HistoryMixin, ToolHandlersMixin, SubagentsMixin, DutiesMixin):
                 params.pop(key)
                 setattr(self, flag, True)
                 try:
-                    stream = self._client().chat.completions.create(**params)
+                    stream = self._create_stream(params)
                     break
                 except BadRequestError as retry_exc:
                     last = retry_exc
@@ -559,6 +588,26 @@ class Agent(HistoryMixin, ToolHandlersMixin, SubagentsMixin, DutiesMixin):
         if message.usage:
             usage_meter.add(message.usage["input"], message.usage["output"], message.usage.get("cached", 0))
         return message
+
+    def _create_stream(self, params: dict):
+        """发起补全 瞬时错误指数退避重试 400原样抛给上层剥参数 退避期间可被取消打断"""
+        delay = _RETRY_BASE_S
+        attempt = 0
+        while True:
+            try:
+                return self._client().chat.completions.create(**params)
+            except BadRequestError:
+                raise  # 参数问题 退避没用 交给上层剥
+            except _TRANSIENT_ERRORS as exc:
+                if attempt >= _RETRY_MAX or self._cancel.is_set():
+                    raise
+                wait = _retry_after_seconds(exc)
+                wait = min(wait if wait is not None else delay, _RETRY_CAP_S)
+                # 用cancel.wait睡 取消能立刻把它叫醒 不傻等
+                if self._cancel.wait(wait):
+                    raise
+                delay = min(delay * 2, _RETRY_CAP_S)
+                attempt += 1
 
     def _meter_response(self, resp) -> None:
         """记非流式调用用量"""
