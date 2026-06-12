@@ -34,7 +34,7 @@
 Mochi is two things at once:
 
 - 🐾 **A desktop pet with a life of its own** — drawn entirely in code (no sprite assets whatsoever). It blinks, follows your cursor with its eyes, daydreams and hums, goes fishing and sips coffee, plays catch and hide-and-seek; it fans itself when the machine runs hot, puts up an umbrella in the rain, hunts down garbage bugs when junk piles up, eats files you drop on it, and brings out a cake on anniversaries. Ignore it and it finds its own fun; leave and it dozes off; now and then it strikes up a conversation on its own.
-- 🧠 **A local Agent that can drive your whole computer** — plug in your own LLM (any OpenAI-compatible endpoint) and it can see the screen, click windows, move the mouse and keyboard, run commands, write code, read and write files, search the web, remember things, and look stuff up; it can also **read its replies aloud, watch your screen on a timer, run tests after it edits code, fan out a team of sub-agents in parallel, and remind you on a daily/weekly schedule**… turning "chatting with an AI" into "having the AI do it for you."
+- 🧠 **A local Agent that can drive your whole computer** — plug in your own LLM (any OpenAI-compatible endpoint) and it can see the screen, click windows, move the mouse and keyboard, run commands, write code, read and write files, search the web, remember things, and look stuff up; it can also **watch your screen on a timer, run tests after it edits code, fan out a team of sub-agents in parallel, and remind you on a daily/weekly schedule**… turning "chatting with an AI" into "having the AI do it for you."
 
 It carries persistent **emotions and rapport**, and slowly grows a **self-portrait (personality evolution)** as you spend time together — so it's "the same one," not a chat box that resets every time.
 
@@ -67,7 +67,6 @@ Mochi acts on your machine with **the same privileges you have** — running arb
 | **Internet** | Web search, fetch page text, HTTP requests, install packages |
 | **See Screen & Control** | Screenshots, OCR (RapidOCR), on-screen image matching, reading the accessibility tree to click controls precisely, mouse & keyboard; plus **watching your screen on the interval you set** (e.g. keep an eye on your game and warn you of danger/openings) |
 | **System Insight** | Inspect memory usage and the most memory-hungry processes; on request, read a process's memory bytes (debugging / forensics, read-only, only when asked) |
-| **Read Aloud** | Speaks its replies: online Edge neural voices (multiple zh-CN voices like Xiaoxiao / Yunxi / Xiaobei) or a local offline voice, kept in sync sentence-by-sentence with the bubble; voice / speed / preview all adjustable |
 | **Memory** | Long-term memory (experience / preferences / environment) + episodic journal + knowledge base (document RAG), automatically reflecting and consolidating after every conversation |
 | **Skills** | Save proven approaches as reusable skills and call them directly next time (Voyager-style "stronger the more it's used") |
 | **Orchestration & Extensions** | MCP connectors, deterministic sub-agent orchestration (**fan out in parallel** / chain into a **pipeline**, with structured returns), long tasks offloaded to the background (listable, stoppable anytime) |
@@ -101,7 +100,7 @@ Mochi acts on your machine with **the same privileges you have** — running arb
 ### ⌨️ Handy Interaction
 
 - **Global Hotkeys**: `Ctrl + Alt + S` summons the input box anywhere; `Ctrl + Alt + A` asks it about selected text directly; `Ctrl + Shift + Q` rewrites selected text in place ("quick rewrite," auto-replacing it)
-- **Control Panel**: configure the endpoint / model parameters / reply language / capability toggles / proactive frequency (Quiet · Normal · Chatty) / TTS voice & speed / one-click "wipe memory, like a newborn"
+- **Control Panel**: configure the endpoint / model parameters / reply language / capability toggles / proactive frequency (Quiet · Normal · Chatty) / one-click "wipe memory, like a newborn"
 
 ---
 
@@ -129,7 +128,6 @@ desktop_pet/
 ├─ emotion/          # Emotion state machine (VA + rapport) and emotion-tag tables
 ├─ somatic.py        # Body sensations: injects "what just happened to it" + ongoing states into each turn's context
 ├─ persona.py        # Self-portrait evolution layer (persona.json), injected into conversation context
-├─ voice.py          # Read-aloud (TTS): Edge online neural voices + local SAPI fallback, synced sentence-by-sentence with the bubble
 ├─ memory/           # Long-term memory (SQLite) + vector embeddings (numpy-vectorized recall)
 ├─ executor/         # Commands / Python / files / network / vision (OCR · matching) / system memory / dev tools (diff · tests) / safety guardrails
 ├─ hands/            # Mouse / keyboard / window control / ghost mouse (ghost — background PostMessage clicks without moving the real cursor)
@@ -220,7 +218,6 @@ A continuous valence / arousal mood + slowly accumulating rapport, persisted to 
 - **Proactive messages**: `proactive.py` manages cooldown / daily-cap tiers (Quiet / Normal / Chatty), `app.py` polls every 60s and only speaks once all gates pass (not busy / present / rapport met / cooldown elapsed); welcome-back greetings have a minimum interval and never interrupt mid-chat.
 - **Memory / knowledge base / episodic journal**: three independently persisted stores — memory is "what it learned about you," the knowledge base is "external documents you fed it (RAG)," the episodic journal is "what it did recently," strictly separated.
 - **Reminders / scheduling**: `say` (speaks in its own voice at the appointed time) / `do` (actually does the work in the background and reports back), with **daily / weekly / every-X-minute** recurrence (persistent across restarts; missed-while-off only delivers the most recent occurrence, no flooding); `list_reminders` / `cancel_reminder` to manage them; when Mochi is hidden or behind a fullscreen game, delivery falls back to a **system tray notification**. All goes through a persisted scheduler, never letting the model sleep to wait out time itself.
-- **Read-aloud (TTS)**: `voice.py` speaks replies — online Edge neural voices (multiple zh-CN voices) or a local SAPI offline voice; with TTS on, each sentence "locks" the bubble in sync with the audio, emoji and blackboard content aren't read, and on exit it stops speaking and tears down COM/audio cleanly (so a hard exit doesn't pop an "application error").
 - **Scheduled screen-watching**: `watcher.py` — on the interval you set, it screenshots the active window, analyzes it against the focus you gave (e.g. your game situation) and reports; session-level (not persisted, ends on restart), and on result it re-checks state so it won't intrude after power-off / stop / mid-conversation, and won't burn a cycle on a transient capture failure.
 - **Engineering discipline**: `executor/devtools.py` provides `review_diff` (view the uncommitted diff, scopable to a file/subdir) / `run_tests` (auto-detect pytest · npm, own 5-min timeout, kills the whole process tree on timeout); the system prompt has a "when working in a code repo" section — look before you leap, small surgical edits, **run tests / self-check the diff after editing**, branch first on a default branch, confirm before irreversible git.
 - **Hiding / entrance**: dragged to a screen edge it shrinks into a corner and occasionally peeks out; every launch picks a random entrance animation and never repeats the previous one; once in a while it "wormholes" — cracking open a wormhole in place, spinning inward, teleporting while the window is invisible, and popping out elsewhere on the screen.
