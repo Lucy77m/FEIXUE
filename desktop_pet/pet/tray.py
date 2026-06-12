@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon
 
@@ -19,6 +20,39 @@ _PERFORM_ITEMS = (
     ("celebrate", "act_celebrate"), ("flip", "act_flip"),
     ("purr", "act_purr"), ("wave", "act_wave"),
 )
+
+# 跟控制面板一个皮肤 白卡圆角加紫色悬停
+_MENU_QSS = """
+QMenu {
+    background: #ffffff;
+    border: 1px solid #e6e3f1;
+    border-radius: 12px;
+    padding: 6px 5px;
+    font-family: 'Microsoft YaHei UI', 'Segoe UI', sans-serif;
+}
+QMenu::item {
+    color: #3b3a4d;
+    font-size: 13px;
+    padding: 8px 32px 8px 16px;
+    margin: 1px 4px;
+    border-radius: 8px;
+    background: transparent;
+    min-width: 130px;
+}
+QMenu::item:selected { background: #efecff; color: #6a59f5; }
+QMenu::item:disabled { color: #b6b4c8; }
+QMenu::separator { height: 1px; background: #efedf7; margin: 5px 12px; }
+QMenu::right-arrow { width: 8px; height: 8px; }
+"""
+
+
+def _dress(menu: QMenu) -> QMenu:
+    """无边框加透明底才能有真圆角 不然四角是方的"""
+    menu.setWindowFlags(menu.windowFlags() | Qt.WindowType.FramelessWindowHint
+                        | Qt.WindowType.NoDropShadowWindowHint)
+    menu.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+    menu.setStyleSheet(_MENU_QSS)
+    return menu
 
 
 class Tray(QSystemTrayIcon):
@@ -40,14 +74,14 @@ class Tray(QSystemTrayIcon):
         self._on_open_panel = on_open_panel
         self._is_shown = is_shown
 
-        menu = QMenu()
+        menu = _dress(QMenu())
         self._act_talk = self._add(menu, "tray_talk", on_talk)
         self._act_peek = self._add(menu, "tray_peek", on_peek)
         self._act_new_topic = self._add(menu, "tray_new_topic", on_new_topic)
         self._act_focus = self._add(menu, "tray_focus", on_focus)
         self._act_ball = self._add(menu, "tray_ball", on_ball)
         if on_perform is not None:
-            sub = menu.addMenu(i18n.t("tray_perform"))
+            sub = _dress(menu.addMenu(i18n.t("tray_perform")))
             for name, key in _PERFORM_ITEMS:
                 act = QAction(i18n.t(key), sub)
                 act.triggered.connect(lambda _checked=False, n=name: on_perform(n))
