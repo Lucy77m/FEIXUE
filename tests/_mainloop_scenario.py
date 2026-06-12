@@ -42,6 +42,11 @@ def main() -> int:
 
     state = {"worker_thread": "", "reply": "", "busy_seq": []}
 
+    # 关掉退避重试 这个场景测回路机制不测退避时序 退避归test_retry管
+    # 不关的话连接错误要退避1+2+4秒 把回路拖过观测窗口
+    import desktop_pet.agent.loop as loop_mod
+    loop_mod._RETRY_MAX = 0
+
     # 在Agent.run上包探针记执行线程 千万不能动信号连接
     # 教训 拿普通函数顶掉queued slot会让派发退化成direct 把agent拉回主线程
     from desktop_pet.agent.loop import Agent
