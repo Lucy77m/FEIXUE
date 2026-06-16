@@ -28,6 +28,24 @@ def atomic_write_text(path: Path, text: str) -> None:
         raise
 
 
+def delete_db_files(path: Path) -> None:
+    """删一个 sqlite 库文件连同它的 -wal/-shm——重建损坏库前用。
+    sqlite 连接 close 后 Windows 释放句柄有延迟 unlink 会撞 WinError 32 被占用 故带退避重试"""
+    import gc
+    import time
+    gc.collect()  # 催一下 让已 close 的连接对象尽快释放底层文件句柄
+    for suffix in ("", "-wal", "-shm"):
+        target = Path(str(path) + suffix)
+        for _ in range(8):
+            try:
+                target.unlink()
+                break
+            except FileNotFoundError:
+                break
+            except OSError:
+                time.sleep(0.06)  # 句柄还没放 退一下再删
+
+
 def _default_data_dir() -> Path:
     """定位数据目录"""
     override = _os.environ.get("STAR_DATA_DIR")

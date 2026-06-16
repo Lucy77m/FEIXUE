@@ -10,7 +10,7 @@ from pathlib import Path
 
 from desktop_pet.memory.embed import cosine_batch, embed_texts, pack
 from desktop_pet.memory.hybrid import fts_query, rrf_fuse
-from desktop_pet.settings import DATA_DIR
+from desktop_pet.settings import DATA_DIR, delete_db_files
 
 _DB_PATH = DATA_DIR / "docs.db"
 _CHUNK = 800
@@ -120,6 +120,14 @@ class DocStore:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
         self._conn = sqlite3.connect(_DB_PATH, check_same_thread=False)
+        self._fts = False
+        try:
+            self._create_schema()
+            self._setup_fts()
+        except sqlite3.DatabaseError:
+            self._rebuild()  # 库损坏(异常退出留下)就重建空库 别让 app 起不来
+
+    def _create_schema(self) -> None:
         with self._lock:
             self._conn.execute(
                 "CREATE TABLE IF NOT EXISTS chunks ("
@@ -127,7 +135,18 @@ class DocStore:
                 "idx INTEGER NOT NULL, content TEXT NOT NULL, embedding BLOB)"
             )
             self._conn.commit()
+
+    def _rebuild(self) -> None:
+        """库损坏时删文件重建空库——损坏后照样能起、能清(对齐 MemoryStore._rebuild)"""
+        try:
+            self._conn.close()
+        except Exception:
+            pass
+        self._conn = None  # 丢掉死连接引用 否则 delete_db_files 里的 gc 收不掉它 文件句柄不放 unlink 必失败
+        delete_db_files(_DB_PATH)
+        self._conn = sqlite3.connect(_DB_PATH, check_same_thread=False)
         self._fts = False
+        self._create_schema()
         self._setup_fts()
 
     def _setup_fts(self) -> None:
@@ -214,18 +233,22 @@ class DocStore:
         if not chunks:
             return -1
         source = str(file)
+        # 先无锁把所有 (source,idx,content,embedding) 算好——embedding 是几十秒的网络慢活
+        # 绝不能持锁做:否则主线程的 docs.sources()/count() 会卡在锁上 整个 UI 冻住
+        prepared: list[tuple] = []
+        for start in range(0, len(chunks), _EMBED_BATCH):
+            batch = chunks[start : start + _EMBED_BATCH]
+            vectors = embed_texts(batch)
+            if not vectors or len(vectors) != len(batch):  # 向量化挂了也照样存内容
+                vectors = [None] * len(batch)
+            for offset, (content, vector) in enumerate(zip(batch, vectors)):
+                prepared.append((source, start + offset, content, pack(vector) if vector else None))
+        # 短事务:锁内只做删旧块 + 批量插新块 不碰网络
         with self._lock:
-            self._conn.execute("DELETE FROM chunks WHERE source = ?", (source,))  # 先删旧块
-            for start in range(0, len(chunks), _EMBED_BATCH):
-                batch = chunks[start : start + _EMBED_BATCH]
-                vectors = embed_texts(batch)
-                if not vectors or len(vectors) != len(batch):  # 向量化挂了也照样存内容
-                    vectors = [None] * len(batch)
-                for offset, (content, vector) in enumerate(zip(batch, vectors)):
-                    self._conn.execute(
-                        "INSERT INTO chunks(source, idx, content, embedding) VALUES (?, ?, ?, ?)",
-                        (source, start + offset, content, pack(vector) if vector else None),
-                    )
+            self._conn.execute("DELETE FROM chunks WHERE source = ?", (source,))
+            self._conn.executemany(
+                "INSERT INTO chunks(source, idx, content, embedding) VALUES (?, ?, ?, ?)", prepared
+            )
             self._conn.commit()
         return len(chunks)
 
@@ -256,7 +279,10 @@ class DocStore:
 
         if vec_rank or fts_rank:
             fused = rrf_fuse([vec_rank, fts_rank])[:k]
-            return "\n\n".join(f"【{Path(by_id[cid][0]).name}】\n{by_id[cid][1]}" for cid in fused)
+            # cid in by_id 兜底:快照取完才被并发 ingest 插进来的新块 不在 by_id 里 别 KeyError
+            parts = [f"【{Path(by_id[cid][0]).name}】\n{by_id[cid][1]}" for cid in fused if cid in by_id]
+            if parts:
+                return "\n\n".join(parts)
 
         needle = query.lower()  # 两路都空退子串
         hits = [(s, c) for _i, s, c, _b in rows if needle in c.lower()]
@@ -267,13 +293,18 @@ class DocStore:
     def forget(self, source: str | None = None) -> str:
         """删文档 给source模糊删 不给清空整库"""
         with self._lock:
-            if source:
-                cur = self._conn.execute("DELETE FROM chunks WHERE source LIKE ?", (f"%{source}%",))
+            try:
+                if source:
+                    cur = self._conn.execute("DELETE FROM chunks WHERE source LIKE ?", (f"%{source}%",))
+                    self._conn.commit()
+                    return f"Removed {cur.rowcount} chunk(s) from the knowledge base (matching \"{source}\")."
+                self._conn.execute("DELETE FROM chunks")
                 self._conn.commit()
-                return f"Removed {cur.rowcount} chunk(s) from the knowledge base (matching \"{source}\")."
-            self._conn.execute("DELETE FROM chunks")
-            self._conn.commit()
-            return "Cleared the knowledge base."
+                return "Cleared the knowledge base."
+            except sqlite3.DatabaseError:
+                # 库损坏 DELETE 走不通——重建空库 保证"清知识库/重置"一定生效(对齐 store.wipe)
+                self._rebuild()
+                return "Cleared the knowledge base (rebuilt a corrupt index)."
 
     def count(self) -> int:
         """按source去重的文档篇数"""

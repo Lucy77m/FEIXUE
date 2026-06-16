@@ -5,11 +5,14 @@
 from __future__ import annotations
 
 import json
+import threading
 from datetime import date, datetime, timedelta
 
 from desktop_pet.settings import DATA_DIR, atomic_write_text
 
 _PATH = DATA_DIR / "stats.json"
+# 挡并发读改写——主线程和多个 daemon 线程都在改 没锁会丢更新(对齐 journal/persona/usage)
+_LOCK = threading.RLock()
 
 
 def _load() -> dict:
@@ -32,17 +35,19 @@ def _save(data: dict) -> None:
 
 def mark_first_seen() -> None:
     """只在第一次写入相遇时间"""
-    data = _load()
-    if not data.get("first_seen"):  # 空字符串也算没记过
-        data["first_seen"] = datetime.now().isoformat(timespec="seconds")
-        _save(data)
+    with _LOCK:
+        data = _load()
+        if not data.get("first_seen"):  # 空字符串也算没记过
+            data["first_seen"] = datetime.now().isoformat(timespec="seconds")
+            _save(data)
 
 
 def bump_interactions() -> None:
     """互动次数加一"""
-    data = _load()
-    data["interactions"] = int(data.get("interactions", 0) or 0) + 1
-    _save(data)
+    with _LOCK:
+        data = _load()
+        data["interactions"] = int(data.get("interactions", 0) or 0) + 1
+        _save(data)
 
 
 def get_note(key: str) -> str:
@@ -52,31 +57,34 @@ def get_note(key: str) -> str:
 
 def set_note(key: str, value: str) -> None:
     """存杂项标记"""
-    data = _load()
-    data["note_" + key] = value
-    _save(data)
+    with _LOCK:
+        data = _load()
+        data["note_" + key] = value
+        _save(data)
 
 
 def mark_late_night() -> int:
     """记一次熬夜 返回连续熬了几天 当天重复调用不重计"""
-    data = _load()
-    today = date.today().isoformat()
-    if data.get("last_late") == today:
-        return int(data.get("late_streak", 1) or 1)
-    yesterday = (date.today() - timedelta(days=1)).isoformat()
-    streak = int(data.get("late_streak", 0) or 0) + 1 if data.get("last_late") == yesterday else 1
-    data["last_late"] = today
-    data["late_streak"] = streak
-    _save(data)
-    return streak
+    with _LOCK:
+        data = _load()
+        today = date.today().isoformat()
+        if data.get("last_late") == today:
+            return int(data.get("late_streak", 1) or 1)
+        yesterday = (date.today() - timedelta(days=1)).isoformat()
+        streak = int(data.get("late_streak", 0) or 0) + 1 if data.get("last_late") == yesterday else 1
+        data["last_late"] = today
+        data["late_streak"] = streak
+        _save(data)
+        return streak
 
 
 def add_eaten(nbytes: int, nfiles: int = 1) -> None:
     """投喂吃掉的量记账"""
-    data = _load()
-    data["bytes_eaten"] = int(data.get("bytes_eaten", 0) or 0) + max(0, int(nbytes))
-    data["files_eaten"] = int(data.get("files_eaten", 0) or 0) + max(0, int(nfiles))
-    _save(data)
+    with _LOCK:
+        data = _load()
+        data["bytes_eaten"] = int(data.get("bytes_eaten", 0) or 0) + max(0, int(nbytes))
+        data["files_eaten"] = int(data.get("files_eaten", 0) or 0) + max(0, int(nfiles))
+        _save(data)
 
 
 def snapshot() -> dict:

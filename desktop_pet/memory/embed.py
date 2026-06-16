@@ -28,6 +28,11 @@ def _get_client(settings: Settings) -> OpenAI | None:
         return None
     key = (settings.api_key, settings.base_url, settings.proxy)
     if _client is None or _client_key != key:
+        if _client is not None:  # 配置变了 先关掉旧 client 的 httpx 连接池 别漏 socket/句柄
+            try:
+                _client.close()
+            except Exception:
+                pass
         _client = OpenAI(
             api_key=settings.api_key,
             base_url=settings.base_url,

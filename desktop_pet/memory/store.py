@@ -13,7 +13,7 @@ from pathlib import Path
 
 from desktop_pet.memory.embed import cosine, cosine_batch, embed_texts, pack, unpack
 from desktop_pet.memory.hybrid import fts_query, rrf_fuse
-from desktop_pet.settings import DATA_DIR
+from desktop_pet.settings import DATA_DIR, delete_db_files
 
 _MEMORY_DIR = DATA_DIR / "memory"
 _DB_PATH = _MEMORY_DIR / "memory.db"
@@ -77,11 +77,14 @@ class MemoryStore:
         self._lock = threading.RLock()
         # 连接跨线程共享 靠rlock串行
         self._conn = sqlite3.connect(path, check_same_thread=False)
-        self._create_schema()
-        self._migrate_columns()
-        self._migrate_legacy_json()
         self._fts = False
-        self._setup_fts()
+        try:
+            self._create_schema()
+            self._migrate_columns()
+            self._migrate_legacy_json()
+            self._setup_fts()
+        except sqlite3.DatabaseError:
+            self._rebuild()  # 库损坏(异常退出留下)就重建空库 别让 app 起不来(自愈只能在跑起来后调)
 
     def _setup_fts(self) -> None:
         """给经验内容建trigram全文索引 triggers自动跟主表同步增删改
@@ -249,12 +252,10 @@ class MemoryStore:
             self._conn.close()
         except Exception:
             pass
-        for suffix in ("", "-wal", "-shm"):  # 连 WAL/SHM 一起清
-            try:
-                Path(str(self._path) + suffix).unlink()
-            except OSError:
-                pass
-        self._conn = sqlite3.connect(self._path, check_same_thread=False)
+        path = self._path
+        self._conn = None  # 丢掉死连接引用 否则 delete_db_files 里的 gc 收不掉它 文件句柄不放 unlink 必失败
+        delete_db_files(path)  # 连 WAL/SHM 一起清 带退避重试绕开 Windows 句柄释放延迟
+        self._conn = sqlite3.connect(path, check_same_thread=False)
         self._create_schema()
         self._migrate_columns()
         self._fts = False
@@ -478,6 +479,7 @@ class MemoryStore:
                     f"WHERE id IN ({qmarks})",
                     (_CONSOLIDATED_DEMOTE, *member_ids),
                 )
+                self._prune_overflow()  # 合并出的概括也服从容量上限 别让 consolidation 路径绕过裁剪
                 self._conn.commit()
             count += 1
         return count
@@ -565,7 +567,10 @@ class MemoryStore:
         m = len(fused)
         scored = []
         for pos, rid in enumerate(fused):
-            content, eff, recency = meta[rid]
+            entry = meta.get(rid)  # 快照取完后才被并发写(反思/合并)插进来的 id 不在 meta 里 跳过别 KeyError
+            if entry is None:
+                continue
+            content, eff, recency = entry
             rel = 1.0 - pos / m  # 融合名次转0~1相关性
             final = _HYBRID_W_REL * rel + _HYBRID_W_SAL * eff + _HYBRID_W_REC * recency
             scored.append((final, rid, content))

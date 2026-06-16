@@ -362,3 +362,54 @@ def test_close_keeps_db_consistent_under_concurrent_writes(mem, tmp_path):
         assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     finally:
         conn.close()
+
+
+def _malform_db(path):
+    """造一个头有效、中间页损坏的 sqlite 文件——模拟异常退出 mid-write 留下的 malformed 库
+    (真实损坏:头是 'SQLite format 3'、坏的是数据页;不是整文件垃圾)"""
+    import sqlite3
+    path.parent.mkdir(parents=True, exist_ok=True)
+    c = sqlite3.connect(str(path))
+    c.execute("CREATE TABLE t(id INTEGER PRIMARY KEY, content TEXT)")
+    for i in range(500):
+        c.execute("INSERT INTO t(content) VALUES(?)", ("x" * 200,))
+    c.commit()
+    c.close()
+    raw = bytearray(path.read_bytes())
+    for off in range(2000, min(len(raw), 8000)):
+        raw[off] = 0xFF  # 涂坏数据页 留头完好
+    path.write_bytes(bytes(raw))
+
+
+def test_corrupt_db_self_heals_on_construct(tmp_path, monkeypatch):
+    """库在磁盘上已损坏(上次异常退出留下) 构造时该删坏库重建空库 而不是崩在启动
+    根因:失败的语句会泄漏文件句柄 close 后必须丢掉死连接引用让 gc 回收 否则 unlink 删不掉坏文件"""
+    monkeypatch.setattr(store_mod, "embed_texts", lambda texts: None)
+    db = tmp_path / "rot.db"
+    _malform_db(db)
+    import sqlite3
+    with pytest.raises(sqlite3.DatabaseError):  # 先确认这库确实坏了
+        sqlite3.connect(str(db)).execute("SELECT count(*) FROM t").fetchone()
+
+    m = MemoryStore(db)  # 唯一连接 应自愈:删坏库重建
+    m.remember("自愈后还能记住这条")
+    out = m.recall_relevant("自愈后", k=3)
+    assert any("自愈" in c for c in out), "重建后该能正常写入/召回"
+    conn_ok = m._conn.execute("PRAGMA integrity_check").fetchone()[0]
+    m.close()
+    assert conn_ok == "ok", "重建出来的库该是健康的"
+
+
+def test_corrupt_docs_db_self_heals_on_construct(tmp_path, monkeypatch):
+    """文档知识库同样:磁盘上 docs.db 已损坏时 DocStore 构造该重建而不是崩"""
+    import desktop_pet.docs as docs_mod
+    fresh = tmp_path / "docs_rot.db"
+    _malform_db(fresh)
+    # 把模块级 _DB_PATH 指向坏文件;原模块单例连的是别的路径 不会挡这次 unlink
+    monkeypatch.setattr(docs_mod, "_DB_PATH", fresh)
+    monkeypatch.setattr(docs_mod, "embed_texts", lambda texts: None)
+
+    ds = docs_mod.DocStore()  # 唯一连接 应自愈
+    summary = ds.recall("随便查点啥")
+    ds.close()
+    assert "empty" in summary or "knowledge base" in summary, "重建后该是空库可正常查询"
