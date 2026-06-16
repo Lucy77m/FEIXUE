@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import os
+import time
 from pathlib import Path
 
 from desktop_pet.settings import DATA_DIR
@@ -159,13 +160,12 @@ def clean_temp(older_than_days: float = 7.0, cap_files: int = 5000) -> tuple[int
     return freed, count
 
 
-def recycle(paths: list[str]) -> str | None:
-    """整批送回收站 成功返回None 失败返回原因"""
+def _shfileop(items: str) -> str | None:
+    """单次回收 成功None 失败给技术原因"""
     try:
         from win32com.shell import shell, shellcon
     except ImportError as exc:
         return f"shell unavailable: {exc}"
-    items = "\0".join(str(Path(p).expanduser().resolve()) for p in paths)
     flags = (shellcon.FOF_ALLOWUNDO | shellcon.FOF_NOCONFIRMATION
              | shellcon.FOF_SILENT | shellcon.FOF_NOERRORUI)
     try:
@@ -173,5 +173,84 @@ def recycle(paths: list[str]) -> str | None:
     except Exception as exc:
         return str(exc)
     if rc != 0 or aborted:
-        return f"SHFileOperation rc={rc} aborted={aborted}"
+        # rc 多半是 0x7C(DE_INVALIDFILES) 或 0x20(共享冲突)——其实都是"里面有文件正被打开"
+        return f"SHFileOperation rc={rc} (0x{rc & 0xFFFFFFFF:X}) aborted={aborted}"
     return None
+
+
+def recycle(paths: list[str]) -> str | None:
+    """整批送回收站 成功返回None 失败返回原因"""
+    # pFrom 必须双 null 结尾 pywin32 只给 Python 串补一个 末尾再手动补一个
+    items = "\0".join(str(Path(p).expanduser().resolve()) for p in paths) + "\0"
+    err = _shfileop(items)
+    if err is not None and not err.startswith("shell unavailable"):
+        time.sleep(0.4)  # 可能只是瞬时锁(杀软扫描/资源管理器刚松手) 等一下再试一次
+        err = _shfileop(items)
+    return err
+
+
+def _is_locked(path: str) -> bool:
+    """独占方式打开 打不开说明被别的进程占着 出错保守当没锁"""
+    try:
+        import pywintypes
+        import win32con
+        import win32file
+    except ImportError:
+        return False
+    try:
+        handle = win32file.CreateFile(
+            path, win32con.GENERIC_READ, 0, None,  # share=0 不允许共享
+            win32con.OPEN_EXISTING, 0, None)
+        win32file.CloseHandle(handle)
+        return False
+    except pywintypes.error:
+        return True
+    except Exception:
+        return False
+
+
+def _lock_holder(path: str) -> str:
+    """尽力找出谁开着这个文件 找不到/没权限返回空串"""
+    try:
+        import psutil
+    except ImportError:
+        return ""
+    try:
+        target = os.path.normcase(os.path.abspath(path))
+    except OSError:
+        return ""
+    try:
+        for proc in psutil.process_iter(["name"]):
+            try:
+                for handle in proc.open_files():
+                    if os.path.normcase(handle.path) == target:
+                        return proc.info.get("name") or ""
+            except (psutil.AccessDenied, psutil.NoSuchProcess, OSError):
+                continue
+    except Exception:
+        return ""
+    return ""
+
+
+def diagnose_lock(paths: list[str], cap: int = 400) -> tuple[str, str]:
+    """投喂失败时找出第一个被占用的文件名和占用它的进程名 都找不到返回('', '')"""
+    files: list[str] = []
+    for raw in paths:
+        p = Path(raw).expanduser()
+        try:
+            if p.is_file():
+                files.append(str(p))
+            elif p.is_dir():
+                for root, _dirs, names in os.walk(p):
+                    for name in names:
+                        files.append(str(Path(root) / name))
+                    if len(files) >= cap:
+                        break
+        except OSError:
+            continue
+        if len(files) >= cap:
+            break
+    for f in files[:cap]:
+        if _is_locked(f):
+            return Path(f).name, _lock_holder(f)
+    return "", ""

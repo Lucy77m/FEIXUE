@@ -110,8 +110,13 @@ class FeedingCtrl(QObject):
         err = feeding.recycle(paths)
         if err:
             self._host._pet.react("droop")
-            self._host._feed_pop(i18n.t("feed_eat_fail"))
-            audit.reply(f"feed recycle failed: {err}")
+            name, who = feeding.diagnose_lock(paths)
+            if name:  # 揪出到底是哪个文件、被谁占着 别再甩含糊的"被占用"
+                msg = i18n.t("feed_eat_locked").format(name=name, who=who or i18n.t("feed_lock_unknown"))
+            else:
+                msg = i18n.t("feed_eat_fail")
+            self._host._feed_pop(msg)
+            audit.reply(f"feed recycle failed: {err} [locked={name!r} holder={who!r}]")
             return
         stats.add_eaten(total, len(paths))
         emotion.apply("fed")
