@@ -110,11 +110,13 @@ class FeedingCtrl(QObject):
         err = feeding.recycle(paths)
         if err:
             self._host._pet.react("droop")
-            name, who = feeding.diagnose_lock(paths)
-            if name:  # 揪出到底是哪个文件、被谁占着 别再甩含糊的"被占用"
-                msg = i18n.t("feed_eat_locked").format(name=name, who=who or i18n.t("feed_lock_unknown"))
+            name = who = ""
+            if err.startswith(("path not found", "no valid path")):
+                msg = i18n.t("feed_missing")  # 路径不对/没了 别说"占用"
             else:
-                msg = i18n.t("feed_eat_fail")
+                name, who = feeding.diagnose_lock(paths)
+                msg = (i18n.t("feed_eat_locked").format(name=name, who=who or i18n.t("feed_lock_unknown"))
+                       if name else i18n.t("feed_eat_fail"))  # 真锁住了才点名 谁都没锁才退回含糊
             self._host._feed_pop(msg)
             audit.reply(f"feed recycle failed: {err} [locked={name!r} holder={who!r}]")
             return

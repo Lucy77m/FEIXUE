@@ -178,14 +178,38 @@ def _shfileop(items: str) -> str | None:
     return None
 
 
+def _abs_clean(raw: str) -> str | None:
+    """规范出能交给 SHFileOperation 的绝对路径。
+    关键是先 strip——路径带首尾空白时 Path.resolve() 不把它当绝对路径，会拼上当前工作
+    目录变成一条垃圾路径(如 '...\\MOCHI\\ C:\\...\\Folder')，SHFileOperation 报 124 非法，
+    老代码把这个误当成"被占用"。绝对路径只做 normpath，不走 resolve(resolve 会跟符号链接、
+    还会对"看着不绝对"的路径拼 CWD)"""
+    s = (raw or "").strip()
+    if not s:
+        return None
+    try:
+        p = Path(s).expanduser()
+        return os.path.normpath(str(p)) if p.is_absolute() else os.path.abspath(str(p))
+    except (OSError, ValueError):
+        return None
+
+
 def recycle(paths: list[str]) -> str | None:
     """整批送回收站 成功返回None 失败返回原因"""
+    cleaned = [c for c in (_abs_clean(p) for p in paths) if c]
+    if not cleaned:
+        return "no valid path"
+    missing = [c for c in cleaned if not os.path.exists(c)]
+    if missing:  # 路径根本不在 别拿"占用"糊弄 直说找不到
+        return f"path not found: {missing[:2]}"
     # pFrom 必须双 null 结尾 pywin32 只给 Python 串补一个 末尾再手动补一个
-    items = "\0".join(str(Path(p).expanduser().resolve()) for p in paths) + "\0"
+    items = "\0".join(cleaned) + "\0"
     err = _shfileop(items)
     if err is not None and not err.startswith("shell unavailable"):
         time.sleep(0.4)  # 可能只是瞬时锁(杀软扫描/资源管理器刚松手) 等一下再试一次
         err = _shfileop(items)
+    if err is not None:  # 失败时把真实路径记进原因 下次直接看清
+        err += f" | paths={cleaned[:2]}"
     return err
 
 
