@@ -1059,6 +1059,12 @@ class ControlPanel(QDialog):
         self._reset_btn.setText(self._t("reset_done"))
         self._reset_btn.setEnabled(False)
         self._reset_armed = False
+        # 数据清了 但上面那些显示是开面板时建的 不刷就还显示旧记忆/日记/知识库
+        for refresh in (self._refresh_bond, self._refresh_docs, self._refresh_status):
+            try:
+                refresh()
+            except Exception:
+                pass
 
     def _switch(self, index: int) -> None:
         """切页 换栈高亮导航并刷对应页数据"""
