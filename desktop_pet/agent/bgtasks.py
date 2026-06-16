@@ -17,22 +17,31 @@ class _BgRegistry:
         self._seq = 0
 
     def register(self, task: str, cancel: threading.Event) -> int:
+        # started 先留空——任务可能还卡在并发信号量上排队 真正开跑才盖时间戳
+        # (登记要早于信号量 这样排队期间也能被 stop;但别把排队时间算进"已跑"显得虚高)
         with self._lock:
             self._seq += 1
             tid = self._seq
-            self._tasks[tid] = {"task": task, "started": datetime.now(), "cancel": cancel}
+            self._tasks[tid] = {"task": task, "started": None, "cancel": cancel}
             return tid
+
+    def mark_started(self, tid: int) -> None:
+        """抢到并发槽真正开跑时盖时间戳"""
+        with self._lock:
+            d = self._tasks.get(tid)
+            if d is not None:
+                d["started"] = datetime.now()
 
     def unregister(self, tid: int) -> None:
         with self._lock:
             self._tasks.pop(tid, None)
 
     def snapshot(self) -> list[tuple[int, str, float]]:
-        """返回任务快照 按id升序"""
+        """返回任务快照 按id升序——还在排队(未开跑)的已跑时长记 0"""
         with self._lock:
             now = datetime.now()
             return [
-                (tid, d["task"], (now - d["started"]).total_seconds())
+                (tid, d["task"], (now - d["started"]).total_seconds() if d["started"] else 0.0)
                 for tid, d in sorted(self._tasks.items())
             ]
 

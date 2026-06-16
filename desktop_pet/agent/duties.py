@@ -33,15 +33,27 @@ class DutiesMixin:
         on_perform: Callable[[str], bool] | None = None,
         on_control: Callable[[bool, str], None] | None = None,
     ) -> str:
-        """跑定时任务 跑完还原对话历史"""
-        snapshot = list(self._messages)
+        """跑定时任务 跑完还原对话历史——整套会话状态都要存还原 别让定时任务污染真实对话
+        run() 会就地改消息dict(降级旧图片)、清compressed摘要、动known_files/last_active/turn_idx
+        所以必须深拷贝 _messages(浅拷贝挡不住就地改dict)并连带快照其它会话字段(对齐 deliver_reminder 的 deepcopy)"""
+        snap_messages = copy.deepcopy(self._messages)
+        snap_compressed = self._compressed
+        snap_known = dict(self._known_files)
+        snap_last_active = self._last_active
+        snap_turn_idx = self._turn_user_idx
+        snap_plan = list(self._plan)
         try:
             return self.run(
                 prompts.timed_task_nudge(task), on_step=on_step, on_think=on_think,
                 on_plan=on_plan, on_media=on_media, on_perform=on_perform, on_control=on_control,
             )
         finally:
-            self._messages = snapshot
+            self._messages = snap_messages
+            self._compressed = snap_compressed
+            self._known_files = snap_known
+            self._last_active = snap_last_active
+            self._turn_user_idx = snap_turn_idx
+            self._plan = snap_plan
             if self._depth == 0:
                 self._save_session()
 

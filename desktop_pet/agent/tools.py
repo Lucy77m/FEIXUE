@@ -19,7 +19,7 @@ from desktop_pet.executor.shell import run_shell
 from desktop_pet.hands import keyboard, mouse, windows
 from desktop_pet.mcp_hub import mcp_hub
 from desktop_pet.memory.store import store
-from desktop_pet.reminders import reminders
+from desktop_pet.reminders import _STALE_GRACE_S, reminders
 from desktop_pet.settings import CAPTURE_FULLSCREEN
 from desktop_pet.skills import skills
 
@@ -678,6 +678,10 @@ def _schedule_reminder(message: str, fire_at: str | None, in_minutes: float | No
     if fire is None:
         return "(Couldn't parse the reminder time — give HH:MM or how many minutes from now.)"
     rep = _parse_repeat(repeat)
+    # 带日期的绝对时刻可能已经过去(模型把相对日期算错/给了昨天):非重复且过期超过宽限的 due() 会静默丢弃
+    # ——别回"设好了"骗用户。重复的不拦(due 会滚到下次)
+    if not rep and (datetime.now() - fire).total_seconds() > _STALE_GRACE_S:
+        return "(That time is already in the past — give a future time, or say how many minutes from now.)"
     reminders.add(fire, message, repeat=rep)
     return f"OK, at {fire.strftime('%H:%M')} I'll come tell you myself{_repeat_note(rep)}: {message}"
 

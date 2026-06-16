@@ -638,13 +638,18 @@ class Agent(HistoryMixin, ToolHandlersMixin, SubagentsMixin, DutiesMixin):
         try:
             stream = self._create_stream(params)
         except BadRequestError as exc:
-            # 非标参数400就逐个剥掉重试 错误消息点名的先剥 剥光还炸才抛
-            order = self._strip_order([
+            candidates = [
                 ("extra_body", "_strip_extra_body"),
                 ("temperature", "_strip_temperature"),
                 ("stream_options", "_strip_stream_options"),
                 ("prompt_cache_key", "_strip_cache_key"),
-            ], str(exc))
+            ]
+            # 错误消息一个非标参数都没点名 -> 这个 400 跟它们无关(上下文超长/内容策略/模型名错等)
+            # 别盲剥四个参数把整会话永久降级(降采样、丢用量统计、丢缓存路由) 直接抛出真错误让上层看见
+            if not any(key in str(exc).lower() for key, _flag in candidates):
+                raise
+            # 非标参数400就逐个剥掉重试 错误消息点名的先剥 剥光还炸才抛
+            order = self._strip_order(candidates, str(exc))
             last = exc
             stream = None
             for key, flag in order:

@@ -130,6 +130,7 @@ class SubagentsMixin:
             tid = bg_tasks.register(task, cancel)
             try:
                 with _BG_TASK_SEMAPHORE:
+                    bg_tasks.mark_started(tid)  # 抢到槽才真正开跑 排队那段不算进"已跑"
                     worker = Agent(settings, depth=depth + 1, cancel_event=cancel)
                     try:
                         result = worker.run(task)

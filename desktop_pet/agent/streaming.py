@@ -78,10 +78,12 @@ def reassemble(
     calls: dict[int, dict] = {}
     finish: str | None = None
     usage: dict | None = None
+    cancelled = False
     for chunk in stream:
         # 取消就先断流再break
         if should_cancel is not None and should_cancel():
             _safe_close(stream)
+            cancelled = True
             break
         found = _read_usage(chunk)
         if found is not None:
@@ -112,6 +114,10 @@ def reassemble(
                 slot["name"] = call.function.name
             if call.function and call.function.arguments:
                 slot["args"].append(call.function.arguments)
+    if cancelled:
+        # 中途取消断流:攒到一半的 tool_calls 其 arguments 多半是截断的非法JSON('{"command": "git pu')
+        # 一旦拼进消息就会被 append 进历史、落盘、下次启动重放给 API。直接丢掉 只回已收到的文本
+        return StreamMessage("".join(content) or None, None, finish or "cancelled", usage)
     seen: set[str] = set()
     tool_calls: list[StreamToolCall] = []
     for i in sorted(calls):
