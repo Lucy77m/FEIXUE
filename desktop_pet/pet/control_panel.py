@@ -7,6 +7,8 @@ from __future__ import annotations
 import threading
 from collections.abc import Callable
 
+from desktop_pet.audit import audit
+
 from PySide6.QtCore import QEasingCurve, QPoint, QPropertyAnimation, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QKeySequence, QMouseEvent
 from PySide6.QtWidgets import (
@@ -190,6 +192,7 @@ class ControlPanel(QDialog):
     _update_checked = Signal(object)
     _gui_model_done = Signal(str)
     _gui_progress = Signal(int)
+    _docs_changed = Signal()  # 后台入库线程干完 回主线程刷文档列表(替代定死的 3.5s 延时)
 
     def __init__(self, settings: Settings, on_reset: Callable[[], None] | None = None,
                  on_apply: Callable[[], None] | None = None,
@@ -216,6 +219,8 @@ class ControlPanel(QDialog):
         self._on_set_language = on_set_language
         self._hotkey_status_provider = hotkey_status_provider
         self._drag_offset = QPoint()
+        self._docs_changed.connect(self._refresh_docs)
+        self.finished.connect(self._stop_polling)  # 关面板停掉轮询定时器 别让隐藏的死面板还在后台每 0.6/1.5s 查库
         self._lang = settings.ui_language if settings.ui_language in UI_LANGUAGES else "中文"
         self.setWindowTitle(self._t("panel_title"))
         self.setWindowIcon(mochi_icon())
@@ -724,6 +729,17 @@ class ControlPanel(QDialog):
             h.addWidget(dele)
             self._docs_box.addWidget(row)
 
+    def _stop_polling(self, *_args) -> None:
+        """关面板时停掉状态/听写下载轮询定时器——否则隐藏的死面板会一直在主线程查库到 GC 才停"""
+        for tname in ("_status_timer", "_hear_dl_timer"):
+            timer = getattr(self, tname, None)
+            if timer is not None:
+                timer.stop()
+
+    def closeEvent(self, event) -> None:
+        self._stop_polling()  # X 关闭走 closeEvent 不一定触发 finished 这里也兜一道
+        super().closeEvent(event)
+
     def _del_doc(self, source: str, btn: QPushButton) -> None:
         """删知识库点两下 第一下armed第二下真删"""
         if not btn.property("armed"):
@@ -734,8 +750,11 @@ class ControlPanel(QDialog):
             return
         try:
             docs.forget_exact(source)
-        except Exception:
-            pass
+        except Exception as exc:
+            # 别像重置那个 bug 一样静默吞掉:留痕 + 按钮显失败 + 不刷新(行还在 用户看得见没删掉)
+            audit.system("docs forget_exact failed", source=source, error=repr(exc))
+            btn.setText(self._t("docs_del_fail"))
+            return
         self._refresh_docs()
 
     def _add_docs(self) -> None:
@@ -749,13 +768,13 @@ class ControlPanel(QDialog):
             for p in paths:
                 try:
                     docs.ingest(p)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    audit.system("panel docs ingest failed", path=p, error=repr(exc))
+            self._docs_changed.emit()  # 真入完库才刷(嵌入是几十秒的网络慢活 定死 3.5s 会刷出陈旧/缺项列表)
         try:
             threading.Thread(target=work, daemon=True, name="panel-ingest").start()
         except RuntimeError:
             return
-        QTimer.singleShot(3500, self._refresh_docs)  # 后台入库 延时后再刷列表
 
     def _build_connect_page(self) -> QWidget:
         page, body = self._scroll_page(self._t("hint_connect"))
