@@ -157,8 +157,9 @@ class Agent(HistoryMixin, ToolHandlersMixin, SubagentsMixin, DutiesMixin):
         for wipe in (store.wipe, journal.clear, persona.clear, docs.forget):
             try:
                 wipe()
-            except Exception:
-                pass
+            except Exception as exc:
+                # 别再静默吞——某步清不掉(如库损坏)要留痕 否则像重置没生效
+                audit.system("forget_all step failed", step=getattr(wipe, "__name__", str(wipe)), error=repr(exc))
         self._reset_compressed()
         self._known_files.clear()
         self._clear_session_file()

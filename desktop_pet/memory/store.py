@@ -73,6 +73,7 @@ class MemoryStore:
     def __init__(self, db_path: Path | None = None) -> None:
         path = db_path or _DB_PATH
         path.parent.mkdir(parents=True, exist_ok=True)
+        self._path = path
         self._lock = threading.RLock()
         # 连接跨线程共享 靠rlock串行
         self._conn = sqlite3.connect(path, check_same_thread=False)
@@ -221,9 +222,30 @@ class MemoryStore:
 
     def wipe(self) -> None:
         with self._lock:
-            for table in ("profile", "experiences", "env", "opinions"):
-                self._conn.execute(f"DELETE FROM {table}")
-            self._conn.commit()
+            try:
+                for table in ("profile", "experiences", "env", "opinions"):
+                    self._conn.execute(f"DELETE FROM {table}")
+                self._conn.commit()
+            except sqlite3.DatabaseError:
+                # 库损坏(异常退出常留下)时 DELETE 走不通——整个重建 保证重置一定清干净
+                self._rebuild()
+
+    def _rebuild(self) -> None:
+        """删掉损坏的库文件 重连建空表 让重置在库坏掉时也一定生效"""
+        try:
+            self._conn.close()
+        except Exception:
+            pass
+        for suffix in ("", "-wal", "-shm"):  # 连 WAL/SHM 一起清
+            try:
+                Path(str(self._path) + suffix).unlink()
+            except OSError:
+                pass
+        self._conn = sqlite3.connect(self._path, check_same_thread=False)
+        self._create_schema()
+        self._migrate_columns()
+        self._fts = False
+        self._setup_fts()
 
     _OPINION_KEEP = 14
 
