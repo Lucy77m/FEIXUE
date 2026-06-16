@@ -85,9 +85,9 @@ class Rituals(QObject):
             QTimer.singleShot(2600, lambda: self._host._pet.set_cake(False))
 
     def farewell(self) -> bool:
-        """退出前挥手道晚安 播了告别返回真"""
+        """退出前挥手告别 播了告别返回真。只有夜里才道晚安 白天说回头见"""
         if self._host._entered and self._host._pet.isVisible() and not getattr(self, "_farewell_done", False):
-            # 走之前挥个手说晚安 再真正退
+            # 走之前挥个手再真正退
             self._farewell_done = True
             self._host._feed_react("wave")
             line = ""
@@ -99,7 +99,10 @@ class Rituals(QObject):
                         break
             except Exception:
                 pass
-            self._host._feed_pop(i18n.t("bye_with_note").format(note=line) if line else i18n.t("bye_plain"))
+            hour = datetime.now().hour
+            prefix = "bye" if (hour >= 21 or hour < 5) else "byeday"  # 深夜才晚安
+            self._host._feed_pop(
+                i18n.t(f"{prefix}_with_note").format(note=line) if line else i18n.t(f"{prefix}_plain"))
             QTimer.singleShot(1700, self._host._do_quit)
             return True
         return False
