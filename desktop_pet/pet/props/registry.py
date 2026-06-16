@@ -89,12 +89,21 @@ COSTUMES = frozenset(COSTUME_LAYERS)
 WORN_COSTUMES = frozenset(name for name, (worn, _ambient) in COSTUME_LAYERS.items() if worn)
 
 # 举着东西的道具：在底部握点画只圆小手 防止东西浮空。(gx, gy) 是 bw/bh 系数
-# 只登记"该有只手攥着"的；寿司/茶杯(有筷子/碟)和穿戴类不在此列
+# 只登记"该有只手攥着、且当前没画手"的。不在此列的：
+#   寿司(筷子)/茶(碟)/积木(摞地上)/陀螺·套圈·纸船·存钱罐(放着的)/数羊·飞盘·飞镖(飞走的)
+#   咖啡/看书/钓鱼/望远镜(画法里已自带 SKIN 手) · 耳机/侦探/吉他/相机/口琴/钢琴/画架(穿戴或贴脸双手姿势)
 GRIP = {
+    # 食物
     "icecream": (0.30, 0.32), "bubbletea": (0.30, 0.25), "tanghulu": (0.16, 0.29),
     "lollipop": (0.255, 0.25), "popcorn": (0.30, 0.27), "donut": (0.30, 0.16),
     "soda": (0.30, 0.25), "popsicle": (0.30, 0.30), "cottoncandy": (0.30, 0.27),
     "burger": (0.30, 0.17), "noodles": (0.28, 0.28), "marshmallow": (0.40, 0.10),
     "sweetpotato": (0.22, 0.11), "cupcake": (0.30, 0.25), "pizza": (0.28, 0.24),
     "watermelon": (0.28, 0.27), "corn": (0.20, 0.23),
+    # 玩具(balloon/kite/yoyo/lantern 代码里已定握点 在那儿补手；其余举把柄/底座)
+    "balloon": (0.22, 0.20), "kite": (0.20, 0.12), "yoyo": (0.28, 0.04),
+    "lantern": (0.18, 0.06), "pinwheel": (0.31, 0.28), "rubik": (0.30, 0.13),
+    "cards": (0.30, 0.14), "snowglobe": (0.30, 0.21), "crane": (0.30, 0.13),
+    # 手作(只取举着的：手机/蒲公英/捧花；浇花·书法等手位偏头 暂不加)
+    "phone": (0.30, 0.16), "dandelion": (0.26, 0.28), "bouquet": (0.30, 0.27),
 }
