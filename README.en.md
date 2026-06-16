@@ -68,7 +68,7 @@ Mochi acts on your machine with **the same privileges you have** — running arb
 | **See Screen & Control** | Screenshots, OCR (RapidOCR), on-screen image matching, reading the accessibility tree to click controls precisely, mouse & keyboard; plus **watching your screen on the interval you set** (e.g. keep an eye on your game and warn you of danger/openings) |
 | **System Insight** | Inspect memory usage and the most memory-hungry processes; on request, read a process's memory bytes (debugging / forensics, read-only, only when asked) |
 | **Memory** | Long-term memory (experience / preferences / environment) + episodic journal + knowledge base (document RAG), automatically reflecting and consolidating after every conversation |
-| **Skills** | Save proven approaches as reusable skills and call them directly next time (Voyager-style "stronger the more it's used") |
+| **Skills** | **Reusable skill library**: save working approaches as skills (persisted + syntax-checked), call them directly next time with `run_skill`, self-debug (edit & re-run) on error. A hand-curated reuse library, not autonomous self-improvement |
 | **Orchestration & Extensions** | MCP connectors, deterministic sub-agent orchestration (**fan out in parallel** / chain into a **pipeline**, with structured returns), long tasks offloaded to the background (listable, stoppable anytime) |
 | **Confirmation Guardrails** | Pops an "execute / don't execute" panel before irreversible / high-risk operations — it only proceeds once you click |
 | **Scheduling** | Timed reminders / scheduled tasks, with **daily · weekly · every-X** recurrence; falls back to a **system tray notification** when hidden or behind a fullscreen game so nothing is missed |
