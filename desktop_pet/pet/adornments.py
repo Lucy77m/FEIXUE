@@ -25,6 +25,14 @@ def _hand_pen(bw: float) -> QPen:
     return pen
 
 
+def hold_hand(painter: QPainter, bw: float, bh: float, gx: float, gy: float, t: float, r: float = 0.088) -> None:
+    """一只圆圆的小手攥住道具——画在道具底部握点 别让举着的东西浮空。gx/gy 是 bw/bh 系数"""
+    bob = math.sin(t * 1.6 + gx * 3.0) * bh * 0.006
+    painter.setPen(_hand_pen(bw))
+    painter.setBrush(_SKIN)
+    painter.drawEllipse(QPointF(gx * bw, gy * bh + bob), bw * r, bw * r * 0.92)
+
+
 def draw_blush(painter: QPainter, bw: float, bh: float, k: float) -> None:
     """脸颊两团红晕"""
     if k <= 0.01:

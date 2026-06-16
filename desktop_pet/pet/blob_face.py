@@ -17,7 +17,7 @@ from PySide6.QtGui import (
 )
 
 from desktop_pet.pet import adornments
-from desktop_pet.pet.props.registry import COSTUME_LAYERS
+from desktop_pet.pet.props.registry import COSTUME_LAYERS, GRIP
 from desktop_pet.pet.behaviors.easing import ease_out
 from desktop_pet.pet.blob_defs import (
     _BLINK_DUR,
@@ -277,7 +277,9 @@ class FaceMixin:
         layers = COSTUME_LAYERS.get(self._costume)
         if layers and layers[0]:
             layers[0](painter, bw, bh, self._t, self._stage, self._stage_p)
-
+            grip = GRIP.get(self._costume)
+            if grip:  # 举着东西的 在握点补只小手
+                adornments.hold_hand(painter, bw, bh, grip[0], grip[1], self._t)
 
     def _draw_costume_ambient(
         self, painter: QPainter, cx: float, head_y: float, bw: float, bh: float
@@ -288,6 +290,9 @@ class FaceMixin:
         painter.save()
         painter.translate(cx, head_y)
         layers[1](painter, bw, bh, self._t, self._stage, self._stage_p)
+        grip = GRIP.get(self._costume)
+        if grip:  # 与道具同一坐标系 在握点补只小手
+            adornments.hold_hand(painter, bw, bh, grip[0], grip[1], self._t)
         painter.restore()
 
     def _draw_question(self, painter: QPainter, cx: float, cy: float, bw: float, bh: float) -> None:

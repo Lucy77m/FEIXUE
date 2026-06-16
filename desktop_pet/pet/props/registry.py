@@ -87,3 +87,14 @@ COSTUME_LAYERS = {
 }
 COSTUMES = frozenset(COSTUME_LAYERS)
 WORN_COSTUMES = frozenset(name for name, (worn, _ambient) in COSTUME_LAYERS.items() if worn)
+
+# 举着东西的道具：在底部握点画只圆小手 防止东西浮空。(gx, gy) 是 bw/bh 系数
+# 只登记"该有只手攥着"的；寿司/茶杯(有筷子/碟)和穿戴类不在此列
+GRIP = {
+    "icecream": (0.30, 0.32), "bubbletea": (0.30, 0.25), "tanghulu": (0.16, 0.29),
+    "lollipop": (0.255, 0.25), "popcorn": (0.30, 0.27), "donut": (0.30, 0.16),
+    "soda": (0.30, 0.25), "popsicle": (0.30, 0.30), "cottoncandy": (0.30, 0.27),
+    "burger": (0.30, 0.17), "noodles": (0.28, 0.28), "marshmallow": (0.40, 0.10),
+    "sweetpotato": (0.22, 0.11), "cupcake": (0.30, 0.25), "pizza": (0.28, 0.24),
+    "watermelon": (0.28, 0.27), "corn": (0.20, 0.23),
+}
