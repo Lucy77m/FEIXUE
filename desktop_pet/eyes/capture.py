@@ -43,7 +43,18 @@ class _MONITORINFO(ctypes.Structure):
     ]
 
 
-_geom: tuple[int, int, int, int] = (0, 0, _SM(0) or 1, _SM(1) or 1)
+# 截图用的监视器矩形:做线程本地——每个 agent(前台 worker、后台 daemon、并行子agent)各跑在自己的线程上
+# 它们的"截图->点击"坐标变换必须用各自这次截的监视器 geom;共享一个全局会被另一个 agent 的截图改掉 导致点错位置/点到别的屏
+_geom_default: tuple[int, int, int, int] = (0, 0, _SM(0) or 1, _SM(1) or 1)
+_geom_tls = threading.local()
+
+
+def _get_geom() -> tuple[int, int, int, int]:
+    return getattr(_geom_tls, "value", _geom_default)
+
+
+def _put_geom(geom: tuple[int, int, int, int]) -> None:
+    _geom_tls.value = geom
 
 try:
     _set_affinity_fn = _user32.SetWindowDisplayAffinity
@@ -116,19 +127,17 @@ def _active_monitor_rect() -> tuple[int, int, int, int]:
 
 
 def set_geom_for_point(x: int, y: int) -> None:
-    global _geom
     rect = _monitor_rect_at(x, y)
     if rect is not None:
-        _geom = rect
+        _put_geom(rect)
 
 
 def current_geom() -> tuple[int, int, int, int]:
-    return _geom
+    return _get_geom()
 
 
 def set_geom(geom: tuple[int, int, int, int]) -> None:
-    global _geom
-    _geom = geom
+    _put_geom(geom)
 
 
 def _scale(w: int, h: int) -> float:
@@ -139,14 +148,14 @@ def _scale(w: int, h: int) -> float:
 
 def image_to_screen(ix: float, iy: float, geom: tuple[int, int, int, int] | None = None) -> tuple[int, int]:
     """图像坐标转屏幕坐标"""
-    ox, oy, ow, oh = geom if geom is not None else _geom
+    ox, oy, ow, oh = geom if geom is not None else _get_geom()
     s = _scale(ow, oh) or 1.0  # 防除零
     return int(round(ox + ix / s)), int(round(oy + iy / s))
 
 
 def screen_to_image(ax: float, ay: float, geom: tuple[int, int, int, int] | None = None) -> tuple[int, int]:
     """屏幕坐标转图像坐标"""
-    ox, oy, ow, oh = geom if geom is not None else _geom
+    ox, oy, ow, oh = geom if geom is not None else _get_geom()
     s = _scale(ow, oh)
     return int(round((ax - ox) * s)), int(round((ay - oy) * s))
 
@@ -200,9 +209,8 @@ def grab_active_geom() -> tuple[Image.Image, tuple[int, int, int, int]]:
     """抓活动显示器整屏带geom"""
     import mss  # 延迟导入
 
-    global _geom
     geom = _active_monitor_rect()
-    _geom = geom
+    _put_geom(geom)  # 记到本线程 让随后本线程的点击坐标按这块屏换算
     ox, oy, ow, oh = geom
     with mss.mss() as sct:
         raw = sct.grab({"left": ox, "top": oy, "width": ow, "height": oh})
@@ -228,7 +236,7 @@ def _grab(include_self: bool) -> Image.Image:
 
 def _mask_to_active_window(image: Image.Image) -> tuple[Image.Image, str | None]:
     """活动窗口外整屏涂黑"""
-    ox, oy, _ow, _oh = _geom
+    ox, oy, _ow, _oh = _get_geom()
     box = _active_window_box(ox, oy, image.width, image.height)
     if box is None:
         return image, None

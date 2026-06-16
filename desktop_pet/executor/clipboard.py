@@ -29,6 +29,49 @@ def read_clipboard() -> str:
     return text if text else "(剪贴板里不是文本、是空的，或读取失败——可能是图片或其它格式)"
 
 
+def snapshot_clipboard() -> dict | None:
+    """快照剪贴板上可可靠回写的格式(文本 + 位图 DIB)。
+    type_text 借剪贴板粘贴 CJK 前后用——之前只存 CF_UNICODETEXT 文本 用户复制的【图片】会被
+    EmptyClipboard 永久销毁且不还原。返回 {} 表示空剪贴板 None 表示读失败"""
+    try:
+        import win32clipboard
+        import win32con
+        win32clipboard.OpenClipboard()
+        try:
+            snap: dict = {}
+            for fmt in (win32con.CF_UNICODETEXT, win32con.CF_DIB):
+                if win32clipboard.IsClipboardFormatAvailable(fmt):
+                    try:
+                        snap[fmt] = win32clipboard.GetClipboardData(fmt)
+                    except Exception:
+                        pass  # 取不出来的格式跳过 至少别假装存到了
+            return snap
+        finally:
+            win32clipboard.CloseClipboard()
+    except Exception:
+        return None
+
+
+def restore_clipboard(snap: dict | None) -> None:
+    """把 snapshot_clipboard 存下的格式写回剪贴板"""
+    if not snap:
+        return
+    try:
+        import win32clipboard
+        win32clipboard.OpenClipboard()
+        try:
+            win32clipboard.EmptyClipboard()
+            for fmt, val in snap.items():
+                try:
+                    win32clipboard.SetClipboardData(fmt, val)
+                except Exception:
+                    pass
+        finally:
+            win32clipboard.CloseClipboard()
+    except Exception:
+        pass
+
+
 def write_clipboard(text: str) -> str:
     """写文本进剪贴板"""
     try:

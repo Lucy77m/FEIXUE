@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import threading
 import time
 from collections import Counter
 
@@ -11,15 +12,22 @@ from PIL import Image, ImageDraw, ImageFont
 
 from desktop_pet.eyes import capture, detect, uia
 
-_LAST: list[dict] = []
+# 元素编号表 + 缩略图缓存做线程本地:并行子agent/后台daemon 各自截图标注
+# 共享一个全局会让 act_element(编号) 解析到【另一个 agent 的】元素列表 -> 点错控件/点到别的窗口
+_tls = threading.local()
 _COLORS = {"uia": (80, 230, 140), "ocr": (90, 190, 255), "icon": (255, 180, 70)}
 _LABEL_INK = (16, 16, 22)
 
 # 缩略图当指纹 屏幕没变复用上次编号结果
 _CACHE_TTL_S = 2.0
-_cache_fp: bytes = b""
-_cache_ts: float = 0.0
-_cache_result: "tuple[bytes, str] | None" = None
+
+
+def _last() -> list[dict]:
+    v = getattr(_tls, "last", None)
+    if v is None:
+        v = []
+        _tls.last = v
+    return v
 
 # 点完截图比对验证生效的阈值
 _VERIFY_SETTLE_S = 0.35
@@ -144,9 +152,9 @@ def screen_elements(region: str = "") -> tuple[bytes, str]:
 
     # region拼进指纹
     fp = region.encode("utf-8") + _fingerprint(img)
-    global _cache_fp, _cache_ts, _cache_result
-    if fp == _cache_fp and _cache_result is not None and time.monotonic() - _cache_ts < _CACHE_TTL_S:
-        return _cache_result
+    cached = getattr(_tls, "cache", None)  # (fp, ts, result)
+    if cached is not None and cached[0] == fp and time.monotonic() - cached[1] < _CACHE_TTL_S:
+        return cached[2]
     from desktop_pet.hands import ghost
 
     top_hwnd = ghost.foreground_hwnd()  # ocr和图标元素统一挂前台hwnd
@@ -194,7 +202,7 @@ def screen_elements(region: str = "") -> tuple[bytes, str]:
         })
         idx += 1
 
-    _LAST[:] = elements
+    _last()[:] = elements
     annotated = _annotate(img, elements, ox, oy)
     jpeg, _w, _h = capture._encode(annotated)
 
@@ -203,8 +211,9 @@ def screen_elements(region: str = "") -> tuple[bytes, str]:
         msg = "(no actionable elements detected — try a screenshot, or this may be a custom-drawn / game surface"
         if not detector_on:
             msg += "; the visual element detector is OFF — turning on 'GUI enhancement' in Control Panel > About lets me find clickable spots on custom-drawn / game / Qt windows"
-        _cache_fp, _cache_ts, _cache_result = fp, time.monotonic(), (jpeg, msg + ")")
-        return _cache_result
+        result = (jpeg, msg + ")")
+        _tls.cache = (fp, time.monotonic(), result)
+        return result
     _tags = {"uia": "·ctrl", "ocr": "·text", "icon": "·icon"}
     # 统计重名好标出来
     name_counts = Counter(el["name"].strip() for el in elements if el["name"].strip())
@@ -228,15 +237,16 @@ def screen_elements(region: str = "") -> tuple[bytes, str]:
     if not detector_on and not any(e.get("source") == "uia" for e in elements):
         text += ("\n(only text/OCR detected here — the visual element detector is OFF; on custom-drawn "
                  "windows, enabling 'GUI enhancement' in Control Panel > About would let me see icon buttons too)")
-    _cache_fp, _cache_ts, _cache_result = fp, time.monotonic(), (jpeg, text)
-    return _cache_result
+    result = (jpeg, text)
+    _tls.cache = (fp, time.monotonic(), result)
+    return result
 
 
 def act_element(index: int, action: str = "click", text: str = "", mode: str = "auto") -> str:
     """按编号对元素执行操作"""
     from desktop_pet.hands import ghost, keyboard, mouse
 
-    el = next((e for e in _LAST if e["idx"] == index), None)
+    el = next((e for e in _last() if e["idx"] == index), None)
     if el is None:
         return f"(no element numbered {index}; call screen_elements again to refresh the numbers)"
     name = el["name"][:30] or el["kind"]
