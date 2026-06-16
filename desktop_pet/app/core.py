@@ -328,6 +328,8 @@ class PetApp(QuickActionsMixin, VoiceMixin, AgentBridgeMixin,
         return dict(self._hotkey_status)
 
     def run(self) -> int:
+        from desktop_pet.settings import sweep_stale_tmp
+        sweep_stale_tmp()  # 清掉上次硬退/崩溃在 write→replace 间留下的孤儿 .tmp 别长期累积
         stats.mark_first_seen()
         hearing.set_enabled(self._settings.hear_enabled)
         hearing.set_wake_enabled(self._settings.hear_enabled and self._settings.wake_enabled)

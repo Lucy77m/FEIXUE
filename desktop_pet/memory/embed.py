@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import math
+import threading
 import time
 from array import array
 
@@ -14,6 +15,7 @@ from desktop_pet.settings import Settings, build_http_client
 
 _client: OpenAI | None = None
 _client_key: tuple[str, str, str] | None = None
+_client_lock = threading.Lock()  # 序列化 client 首建/重建——多线程(worker/反思/合并/入库daemon)并发首调时防重复造 client 漏掉 httpx 连接池
 _disabled_until = 0.0
 _DISABLE_COOLDOWN_S = 300.0  # 嵌入出错冷却5分钟
 
@@ -27,21 +29,22 @@ def _get_client(settings: Settings) -> OpenAI | None:
     if not settings.api_key:
         return None
     key = (settings.api_key, settings.base_url, settings.proxy)
-    if _client is None or _client_key != key:
-        if _client is not None:  # 配置变了 先关掉旧 client 的 httpx 连接池 别漏 socket/句柄
-            try:
-                _client.close()
-            except Exception:
-                pass
-        _client = OpenAI(
-            api_key=settings.api_key,
-            base_url=settings.base_url,
-            timeout=_EMBED_TIMEOUT,
-            max_retries=_EMBED_RETRIES,
-            http_client=build_http_client(settings.proxy),
-        )
-        _client_key = key
-    return _client
+    with _client_lock:  # 加锁:两个线程同时见 _client is None 各造一个 后者覆盖前者会漏掉前者的 httpx client
+        if _client is None or _client_key != key:
+            if _client is not None:  # 配置变了 先关掉旧 client 的 httpx 连接池 别漏 socket/句柄
+                try:
+                    _client.close()
+                except Exception:
+                    pass
+            _client = OpenAI(
+                api_key=settings.api_key,
+                base_url=settings.base_url,
+                timeout=_EMBED_TIMEOUT,
+                max_retries=_EMBED_RETRIES,
+                http_client=build_http_client(settings.proxy),
+            )
+            _client_key = key
+        return _client
 
 
 def embed_texts(texts: list[str]) -> list[list[float]] | None:
@@ -88,7 +91,7 @@ def cosine_batch(query_vec: list[float], blobs: list[bytes | None]) -> list[floa
         sims = [0.0] * n
         idxs, vecs = [], []
         for i, b in enumerate(blobs):
-            if not b:
+            if not b or len(b) % 4:  # 空或截断(长度非4倍数)的blob跳过 别让np.frombuffer抛
                 continue
             v = np.frombuffer(b, dtype=np.float32)
             if v.shape[0] == dim:
@@ -117,7 +120,7 @@ def rank_by_cosine(query_vec: list[float], blobs: list[bytes | None], k: int) ->
     try:
         import numpy as np  # 有numpy走矩阵 没装退逐条cosine
 
-        rows = [(i, np.frombuffer(b, dtype=np.float32)) for i, b in enumerate(blobs) if b]
+        rows = [(i, np.frombuffer(b, dtype=np.float32)) for i, b in enumerate(blobs) if b and not len(b) % 4]
         rows = [(i, v) for i, v in rows if v.shape[0] == dim]  # 维度不符的剔掉
         if not rows:
             return []
@@ -148,8 +151,9 @@ def pack(vector: list[float]) -> bytes:
 
 
 def unpack(blob: bytes | None) -> list[float] | None:
-    """bytes还原成向量"""
-    if not blob:
+    """bytes还原成向量 长度不是4的倍数(截断/字节级损坏)当None跳过
+    别让一条坏blob抛 ValueError 崩掉召回/去重/聚类/反思整条链"""
+    if not blob or len(blob) % 4:
         return None
     vector = array("f")
     vector.frombytes(blob)

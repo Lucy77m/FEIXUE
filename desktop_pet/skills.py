@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -32,6 +33,9 @@ class SkillStore:
     """AI 自创代码仓库 每个技能一个 py 文件 元信息进注册表"""
 
     def __init__(self) -> None:
+        # 并行子智能体(fanout 最多4个)共享这一个 skills 单例 没锁会:json.dumps 迭代 registry 时
+        # 另一线程插键 -> RuntimeError dictionary changed size during iteration;两次写 registry.json 互覆盖
+        self._lock = threading.RLock()
         self._registry: dict = _read_registry()
 
     def create(self, name: str, code: str, desc: str, params: str = "") -> str:
@@ -44,56 +48,62 @@ class SkillStore:
         except SyntaxError as exc:
             return (f"Skill NOT saved — the code has a syntax error: {exc}. "
                     "Fix it, and run it once via run_python to confirm it actually works, then save.")
-        verb = "Updated" if name in self._registry else "Created"
-        self._write_code(name, code)
-        self._registry[name] = {
-            "desc": desc,
-            "params": params,
-            "updated": datetime.now().isoformat(timespec="seconds"),
-        }
-        self._save_registry()
+        with self._lock:
+            verb = "Updated" if name in self._registry else "Created"
+            self._write_code(name, code)
+            self._registry[name] = {
+                "desc": desc,
+                "params": params,
+                "updated": datetime.now().isoformat(timespec="seconds"),
+            }
+            self._save_registry()
         return f"{verb} skill \"{name}\": {desc}"
 
     def edit(self, name: str, code: str) -> str:
         """只改已有技能的代码 不碰元信息"""
-        if name not in self._registry:
-            return f"No skill named \"{name}\"; create it first with create_skill."
         try:
             compile(code, f"<skill {name}>", "exec")
         except SyntaxError as exc:
             return f"Not saved — syntax error: {exc}. Fix it and try again."
-        self._write_code(name, code)
-        self._registry[name]["updated"] = datetime.now().isoformat(timespec="seconds")
-        self._save_registry()
+        with self._lock:
+            if name not in self._registry:
+                return f"No skill named \"{name}\"; create it first with create_skill."
+            self._write_code(name, code)
+            self._registry[name]["updated"] = datetime.now().isoformat(timespec="seconds")
+            self._save_registry()
         return f"Updated the code of skill \"{name}\"."
 
     def code(self, name: str) -> str | None:
         """取技能源码 没有就回 None"""
-        if name not in self._registry:
-            return None
-        path = self._path(name)
+        with self._lock:
+            if name not in self._registry:
+                return None
+            path = self._path(name)
         return path.read_text(encoding="utf-8") if path.exists() else None
 
     def count(self) -> int:
-        return len(self._registry)
+        with self._lock:
+            return len(self._registry)
 
     def listing(self) -> str:
-        if not self._registry:
-            return "(no skills yet)"
-        return "\n".join(
-            f"- {name}({meta.get('params', '')}): {meta.get('desc', '')}"
-            for name, meta in self._registry.items()
-        )
+        with self._lock:
+            if not self._registry:
+                return "(no skills yet)"
+            return "\n".join(
+                f"- {name}({meta.get('params', '')}): {meta.get('desc', '')}"
+                for name, meta in self._registry.items()
+            )
 
     def as_context(self) -> str:
         """拼给系统提示的技能清单"""
-        if not self._registry:
-            return ""
-        lines = ["[Skills you already have (call directly with run_skill; don't rewrite them)]"]
-        lines += [
-            f"- {name}({meta.get('params', '')}): {meta.get('desc', '')}"
-            for name, meta in self._registry.items()
-        ]
+        with self._lock:
+            if not self._registry:
+                return ""
+            lines = ["[Skills you already have (call directly with run_skill; don't rewrite them)]"]
+            lines += [
+                f"- {name}({meta.get('params', '')}): {meta.get('desc', '')}"
+                for name, meta in self._registry.items()
+            ]
         return "\n".join(lines)
 
     def _path(self, name: str) -> Path:

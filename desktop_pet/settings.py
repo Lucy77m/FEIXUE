@@ -28,6 +28,28 @@ def atomic_write_text(path: Path, text: str) -> None:
         raise
 
 
+def sweep_stale_tmp(directory: Path | None = None, max_age_s: float = 300.0) -> None:
+    """清掉 atomic_write_text 留下的孤儿临时文件。
+    进程在 write_text 和 os.replace 之间被硬杀(退出走 os._exit、或崩溃)时 那个唯一命名的
+    .{name}.{uuid}.tmp 不会被 except 清理 长期累积。启动扫一遍删够旧的(还在写的新 tmp 不碰)"""
+    import time
+    base = directory if directory is not None else DATA_DIR
+    try:
+        now = time.time()
+        targets = list(base.glob(".*.tmp"))
+        skills_dir = base / "skills"
+        if skills_dir.is_dir():
+            targets += list(skills_dir.glob(".*.tmp"))
+        for tmp in targets:
+            try:
+                if now - tmp.stat().st_mtime >= max_age_s:
+                    tmp.unlink()
+            except OSError:
+                pass
+    except OSError:
+        pass
+
+
 def delete_db_files(path: Path) -> None:
     """删一个 sqlite 库文件连同它的 -wal/-shm——重建损坏库前用。
     sqlite 连接 close 后 Windows 释放句柄有延迟 unlink 会撞 WinError 32 被占用 故带退避重试"""

@@ -224,25 +224,49 @@ class DocStore:
         tail = f", {skipped} file(s) skipped (too big / unreadable / over cap)" if skipped else ""
         return f"Ingested {done_files} file(s), {total_chunks} chunks into the knowledge base{tail}."
 
+    def _drop_source(self, source: str) -> None:
+        """清掉某来源的旧块——之前入过库的文件现在读不出/超大了 别让 recall 继续供陈旧内容"""
+        with self._lock:
+            self._conn.execute("DELETE FROM chunks WHERE source = ?", (source,))
+            self._conn.commit()
+
+    def _source_has_embeddings(self, source: str) -> bool:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT 1 FROM chunks WHERE source = ? AND embedding IS NOT NULL LIMIT 1", (source,)
+            ).fetchone()
+        return row is not None
+
     def _ingest_file(self, file: Path, budget: int) -> int:
         """单文件入库返回chunk数 读不出返回负数"""
+        source = str(file)
         text = _read_pdf(file) if file.suffix.lower() == ".pdf" else _read_text(file)
         if text is None or len(text) > _MAX_FILE:
+            self._drop_source(source)  # 同名文件曾入库 现在读不出/超大 清掉旧块 别留陈旧知识
             return -1
         chunks = _chunk_text(text)[:budget]  # 超出剩余配额截断
         if not chunks:
+            self._drop_source(source)
             return -1
-        source = str(file)
         # 先无锁把所有 (source,idx,content,embedding) 算好——embedding 是几十秒的网络慢活
         # 绝不能持锁做:否则主线程的 docs.sources()/count() 会卡在锁上 整个 UI 冻住
         prepared: list[tuple] = []
+        any_ok = False   # 这次至少有一批拿到了真向量
+        any_fail = False  # 这次至少有一批没拿到(嵌入进了冷却)
         for start in range(0, len(chunks), _EMBED_BATCH):
             batch = chunks[start : start + _EMBED_BATCH]
             vectors = embed_texts(batch)
             if not vectors or len(vectors) != len(batch):  # 向量化挂了也照样存内容
                 vectors = [None] * len(batch)
+                any_fail = True
+            else:
+                any_ok = True
             for offset, (content, vector) in enumerate(zip(batch, vectors)):
                 prepared.append((source, start + offset, content, pack(vector) if vector else None))
+        # 部分嵌入(前几批成功 后几批进了冷却返回 None):别拿半成品覆盖掉之前已全嵌入的旧块
+        # ——保留旧块 等嵌入恢复后重新入库补全;首次入库(没有旧嵌入)则照常存 内容/FTS 仍可用
+        if any_ok and any_fail and self._source_has_embeddings(source):
+            return -1
         # 短事务:锁内只做删旧块 + 批量插新块 不碰网络
         with self._lock:
             self._conn.execute("DELETE FROM chunks WHERE source = ?", (source,))

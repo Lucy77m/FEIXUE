@@ -169,10 +169,9 @@ class ReminderStore:
                 continue
             try:
                 datetime.fromisoformat(str(entry["fire_at"]))  # fire_at 解析不了的整条扔掉
-            except ValueError:
-                continue
-            items.append(
-                Reminder(
+                # id/字段构造也放进 try:坏 id(手改/外部损坏成 "1.0"/"abc"/null)别让 int() 抛到
+                # 模块级 reminders=ReminderStore() 把整个 app 卡在 import——其它 loader 都是坏了退空 这里也对齐
+                item = Reminder(
                     id=int(entry["id"]),
                     fire_at=str(entry["fire_at"]),
                     what=str(entry["what"]),
@@ -180,7 +179,9 @@ class ReminderStore:
                     kind=str(entry.get("kind", "say")),
                     repeat=str(entry.get("repeat", "")),
                 )
-            )
+            except (ValueError, TypeError):
+                continue
+            items.append(item)
         return items
 
     def _save(self) -> None:

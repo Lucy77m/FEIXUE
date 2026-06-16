@@ -75,6 +75,7 @@ class MemoryStore:
         path.parent.mkdir(parents=True, exist_ok=True)
         self._path = path
         self._lock = threading.RLock()
+        self._closing = False  # close() 置位 后台合并 daemon 据此别往已关连接写
         # 连接跨线程共享 靠rlock串行
         self._conn = sqlite3.connect(path, check_same_thread=False)
         self._fts = False
@@ -237,6 +238,7 @@ class MemoryStore:
         """退出前干净关闭——锁住等任何在途写(如后台反思的 commit)收尾再关。
         关完磁盘上的库就是一致的 之后进程被硬杀也不会把 SQLite 截断成 malformed(损坏根因)"""
         with self._lock:
+            self._closing = True  # 置位后 consolidate 的锁内段会早退 不再 INSERT 到即将关掉的连接
             try:
                 self._conn.commit()
             except Exception:
@@ -299,20 +301,25 @@ class MemoryStore:
         if not needle:
             return "(give a keyword for the memory to forget)"
         removed: list[str] = []
-        with self._lock:
-            for rid, content in self._conn.execute("SELECT id, content FROM experiences").fetchall():
-                if needle in content.lower():
-                    self._conn.execute("DELETE FROM experiences WHERE id = ?", (rid,))
-                    removed.append(content[:60])
-            for key, value in self._conn.execute("SELECT key, value FROM profile").fetchall():
-                if needle in key.lower() or needle in str(value).lower():
-                    self._conn.execute("DELETE FROM profile WHERE key = ?", (key,))
-                    removed.append(f"{key}={value}"[:60])
-            for key, value in self._conn.execute("SELECT key, value FROM env").fetchall():
-                if needle in key.lower() or needle in str(value).lower():
-                    self._conn.execute("DELETE FROM env WHERE key = ?", (key,))
-                    removed.append(f"[env] {key}={value}"[:60])
-            self._conn.commit()
+        try:
+            with self._lock:
+                for rid, content in self._conn.execute("SELECT id, content FROM experiences").fetchall():
+                    if needle in content.lower():
+                        self._conn.execute("DELETE FROM experiences WHERE id = ?", (rid,))
+                        removed.append(content[:60])
+                for key, value in self._conn.execute("SELECT key, value FROM profile").fetchall():
+                    if needle in key.lower() or needle in str(value).lower():
+                        self._conn.execute("DELETE FROM profile WHERE key = ?", (key,))
+                        removed.append(f"{key}={value}"[:60])
+                for key, value in self._conn.execute("SELECT key, value FROM env").fetchall():
+                    if needle in key.lower() or needle in str(value).lower():
+                        self._conn.execute("DELETE FROM env WHERE key = ?", (key,))
+                        removed.append(f"[env] {key}={value}"[:60])
+                self._conn.commit()
+        except sqlite3.DatabaseError:
+            # 库损坏时定向删走不通——别静默吞成泛化工具失败(reset 那个 bug 就是这么来的)
+            # 也不像 wipe 那样整库重建(定向遗忘不该清空一切);明确告知去做整库重置
+            return "(memory database looks corrupted — targeted forget can't run; use a full memory reset 重置记忆 to rebuild it)"
         if not removed:
             return f'(no memory matched "{query}" — nothing to forget)'
         tail = f" (+{len(removed) - 5} more)" if len(removed) > 5 else ""
@@ -466,6 +473,8 @@ class MemoryStore:
             blob = pack(vector) if vector else None
             member_ids = [rid for rid, _c in members]
             with self._lock:
+                if self._closing:  # 退出已开始关库 别再往(即将)关掉的连接写 这次合并丢了就丢了
+                    break
                 # 概括以高显著性入库 来源标consolidation 自带last_seen
                 self._conn.execute(
                     "INSERT INTO experiences(content, ts, confidence, source, embedding, salience, last_seen) "
