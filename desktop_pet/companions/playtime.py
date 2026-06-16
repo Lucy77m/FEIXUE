@@ -1,6 +1,6 @@
 # author: bdth
 # email: 2074055628@qq.com
-# 玩耍伴生 抓虫捉迷藏投球蹲守脚印物理反馈渔获
+# 玩耍伴生 抓虫投球蹲守脚印物理反馈渔获
 
 from __future__ import annotations
 
@@ -39,7 +39,6 @@ class Playtime(QObject):
         self._paws = FootprintLayer()
         self._paw_last = QPoint()
         self._host._pet.moved.connect(self._on_pet_moved_paws)
-        self._tail = None  # 捉迷藏的尾巴窗
         self._ball = None  # 玩具球
         self._host._pet.bind_activity_done(self._on_activity_done)
         self._perch_hwnd = 0
@@ -59,14 +58,14 @@ class Playtime(QObject):
                 t.stop()
             except Exception:
                 pass
-        for w in (self._bug, self._tail, self._ball):
+        for w in (self._bug, self._ball):
             if w is not None:
                 try:
                     w._timer.stop()
                     w.close()
                 except Exception:
                     pass
-        self._bug = self._tail = self._ball = None
+        self._bug = self._ball = None
         try:
             self._paws._timer.stop()
             self._paws.hide()
@@ -114,74 +113,6 @@ class Playtime(QObject):
             self._paws.add(pos.x(), pos.y() + self._host._pet.height() // 4, heading, kind)
         except Exception:
             pass
-
-    def maybe_hide_seek(self) -> bool:
-        """偶尔藏起来让用户找 一天最多一次"""
-        if not self._host._settings.proactive_enabled or self._host._meeting_mode:
-            return False
-        if self._host._engaged() or not self._host._pet.isVisible() or self._host._pet.is_asleep or self._tail is not None:
-            return False
-        if presence.idle_seconds() >= 60:
-            return False
-        _val, _aro, rapport = emotion.snapshot()
-        if rapport < 0.5:
-            return False
-        today = datetime.now().date().isoformat()
-        if stats.get_note("hideseek") == today or random.random() > 0.12:
-            return False
-        stats.set_note("hideseek", today)
-        self._host._feed_pop(i18n.t("hs_start"))
-        QTimer.singleShot(1500, self._hs_hide)
-        return True
-
-    def _hs_hide(self) -> None:
-        from desktop_pet.pet.hideseek import TailWindow
-        from desktop_pet.eyes import capture
-        if self._tail is not None or not self._host._pet.isVisible():
-            return
-        scr = self._host._app.primaryScreen().availableGeometry()
-        x = random.randint(scr.left() + 120, scr.right() - 120)
-        y = random.randint(scr.top() + 160, scr.bottom() - 120)
-        tail = TailWindow()
-        capture.register_own_window(int(tail.winId()))
-        tail.found.connect(self._hs_found)
-        tail.gave_up.connect(self._hs_gave_up)
-        self._host._pet.setVisible(False)
-        tail.appear_at(x, y)
-        self._tail = tail
-
-    def _hs_reveal(self, near: "QPoint | None") -> None:
-        if near is not None:
-            scr = self._host._app.primaryScreen().availableGeometry()
-            nx = max(scr.left(), min(near.x() - self._host._pet.width() // 2, scr.right() - self._host._pet.width()))
-            ny = max(scr.top(), min(near.y() - self._host._pet.height() // 2, scr.bottom() - self._host._pet.height()))
-            self._host._pet.move(nx, ny)
-        self._host._pet.setVisible(True)
-        self._host._pet.wake()
-
-    @Slot()
-    def _hs_found(self) -> None:
-        tail, self._tail = self._tail, None
-        pos = tail.pos() if tail is not None else None
-        self._hs_reveal(pos)
-        self._host._feed_react("celebrate")
-        emotion.apply("praised")
-        selector.set_emotion(*emotion.snapshot())
-        somatic.note(agent_prompts.SOMA_HS_FOUND)
-        self._host._feed_pop(i18n.t("hs_found"))
-
-    @Slot()
-    def _hs_gave_up(self) -> None:
-        self._tail = None
-        self._hs_reveal(None)
-        self._host._feed_pop(i18n.t("hs_giveup"))
-
-    def hs_abort(self) -> None:
-        """藏着的时候被召唤就直接现身"""
-        if self._tail is not None:
-            self._tail.stop()
-            self._tail = None
-            self._hs_reveal(None)
 
     def _on_activity_done(self, name: str) -> None:
         """小品演完的彩蛋 钓鱼有渔获"""
@@ -235,7 +166,7 @@ class Playtime(QObject):
         """偶尔跳上前台窗口顶上待着 窗口一动摔下来"""
         if not self._host._settings.proactive_enabled or self._host._meeting_mode or self._perch_hwnd:
             return False
-        if self._host._engaged() or not self._host._pet.isVisible() or self._host._pet.is_asleep or self._tail is not None:
+        if self._host._engaged() or not self._host._pet.isVisible() or self._host._pet.is_asleep:
             return False
         now = time.time()
         if now - self._perch_last < 7200 or random.random() > 0.15:

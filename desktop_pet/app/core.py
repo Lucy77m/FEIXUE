@@ -308,7 +308,6 @@ class PetApp(QuickActionsMixin, VoiceMixin, AgentBridgeMixin,
     def _summon(self) -> None:
         if not self._shown:
             self._power_on()
-        self._playtime.hs_abort()
         if not self._pet.isVisible():
             self._pet.setVisible(True)
         self._pet.summon_front()

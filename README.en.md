@@ -33,7 +33,7 @@
 
 Mochi is two things at once:
 
-- 🐾 **A desktop pet with a life of its own** — drawn entirely in code (no sprite assets whatsoever). It blinks, follows your cursor with its eyes, daydreams and hums, goes fishing and sips coffee, plays catch and hide-and-seek; it fans itself when the machine runs hot, puts up an umbrella in the rain, hunts down garbage bugs when junk piles up, eats files you drop on it, and brings out a cake on anniversaries. Ignore it and it finds its own fun; leave and it dozes off; now and then it strikes up a conversation on its own.
+- 🐾 **A desktop pet with a life of its own** — drawn entirely in code (no sprite assets whatsoever). It blinks, follows your cursor with its eyes, daydreams and hums, goes fishing and sips coffee, plays catch; it fans itself when the machine runs hot, puts up an umbrella in the rain, hunts down garbage bugs when junk piles up, eats files you drop on it, and brings out a cake on anniversaries. Ignore it and it finds its own fun; leave and it dozes off; now and then it strikes up a conversation on its own.
 - 🧠 **A local Agent that can drive your whole computer** — plug in your own LLM (any OpenAI-compatible endpoint) and it can see the screen, click windows, move the mouse and keyboard, run commands, write code, read and write files, search the web, remember things, and look stuff up; it can also **watch your screen on a timer, run tests after it edits code, fan out a team of sub-agents in parallel, and remind you on a daily/weekly schedule**… turning "chatting with an AI" into "having the AI do it for you."
 
 It carries persistent **emotions and rapport**, and slowly grows a **self-portrait (personality evolution)** as you spend time together — so it's "the same one," not a chat box that resets every time.
@@ -122,7 +122,7 @@ desktop_pet/
 │                    #       control panel, confirm panel, hiding/entrance/wormhole teleport (wormhole), tray (tray),
 │                    #       window effects (fx), behavior selector & action library, props & palette;
 │                    #       toy ball (ball), garbage bug (bug), feeding (feeding), ink footprints (footprints),
-│                    #       hide-and-seek (hideseek), persistent-state adornments (adornments)
+│                    #       persistent-state adornments (adornments)
 ├─ companions/       # Companion-behavior package, one little machine per module: feeding routing (feeding_ctrl),
 │                    #       play & physics (playtime), rituals (rituals), environment sensors (sensors), background watching (watchers)
 ├─ emotion/          # Emotion state machine (VA + rapport) and emotion-tag tables
@@ -224,7 +224,7 @@ A continuous valence / arousal mood + slowly accumulating rapport, persisted to 
 - **Holidays / companionship**: `occasions.py` recognizes Gregorian holidays + the birthday you set and, on the day, gives the model a fitting "hook" so it brings them up naturally rather than offering a canned greeting; `stats.py` quietly tracks first-meeting time and cumulative interactions — the basis for "how long we've known each other."
 - **Companion behaviors (companions/)**: five "little machines," each minding its own patch, all wrapped in presence / busy / rapport / cooldown gating —
   - `sensors.py`: reads CPU / RAM / battery vitals every 10s (with hysteresis, no jitter), driving **machine mimicry** (fan when hot, squished RAM, low battery, late-night blanket, winter snuggle); checks mic usage for **meeting-mute**; queries `wttr.in` every two hours for **weather mimicry**; watches the Downloads folder and desktop icon count; covers its eyes when the focused field is a password box.
-  - `playtime.py`: play & physical feedback — throw/catch ball, hide-and-seek (rapport-gated, once a day max), windowsill perch (tumbles when the window moves), tickle / drag-throw grudge, **ink footprints** while walking, a fishing-catch easter egg; scans temp and spawns a **garbage bug** past 500MB, squishing it triggers a real cleanup.
+  - `playtime.py`: play & physical feedback — throw/catch ball, windowsill perch (tumbles when the window moves), tickle / drag-throw grudge, **ink footprints** while walking, a fishing-catch easter egg; scans temp and spawns a **garbage bug** past 500MB, squishing it triggers a real cleanup.
   - `rituals.py`: **rituals** — morning mood forecast, anniversary cake (blow out candles), a goodbye wave at exit, a 25-minute Pomodoro focus.
   - `feeding_ctrl.py` + `pet/feeding.py`: **feeding routing** — dropped files routed by type (junk → Recycle Bin, docs → knowledge base, images → a glance), protected / risky paths blocked, big meals / whole directories confirmed first.
   - `watchers.py`: **background watching** — watches background shells started by `start_background_task`, celebrating success and calling the agent to analyze failures; quietly stashes clipboard treasures and fondly "gives them back" hours later.

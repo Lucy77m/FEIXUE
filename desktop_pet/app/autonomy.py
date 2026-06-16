@@ -129,8 +129,6 @@ class AutonomyMixin:
                 return
             if self._maybe_occasion():
                 return
-            if self._playtime.maybe_hide_seek():
-                return
             if self._playtime.maybe_perch():
                 return
             if self._watchers.maybe_giveback():
