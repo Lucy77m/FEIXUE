@@ -228,6 +228,7 @@ class PetWindow(QWidget):
         )
 
     def play_entrance(self, kind: str, rest_pos: QPoint, screen) -> None:
+        self._wormhole = None  # 入场前清掉可能在跑的虫洞 别让两个动画同占导致 blob 卡在缩 0
         self._rest_pos = QPoint(rest_pos)
         self._entrance = Entrance(kind, screen, rest_pos, self.width(), self.height())
         self._entrance_t = 0.0
@@ -302,6 +303,10 @@ class PetWindow(QWidget):
             self.moved.emit()
             if glance is not None:
                 self._blob.look_at(glance)
+        elif self.windowOpacity() < 1.0:
+            # 自愈：没有入场/虫洞在跑 窗口就该满不透明
+            # 防某次动画被打断留下 opacity<1 让桌宠凭空消失(气泡是独立窗口照常显示)
+            self.setWindowOpacity(1.0)
         self.update()
 
     def _advance_entrance(self, dt: float) -> None:

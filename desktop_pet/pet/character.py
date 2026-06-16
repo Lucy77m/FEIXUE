@@ -105,6 +105,7 @@ class BlobPet(ThinkMixin, ReactFxMixin, FaceMixin):
         self._pending_perform: str | None = None
         self._wants_travel = False
         self._activity_timer = random.uniform(*_ACTIVITY_GAP)
+        self._activity_age = 0.0  # 小品已演时长 卡死兜底用
         self._stage_i = 0
         self._stage_left = 0.0
         self._stage_dur = 1.0
@@ -287,6 +288,7 @@ class BlobPet(ThinkMixin, ReactFxMixin, FaceMixin):
         self.wake()
         self._react = None
         self._activity = name
+        self._activity_age = 0.0
         self._act_sticky = True  # 点名演出 自己的回复气泡不许掐它
         self._costume = _ACTIVITIES[name][0]
         self._stage_i = 0
@@ -471,6 +473,10 @@ class BlobPet(ThinkMixin, ReactFxMixin, FaceMixin):
         soft = self._pondering or self._talking or self._lecturing or self._busy
         idle = not (hard or soft)
         if self._activity is not None:
+            self._activity_age += dt
+            if self._activity_age > 25.0:  # 卡死兜底:小品演太久(远超任何一段)强制收场 防 blob 缩没卡住
+                self._end_activity()
+                return
             if hard or (soft and not self._act_sticky):
                 self._end_activity()
                 return
@@ -508,6 +514,8 @@ class BlobPet(ThinkMixin, ReactFxMixin, FaceMixin):
                         self._wants_travel = True
                     else:
                         self._activity = name
+                        self._activity_age = 0.0
+                        self._act_sticky = False  # 自发小品 软打断(说话/思考)就让位
                         self._costume = _ACTIVITIES[name][0]
                         self._stage_i = 0
                         self._enter_stage(_ACTIVITIES[name][3][0])
