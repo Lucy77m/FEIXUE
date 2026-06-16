@@ -23,7 +23,8 @@ class QuickActionsMixin:
     def _ask_selection(self) -> None:
         if not self._shown:
             self._power_on()
-        self._saved_clip = self._app.clipboard().text()   # 先存原剪贴板 复制完还回去
+        # 原剪贴板用闭包贯穿整条链 不放共享属性——划词提问和快捷润色交错触发时 共享 _saved_clip 会互相覆盖把原剪贴板弄丢
+        saved = self._app.clipboard().text()
         try:
             import pyautogui
             # 先松开残留的修饰键再模拟复制
@@ -32,20 +33,19 @@ class QuickActionsMixin:
         except Exception:
             self._summon()
             return
-        QTimer.singleShot(70, self._copy_selection)
+        QTimer.singleShot(70, lambda: self._copy_selection(saved))
 
-    def _copy_selection(self) -> None:
+    def _copy_selection(self, saved: str) -> None:
         try:
             import pyautogui
             pyautogui.hotkey("ctrl", "c")
         except Exception:
             self._summon()
             return
-        QTimer.singleShot(200, self._after_copy)
+        QTimer.singleShot(200, lambda: self._after_copy(saved))
 
-    def _after_copy(self) -> None:
+    def _after_copy(self, saved: str) -> None:
         text = self._app.clipboard().text().strip()
-        saved = getattr(self, "_saved_clip", "")
         self._summon()
         if not text or text == saved.strip():   # 剪贴板没变当作无选区
             return
@@ -57,26 +57,25 @@ class QuickActionsMixin:
     def _quick_rewrite(self) -> None:
         if not self._shown:
             self._power_on()
-        self._saved_clip = self._app.clipboard().text()
+        saved = self._app.clipboard().text()
         try:
             import pyautogui
             for mod in ("alt", "ctrl", "shift"):
                 pyautogui.keyUp(mod)
         except Exception:
             return
-        QTimer.singleShot(70, self._quick_copy)
+        QTimer.singleShot(70, lambda: self._quick_copy(saved))
 
-    def _quick_copy(self) -> None:
+    def _quick_copy(self, saved: str) -> None:
         try:
             import pyautogui
             pyautogui.hotkey("ctrl", "c")
         except Exception:
             return
-        QTimer.singleShot(200, self._quick_after_copy)
+        QTimer.singleShot(200, lambda: self._quick_after_copy(saved))
 
-    def _quick_after_copy(self) -> None:
+    def _quick_after_copy(self, saved: str) -> None:
         text = self._app.clipboard().text().strip()
-        saved = getattr(self, "_saved_clip", "")
         if not self._pet.isVisible():
             self._pet.setVisible(True)
         self._pet.wake()

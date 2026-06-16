@@ -64,6 +64,8 @@ class PetApp(QuickActionsMixin, VoiceMixin, AgentBridgeMixin,
     request_confirm = Signal(str)
     request_rewrite = Signal(str)
     request_clip_alchemy = Signal(str, str)
+    request_new_topic = Signal()    # 换话题/重置改走队列进 worker 线程 别在 UI 线程直接动 agent 消息历史
+    request_forget_all = Signal()
     _hear_partial = Signal(str)
     _hear_final = Signal(str)
     _hear_state = Signal(str)
@@ -251,6 +253,8 @@ class PetApp(QuickActionsMixin, VoiceMixin, AgentBridgeMixin,
         self._hotkeys.quick_rewrite.connect(self._quick_rewrite)
         self._hotkeys.status.connect(self._on_hotkey_status)
         self.request_rewrite.connect(self._worker.rewrite)
+        self.request_new_topic.connect(self._worker.new_topic)
+        self.request_forget_all.connect(self._worker.forget_all)
         self._worker.rewrite_ready.connect(self._on_rewrite_done)
         self._app.clipboard().dataChanged.connect(self._on_clipboard_changed)
         sampler.interesting.connect(self._on_clip_interesting)

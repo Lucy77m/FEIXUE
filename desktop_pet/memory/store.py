@@ -76,6 +76,7 @@ class MemoryStore:
         self._path = path
         self._lock = threading.RLock()
         self._closing = False  # close() 置位 后台合并 daemon 据此别往已关连接写
+        self._epoch = 0  # 重置代数 wipe() 自增——后台反思据此判断快照后是否发生过重置 是则丢弃写入
         # 连接跨线程共享 靠rlock串行
         self._conn = sqlite3.connect(path, check_same_thread=False)
         self._fts = False
@@ -226,6 +227,7 @@ class MemoryStore:
 
     def wipe(self) -> None:
         with self._lock:
+            self._epoch += 1  # 标记一次重置 在途反思据此放弃把旧记忆重新写回(否则重置被静默撤销)
             try:
                 for table in ("profile", "experiences", "env", "opinions"):
                     self._conn.execute(f"DELETE FROM {table}")
@@ -233,6 +235,10 @@ class MemoryStore:
             except sqlite3.DatabaseError:
                 # 库损坏(异常退出常留下)时 DELETE 走不通——整个重建 保证重置一定清干净
                 self._rebuild()
+
+    def reset_epoch(self) -> int:
+        """当前重置代数——后台反思开工时取一份 写回前再取一份 不一致说明中途被重置了 该丢弃"""
+        return self._epoch
 
     def close(self) -> None:
         """退出前干净关闭——锁住等任何在途写(如后台反思的 commit)收尾再关。
@@ -271,6 +277,8 @@ class MemoryStore:
         if not content:
             return "(nothing)"
         with self._lock:
+            if self._closing:  # 关库进行中 别往(即将)关掉的连接写 防 ProgrammingError
+                return "(skipped — shutting down)"
             rows = self._conn.execute(
                 "SELECT id, content FROM opinions ORDER BY id DESC LIMIT 30"
             ).fetchall()
@@ -303,6 +311,8 @@ class MemoryStore:
         removed: list[str] = []
         try:
             with self._lock:
+                if self._closing:
+                    return "(skipped — shutting down)"
                 for rid, content in self._conn.execute("SELECT id, content FROM experiences").fetchall():
                     if needle in content.lower():
                         self._conn.execute("DELETE FROM experiences WHERE id = ?", (rid,))
@@ -327,6 +337,8 @@ class MemoryStore:
 
     def set_preference(self, key: str, value: str) -> str:
         with self._lock:
+            if self._closing:
+                return "(skipped — shutting down)"
             self._conn.execute(
                 "INSERT INTO profile(key, value) VALUES (?, ?) "
                 "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -344,6 +356,8 @@ class MemoryStore:
         vectors = embed_texts([content])
         vector = vectors[0] if vectors else None  # 没嵌入退纯文本去重
         with self._lock:
+            if self._closing:
+                return "(skipped — shutting down)"
             added = self._insert_experience(
                 content, ts=_now(), confidence=1.0, source="reflection", vector=vector, salience=salience
             )
@@ -356,6 +370,8 @@ class MemoryStore:
         if not key:
             return "(env key can't be empty)"
         with self._lock:
+            if self._closing:
+                return "(skipped — shutting down)"
             self._conn.execute(
                 "INSERT INTO env(key, value, ts, confidence, source) VALUES (?, ?, ?, 1.0, 'observed') "
                 "ON CONFLICT(key) DO UPDATE SET value = excluded.value, ts = excluded.ts, confidence = 1.0",

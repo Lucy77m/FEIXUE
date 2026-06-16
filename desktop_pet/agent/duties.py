@@ -264,6 +264,7 @@ class DutiesMixin:
     def _reflect(self, snapshot: list[dict]) -> None:
         """反思线程体 提炼json写进各存储"""
         try:
+            epoch0 = store.reset_epoch()  # 开工前记下重置代数 反思要花几秒网络 期间可能被重置
             core = store.core_memories(4)
             core_block = (
                 "\n\n[Your core memories — the formative moments that made you who you are; "
@@ -282,6 +283,8 @@ class DutiesMixin:
             data = _parse_json(content)
             if not data:
                 return
+            if store.reset_epoch() != epoch0:
+                return  # 反思期间用户点了重置——别把刚清掉的记忆又写回去(重置静默失效)
             peak = getattr(self, "_turn_emotion_peak", 0.5)
             for experience in (data.get("experiences") or [])[:5]:
                 text, weight = "", 0.3

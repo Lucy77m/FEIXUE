@@ -10,6 +10,12 @@ from PySide6.QtCore import qInstallMessageHandler
 from PySide6.QtGui import QColor, QPalette
 
 
+# 半透明无边框窗反复刷新的 UpdateLayeredWindowIndirect、PNG 色彩配置的 iCCP——纯噪声 压掉
+# (拆 mixin 时这个常量被漏掉了 导致 _filter 每条 Qt 消息都 NameError 反而更吵)
+_SUPPRESSED_QT_WARNINGS = ("UpdateLayeredWindowIndirect", "iCCP")
+_prev_qt_handler = None
+
+
 def _install_qt_message_filter() -> None:
     global _prev_qt_handler
 

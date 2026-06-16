@@ -208,7 +208,12 @@ class AutonomyMixin:
             return False
         if presence.idle_seconds() >= _AWAY_S:
             return False
-        key = occasions.today_key(datetime.now())
+        now = datetime.now()
+        if getattr(self, "_fired_date", None) != now.date():
+            # 跨天清掉去重集——节日键只有月日没年份 不清的话长期不重启时同一节日整个进程一辈子只触发一次
+            self._fired_date = now.date()
+            self._fired_occasions.clear()
+        key = occasions.today_key(now)
         if not key or key in self._fired_occasions:
             return False
         self._fired_occasions.add(key)
@@ -237,14 +242,15 @@ class AutonomyMixin:
             return
         now = datetime.now()
         context = self._proactive_context()
-        if self._just_returned and proactive.welcome_ready(now, level):
-            self._just_returned = False
-            proactive.record(now, level)
-            dream = self._dreams.take_dream_hint()  # 睡着时做了梦就迷糊提一句
-            bits = [b for b in (context, self._away_note(now), dream) if b]
-            self.request_proactive.emit("welcome_back", "\n".join(bits))
+        if self._just_returned:
+            if proactive.welcome_ready(now, level):
+                self._just_returned = False  # 只在真发出欢迎时才清标志
+                proactive.record(now, level)
+                dream = self._dreams.take_dream_hint()  # 睡着时做了梦就迷糊提一句
+                bits = [b for b in (context, self._away_note(now), dream) if b]
+                self.request_proactive.emit("welcome_back", "\n".join(bits))
+            # 还欠着欢迎但限流没到点:先不主动说别的 也别把标志白白清掉 等下次轮询再看(否则这次回来的欢迎永远丢了)
             return
-        self._just_returned = False
         if not proactive.ready(now, level):
             return
         proactive.record(now, level)

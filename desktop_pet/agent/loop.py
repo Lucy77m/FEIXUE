@@ -103,6 +103,7 @@ class Agent(HistoryMixin, ToolHandlersMixin, SubagentsMixin, DutiesMixin):
         self._oa_client: OpenAI | None = None
         self._oa_creds: tuple[str, str, str] | None = None
         self._client_lock = threading.Lock()
+        self._retired_clients: list = []  # 配置变了换下来的旧 client——可能仍有线程在流式用着 不当场关 退出时统一收
         self._shell = shell.new_session()
         self._python = pycode.new_runner()
         self._compressed = ""
@@ -198,6 +199,7 @@ class Agent(HistoryMixin, ToolHandlersMixin, SubagentsMixin, DutiesMixin):
                 client.close()
             except Exception:
                 pass
+        self._close_retired_clients()
 
     @staticmethod
     def was_cancelled(reply: str) -> bool:
@@ -241,6 +243,26 @@ class Agent(HistoryMixin, ToolHandlersMixin, SubagentsMixin, DutiesMixin):
             self._save_session()
         self._shell.close()
         self._python.close()
+        self._close_retired_clients()
+        with self._client_lock:
+            client = self._oa_client
+            self._oa_client = None
+        if client is not None:
+            try:
+                client.close()
+            except Exception:
+                pass
+
+    def _close_retired_clients(self) -> None:
+        """收掉历次配置变更留下的旧 client 的 httpx 连接池"""
+        with self._client_lock:
+            retired = self._retired_clients
+            self._retired_clients = []
+        for c in retired:
+            try:
+                c.close()
+            except Exception:
+                pass
 
     def _system_message(self) -> dict:
         """拼系统提示 只放基本不变的内容"""
@@ -579,10 +601,9 @@ class Agent(HistoryMixin, ToolHandlersMixin, SubagentsMixin, DutiesMixin):
                 self._strip_temperature = False
                 self._strip_cache_key = False
                 if old is not None:
-                    try:
-                        old.close()
-                    except Exception:
-                        pass
+                    # 别在这关:可能正有 worker 线程在用 old 做流式补全 当场 close 会掐断它那一轮
+                    # 先留着 等 close()/cancel 收尾时统一关(配置变更很少 顶多攒下寥寥几个)
+                    self._retired_clients.append(old)
             return self._oa_client
 
     def _model_name(self) -> str:

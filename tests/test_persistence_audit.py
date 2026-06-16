@@ -72,6 +72,33 @@ def test_forget_on_corrupt_db_reports_clearly(tmp_path):
 
 # ---------- consolidate 在 close 后不再往关掉的连接写 ----------
 
+def test_wipe_bumps_reset_epoch(tmp_path):
+    """重置代数:wipe 自增 普通读写不变——后台反思据此判断快照后是否被重置过(板块②#5)"""
+    from desktop_pet.memory.store import MemoryStore
+    m = MemoryStore(tmp_path / "m.db")
+    e0 = m.reset_epoch()
+    m.remember("写一条不该改代数")
+    assert m.reset_epoch() == e0, "普通写入不该动重置代数"
+    m.wipe()
+    assert m.reset_epoch() == e0 + 1, "wipe 该让重置代数 +1"
+    m.wipe()
+    assert m.reset_epoch() == e0 + 2
+    m.close()
+
+
+def test_store_writes_skip_when_closing(tmp_path):
+    """关库进行中 各写入方法静默跳过 不往已关连接写(板块②#8)"""
+    from desktop_pet.memory.store import MemoryStore
+    m = MemoryStore(tmp_path / "m.db")
+    m._closing = True
+    for call in (lambda: m.remember("x"), lambda: m.set_preference("k", "v"),
+                 lambda: m.note_env("k", "v"), lambda: m.add_opinion("o"),
+                 lambda: m.forget("x")):
+        assert "shutting down" in call(), "关库中写入该跳过"
+    m._closing = False
+    assert "Remembered" in m.remember("恢复后正常写")
+
+
 def test_consolidate_skips_write_after_close(tmp_path, monkeypatch):
     import desktop_pet.memory.store as store_mod
     from desktop_pet.memory.store import MemoryStore

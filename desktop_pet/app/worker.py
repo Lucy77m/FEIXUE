@@ -208,8 +208,11 @@ class AgentWorker(QObject):
                 self.proactive_reply.emit(out)
         threading.Thread(target=work, daemon=True, name="mochi-alchemy").start()
 
+    @Slot()
     def forget_all(self) -> None:
+        # 经队列在 worker 线程跑——必须和在途 run() 串行 不能从 UI 线程直接改 agent._messages(会撕裂消息历史)
         self._agent.forget_all()
 
+    @Slot()
     def new_topic(self) -> None:
         self._agent.new_topic()

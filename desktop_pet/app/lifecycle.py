@@ -252,7 +252,8 @@ class LifecycleMixin:
     def _new_topic(self) -> None:
         if self._busy or self._worker.is_running:
             self._worker.cancel()
-        self._worker.new_topic()
+        # 经队列进 worker 线程:cancel 让在途 run() 收尾后 再串行清消息历史 不和 run() 抢同一个 list
+        self.request_new_topic.emit()
         self._speech.interrupt()
         self._todo.dismiss()
         self._reset_lecture()
@@ -260,7 +261,7 @@ class LifecycleMixin:
     def _reset_all(self) -> None:
         if self._busy or self._worker.is_running:
             self._worker.cancel()
-        self._worker.forget_all()
+        self.request_forget_all.emit()  # 同上 改走队列进 worker 线程 别在 UI 线程直接 wipe + 改消息历史
         emotion.reset()
         reminders.clear()
         stats.clear()
@@ -292,6 +293,7 @@ class LifecycleMixin:
                 pass
         if self._rituals.farewell():
             return
+        self._requeue_timed()  # 没派发的定时(do)任务写回 reminders 持久化 别随 os._exit 一起丢掉
         for _t in (self._presence_timer, self._reminder_timer, self._proactive_timer,
                    self._watch_timer):
             try:
@@ -312,13 +314,15 @@ class LifecycleMixin:
                 bg_tasks.stop(_tid)
         except Exception:
             pass
-        self._worker.shutdown()
+        # 先停 worker 线程的事件循环并等它退出 run()——务必在 shutdown() 杀 shell/python 子进程之前
+        # 否则主线程的 close() 会和仍在 run() 里用着子进程的 worker 线程 对杀同一个 Popen(对杀曾引发 access violation)
+        self._thread.quit()
+        self._thread.wait(3000)
+        self._worker.shutdown()  # 此刻 worker 已停 杀子进程不再撞在途调用
         try:
             mcp_hub.shutdown()
         except Exception:
             pass
-        self._thread.quit()
-        self._thread.wait(3000)
         # 硬退之前干净关掉两个 SQLite 库——锁住等后台反思的在途 commit 收尾再关。
         # 关完磁盘上的库就是一致的，进程随后退出也不会把它截断成 malformed（库损坏根因）
         for db in (store, docs):
