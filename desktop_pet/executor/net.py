@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+import re
+
 import httpx
 
 _TIMEOUT = 30
@@ -11,6 +13,41 @@ _MAX_BODY = 20000  # 回给模型的字符上限
 _MAX_DOWNLOAD = 200_000  # 边读边截的字节上限
 # content type 命中任一子串就当文本读
 _TEXTY = ("text/", "json", "xml", "javascript", "html", "csv", "yaml", "x-www-form-urlencoded")
+_META_CHARSET = re.compile(rb'charset=["\']?\s*([a-z0-9_\-]+)', re.I)
+
+
+def _looks_binary(raw: bytes) -> bool:
+    """没声明 content-type 时嗅一下:含 NUL 或控制字节占比过高就当二进制 别解成乱码喂给模型"""
+    sample = raw[:2048]
+    if not sample:
+        return False
+    if b"\x00" in sample:
+        return True
+    texty = sum(1 for b in sample if b in (9, 10, 13) or 32 <= b < 127 or b >= 128)
+    return (texty / len(sample)) < 0.7
+
+
+def _decode_body(response: httpx.Response, raw: bytes) -> str:
+    """按 头部charset -> body里<meta charset> -> utf-8 -> gbk 的顺序解码
+    别一律 response.encoding(头里没 charset 时它默认就是 'utf-8')把 GBK 页面解成乱码"""
+    header_cs = getattr(response, "charset_encoding", None)  # 仅当 Content-Type 头真带 charset 才非 None
+    if header_cs:
+        try:
+            return raw.decode(header_cs, errors="replace")
+        except (LookupError, ValueError):
+            pass
+    m = _META_CHARSET.search(raw[:4096])
+    if m:
+        try:
+            return raw.decode(m.group(1).decode("ascii", "ignore"), errors="replace")
+        except (LookupError, ValueError):
+            pass
+    for enc in ("utf-8", "gbk"):
+        try:
+            return raw.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("utf-8", errors="replace")
 
 
 def http_request(url: str, method: str = "GET", body: str | None = None, headers: dict | None = None) -> str:
@@ -37,7 +74,12 @@ def http_request(url: str, method: str = "GET", body: str | None = None, headers
                 if len(raw) >= _MAX_DOWNLOAD:
                     truncated_dl = True
                     break
-            text = raw.decode(response.encoding or "utf-8", errors="replace")
+            if not ctype and _looks_binary(raw):
+                # 没声明 content-type 又嗅出是二进制 别硬解成乱码
+                return (f"[{response.status_code} {response.reason_phrase}]\n"
+                        f"[二进制响应（无 content-type，{len(raw)} bytes）——正文没有读取。"
+                        f"要下载就用 run_python 存到本地路径。]")
+            text = _decode_body(response, raw)
     except Exception as exc:
         return f"[request failed: {exc}]"
     if len(text) > _MAX_BODY:

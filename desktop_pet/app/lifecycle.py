@@ -320,6 +320,11 @@ class LifecycleMixin:
         self._thread.wait(3000)
         self._worker.shutdown()  # 此刻 worker 已停 杀子进程不再撞在途调用
         try:
+            from desktop_pet.executor import shell
+            shell.shutdown_background()  # 杀掉 agent 起的后台 shell——它们不在 Job 里 os._exit 不会带走 会变孤儿
+        except Exception:
+            pass
+        try:
             mcp_hub.shutdown()
         except Exception:
             pass

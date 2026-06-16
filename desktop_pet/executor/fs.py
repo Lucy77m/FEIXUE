@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import os
 import re
+import uuid
 from fnmatch import fnmatch
 from pathlib import Path
 
@@ -27,14 +28,40 @@ _TEXT_EXT = frozenset(
 
 
 def _read_with_encoding(target: Path) -> tuple[str, str]:
-    """读文本并猜编码"""
+    """读文本并猜编码 返回(文本, 回写该用的编码)
+    真带 BOM 的回 utf-8-sig 让 edit_file 回写时保留 BOM;不带 BOM 的回 utf-8 别凭空加一个"""
     raw = target.read_bytes()
-    for encoding in ("utf-8-sig", "gbk"):
+    if raw.startswith(b"\xef\xbb\xbf"):
+        return raw.decode("utf-8-sig"), "utf-8-sig"
+    for encoding in ("utf-8", "gbk"):
         try:
-            return raw.decode(encoding), ("utf-8" if encoding == "utf-8-sig" else encoding)
+            return raw.decode(encoding), encoding
         except UnicodeDecodeError:
             continue
     return raw.decode("utf-8", errors="replace"), "utf-8"
+
+
+def _atomic_write(target: Path, text: str, encoding: str, newline: str | None) -> None:
+    """原子写:先写同目录临时文件再 os.replace 顶上去。
+    中途失败(GBK 编码不了的字符、磁盘满、进程被杀)只毁掉临时文件 原文件分毫不动——
+    edit_file 直接 write_text 会先把原文截成 0 字节再写 一旦回写抛异常用户的源文件就没了"""
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.parent / f".{target.name}.{uuid.uuid4().hex}.tmp"
+    try:
+        with open(tmp, "w", encoding=encoding, newline=newline) as f:
+            f.write(text)  # 编码错在这一步抛 此时只动了临时文件
+            f.flush()
+            try:
+                os.fsync(f.fileno())
+            except OSError:
+                pass
+        os.replace(tmp, target)
+    except Exception:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise
 
 
 def paginate(text: str, offset: int = 0, max_chars: int = 0) -> str:
@@ -75,8 +102,7 @@ def read_file(path: str, offset: int = 0, max_chars: int = 0) -> str:
 def write_file(path: str, content: str) -> str:
     target = Path(path).expanduser()
     try:
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(content, encoding="utf-8")
+        _atomic_write(target, content, "utf-8", None)
     except Exception as exc:
         return f"[write failed: {exc}]"
     return f"Wrote {path} ({len(content)} chars)."
@@ -190,7 +216,7 @@ def edit_file(path: str, old: str, new: str, replace_all: bool = False) -> str:
         note = " (matched by ignoring whitespace differences — double-check the diff)"
 
     try:
-        target.write_text(updated, encoding=encoding, newline=nl)
+        _atomic_write(target, updated, encoding, nl)  # 原子写:回写编码失败也不会把原文件截没
     except Exception as exc:
         return f"[write failed: {exc}]"
     return f"Replaced {count if replace_all else 1} occurrence(s) in {path}.{note}"

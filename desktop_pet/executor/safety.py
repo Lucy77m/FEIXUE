@@ -40,9 +40,11 @@ def check_blocked(text: str) -> str | None:
     for pattern, reason in _CATASTROPHIC:
         if pattern.search(text):
             return reason
-    # 删除动词加递归强制加裸根 三个凑齐才拦
-    if _DELETE_VERB.search(text) and _RECURSE_OR_FORCE.search(text) and _BARE_ROOT.search(text):
-        return "recursively deleting a drive root / system directory"
+    # 删除动词+递归强制+裸根三者必须落在【同一条子命令】里才拦——按 ;|& 换行切开逐条判
+    # 否则 `cd C:\ ; rm -rf build` 会被来自不同子句的三者凑齐误拦(裸根其实来自 cd 子句 删的是 build)
+    for sub in re.split(r"[;|&\n]", text):
+        if _DELETE_VERB.search(sub) and _RECURSE_OR_FORCE.search(sub) and _BARE_ROOT.search(sub):
+            return "recursively deleting a drive root / system directory"
     return None
 
 

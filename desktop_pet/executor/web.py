@@ -178,6 +178,7 @@ def web_fetch(url: str) -> str:
 
 
 _MEDIA_EXT = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"})
+_MAX_MEDIA_BYTES = 32 * 1024 * 1024  # 媒体下载上限 防一个 URL 把临时盘/内存撑爆
 _CTYPE_EXT = {
     "image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif",
     "image/webp": ".webp", "image/bmp": ".bmp", "image/svg+xml": ".svg",
@@ -192,11 +193,14 @@ def download_to_temp(url: str, subdir: str = "star_media") -> str | None:
         return None
     try:
         response = _client_get().get(url)
+        clen = str(getattr(response, "headers", {}).get("content-length", "") or "")
+        if clen.isdigit() and int(clen) > _MAX_MEDIA_BYTES:
+            return None  # 声明就超过上限 直接不下
         data = response.content
     except Exception:
         return None
-    if not data:
-        return None
+    if not data or len(data) > _MAX_MEDIA_BYTES:
+        return None  # 谎报/无 content-length 的实际超大 也不落盘
     # 先信 url 后缀 再看 content type 都认不出就 bin
     suffix = Path(urlparse(url).path).suffix.lower()
     if suffix not in _MEDIA_EXT:

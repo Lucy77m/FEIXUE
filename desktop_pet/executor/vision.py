@@ -11,6 +11,9 @@ _OCR_MAX_SIDE = 3200
 _MIN_OCR_SCORE = 0.5
 _ocr_engine = None
 _ocr_lock = threading.Lock()
+# 推理串行化:同一个 RapidOCR 实例被 worker 线程(ocr_screen)和入库 daemon 线程(ocr_boxes 来自 PDF OCR)同时调
+# 并发 __call__ 会让结果错乱或抛异常(被吞成空结果 喂进库的文档丢字)。OCR 本就是瓶颈 串行无妨
+_infer_lock = threading.Lock()
 
 
 def _get_engine():
@@ -86,7 +89,8 @@ def ocr_screen(region: str = "") -> str:
         if img.size == 0:
             return "[region 超出屏幕、裁出来是空的——核对 left,top,width,height(图像像素)]"
 
-    result, _ = engine(img)
+    with _infer_lock:  # 和入库 daemon 的 OCR 串行 别并发用同一个引擎
+        result, _ = engine(img)
     # 滤掉低置信结果
     result = [r for r in (result or []) if _score_of(r[2]) >= _MIN_OCR_SCORE]
     if not result:
@@ -110,7 +114,8 @@ def ocr_boxes(bgr, ox: int, oy: int) -> list[dict]:
     if engine is None:
         return []
     try:
-        result, _ = engine(bgr)
+        with _infer_lock:  # 同上 和 worker 线程的截图 OCR 串行
+            result, _ = engine(bgr)
     except Exception:
         return []
     boxes: list[dict] = []

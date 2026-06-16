@@ -232,6 +232,7 @@ def new_session() -> _PowerShell:
 
 _BG_CAP = 100_000
 _BG_KEEP_DONE = 8
+_BG_MAX_RUNNING = 8  # 同时在跑的后台 shell 上限 防 agent 起一堆永不收的服务/循环 把进程句柄堆爆
 
 
 class _BgShell:
@@ -263,7 +264,8 @@ class _BgShell:
             bufsize=1,
             creationflags=_NO_WINDOW,
         )
-        threading.Thread(target=self._pump, daemon=True).start()
+        self._pump_thread = threading.Thread(target=self._pump, daemon=True)
+        self._pump_thread.start()
 
     def _pump(self) -> None:
         try:
@@ -300,7 +302,20 @@ class _BgShell:
         return self.proc.poll() is None
 
     def kill(self) -> None:
-        _kill_proc(self.proc)
+        # 先杀进程树但【不关管道】 让 pump 把管道里残留的最后几行读完——刚被杀的命令尾部输出往往最相关
+        try:
+            if self.proc.pid is not None:
+                subprocess.run(["taskkill", "/F", "/T", "/PID", str(self.proc.pid)],
+                               capture_output=True, timeout=10, creationflags=_NO_WINDOW)
+        except Exception:
+            pass
+        try:
+            self.proc.kill()
+        except Exception:
+            pass
+        if self._pump_thread is not None:
+            self._pump_thread.join(timeout=0.4)  # 进程已死 pump 读完残留即 EOF 退出
+        _kill_proc(self.proc)  # 收尾:关管道 + 异步收尸(taskkill 重复一次无害 进程已没了)
 
 
 _bg_tasks: dict[int, _BgShell] = {}
@@ -322,6 +337,10 @@ def start_background(command: str) -> str:
         return f"[blocked: {blocked}. This is an irreversible high-risk operation and was prevented; if truly needed, have the user do it manually.]"
     global _bg_seq
     with _bg_lock:
+        running = sum(1 for t in _bg_tasks.values() if t.running())
+        if running >= _BG_MAX_RUNNING:
+            return (f"[too many background shells already running ({running}); "
+                    "stop some with check_shell(id=N, kill=true) before starting more]")
         _bg_seq += 1
         task_id = _bg_seq
         try:
@@ -374,6 +393,20 @@ def background_snapshot() -> list[dict]:
             "returncode": rc, "started": t.started, "tail": t.peek_tail(1600),
         })
     return out
+
+
+def shutdown_background() -> None:
+    """退出前杀掉所有后台 shell 进程树。
+    _BgShell 是独立 Popen 没挂在 Job 对象里 父进程 os._exit 不会带走它们 会留下孤儿(占端口/吃CPU);
+    每次退出都漏 跨会话累积。kill() 走 taskkill /F /T 连子孙一起收"""
+    with _bg_lock:
+        tasks = list(_bg_tasks.values())
+        _bg_tasks.clear()
+    for t in tasks:
+        try:
+            t.kill()
+        except Exception:
+            pass
 
 
 def _bg_trim(chunk: str, dropped: int) -> str:
