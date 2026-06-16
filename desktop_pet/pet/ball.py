@@ -11,6 +11,7 @@ from PySide6.QtCore import QPointF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QPainter, QPen, QRadialGradient
 from PySide6.QtWidgets import QWidget
 
+from desktop_pet.eyes import capture
 from desktop_pet.pet.fx import make_floating
 
 _SIZE = 44
@@ -36,6 +37,11 @@ class BallWindow(QWidget):
         self._pet_rect = None
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
+
+    def closeEvent(self, event) -> None:
+        # 注销自家窗口登记 别让死句柄堆在 capture._own_hwnds 里(会被 Windows 回收复用误伤别家窗口)
+        capture.unregister_own_window(int(self.winId()))
+        super().closeEvent(event)
 
     def throw_from_top(self, screen, pet_rect) -> None:
         """从屏幕上方丢下来 朝宠物那边滚"""

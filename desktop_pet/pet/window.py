@@ -370,7 +370,9 @@ class PetWindow(QWidget):
 
     def enterEvent(self, event: QEnterEvent) -> None:
         # 鼠标进来逗一下 拖拽睡着藏边时不打扰 带冷却
-        if not self._is_dragging and not self._blob.is_asleep and self._hideout is None:
+        # 演小品时也不打扰:perk_up 是硬打断 一晃鼠标就会把正在钓鱼/读书的非点名小品整段掐掉(连收尾和奖励回调都丢)
+        if (not self._is_dragging and not self._blob.is_asleep and self._hideout is None
+                and not self._blob.in_activity):
             now = time.perf_counter()
             if now - self._last_hover >= _HOVER_COOLDOWN:
                 self._last_hover = now

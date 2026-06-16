@@ -7,6 +7,7 @@ from __future__ import annotations
 import base64
 import ctypes
 import io
+import threading
 import time
 from ctypes import wintypes
 from dataclasses import dataclass
@@ -25,6 +26,8 @@ _WDA_EXCLUDEFROMCAPTURE = 0x11
 _RECOMPOSE_S = 0.06  # 撤标志后等dwm重新合成的间隔
 
 _own_hwnds: set[int] = set()
+# 主线程登记/注销自家窗口(球、虫子随生随灭) worker 线程截图时遍历——加锁+遍历副本 防"set changed size during iteration"
+_own_lock = threading.Lock()
 
 _user32 = ctypes.windll.user32
 _SM = _user32.GetSystemMetrics
@@ -64,8 +67,18 @@ def register_own_window(hwnd: int) -> None:
     """登记自家窗口排除在截图外"""
     if not hwnd:
         return
-    _own_hwnds.add(int(hwnd))
+    with _own_lock:
+        _own_hwnds.add(int(hwnd))
     _set_affinity(int(hwnd), _WDA_EXCLUDEFROMCAPTURE)
+
+
+def unregister_own_window(hwnd: int) -> None:
+    """注销随生随灭的自家窗口(球/虫子关闭时)——否则 _own_hwnds 无限堆积死句柄
+    Windows 会回收 HWND 数值 堆积的旧句柄可能被复用到别家窗口 截图时误把人家排除掉"""
+    if not hwnd:
+        return
+    with _own_lock:
+        _own_hwnds.discard(int(hwnd))
 
 
 def _monitor_rect_at(x: int, y: int) -> tuple[int, int, int, int] | None:
@@ -198,16 +211,18 @@ def grab_active_geom() -> tuple[Image.Image, tuple[int, int, int, int]]:
 
 def _grab(include_self: bool) -> Image.Image:
     """抓屏 include_self时临时放开自家窗口"""
-    if not (include_self and _own_hwnds):
+    with _own_lock:
+        hwnds = list(_own_hwnds)  # 拍一份快照再遍历 主线程此刻 add/discard 都不会撞 RuntimeError
+    if not (include_self and hwnds):
         return grab_active()
-    for hwnd in _own_hwnds:
+    for hwnd in hwnds:
         _set_affinity(hwnd, _WDA_NONE)
     time.sleep(_RECOMPOSE_S)  # 等dwm重新合成
     try:
         return grab_active()
     finally:
         # 还原排除标志
-        for hwnd in _own_hwnds:
+        for hwnd in hwnds:
             _set_affinity(hwnd, _WDA_EXCLUDEFROMCAPTURE)
 
 

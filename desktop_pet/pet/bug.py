@@ -12,6 +12,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QCursor, QLinearGradient, QMouseEvent, QPainter, QPen
 from PySide6.QtWidgets import QWidget
 
+from desktop_pet.eyes import capture
 from desktop_pet.pet.fx import make_floating
 
 _SIZE = 72
@@ -48,6 +49,11 @@ class BugWindow(QWidget):
         self._splats: list[tuple[float, float, float, float]] = []  # 溅墨方向 速度 大小 旋转
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
+
+    def closeEvent(self, event) -> None:
+        # 注销自家窗口登记 别让死句柄堆在 capture._own_hwnds 里(会被 Windows 回收复用误伤别家窗口)
+        capture.unregister_own_window(int(self.winId()))
+        super().closeEvent(event)
 
     def spawn_near(self, x: int, y: int, screen) -> None:
         """在某点附近落地开爬"""
