@@ -100,7 +100,7 @@ _ACTIVITIES = {
     ]),
     "icecream": ("icecream", 0.0, "puff_up", [
         ("hold", 1.6, ""),
-        ("lick", 5.5, "～"),
+        ("bite", 5.5, "～"),
         ("melt", 2.6, "～"),
     ]),
     "paperplane": ("paperplane", 0.0, "celebrate", [

@@ -65,7 +65,13 @@ def draw_weather(painter: QPainter, bw: float, bh: float, kind: str, e: float, t
         for i in range(3):
             px = -span + span * i
             painter.drawLine(QPointF(px, top + bh * 0.25), QPointF(px, top + bh * 0.28))
-        painter.drawLine(QPointF(0, top + bh * 0.25), QPointF(0, -bh * 0.42))
+        grip_y = -bh * 0.36
+        painter.drawLine(QPointF(0, top + bh * 0.25), QPointF(0, grip_y))
+        # 一只圆圆的小手攥住伞柄——别让伞柄悬空插进身体
+        bob = math.sin(t * 1.6) * bh * 0.008
+        painter.setPen(_hand_pen(bw))
+        painter.setBrush(_SKIN)
+        painter.drawEllipse(QPointF(bw * 0.035, grip_y + bob), bw * 0.09, bw * 0.082)
         # 雨丝 伞外落
         pen = QPen(QColor(140, 180, 235, int(190 * e)))
         pen.setWidthF(max(1.3, bw * 0.012))

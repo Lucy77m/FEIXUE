@@ -13,10 +13,11 @@ from desktop_pet.pet.behaviors.easing import ease_out
 
 
 def draw_icecream(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
-    """举个甜筒 舔->融化滴"""
+    """举个甜筒 一口一口往下啃 最后一点在化"""
     cx = bw * 0.30
     cone_top = bh * 0.06
     cw = bw * 0.15
+    # 甜筒始终在
     painter.setPen(QPen(QColor(190, 140, 80), max(1.0, bw * 0.008)))
     painter.setBrush(QColor(222, 175, 110))
     painter.drawPolygon(QPolygonF([QPointF(cx - cw, cone_top), QPointF(cx + cw, cone_top),
@@ -24,18 +25,49 @@ def draw_icecream(painter: QPainter, bw: float, bh: float, t: float, stage: str,
     painter.setPen(QPen(QColor(180, 130, 75, 160), max(0.8, bw * 0.005)))
     for k in (-1, 0, 1):
         painter.drawLine(QPointF(cx + k * cw * 0.5, cone_top), QPointF(cx + k * cw * 0.18, cone_top + bh * 0.32))
-    painter.setPen(Qt.PenStyle.NoPen)
-    painter.setBrush(QColor(245, 200, 215))
-    painter.drawEllipse(QPointF(cx, cone_top - bh * 0.01), cw * 1.05, bh * 0.16)
-    painter.setBrush(QColor(250, 236, 205))
-    painter.drawEllipse(QPointF(cx, cone_top - bh * 0.15), cw * 0.82, bh * 0.13)
-    painter.setBrush(QColor(232, 96, 112))  # 樱桃
-    painter.drawEllipse(QPointF(cx, cone_top - bh * 0.26), cw * 0.18, cw * 0.18)
+
+    # 吃到哪了：hold 没动，bite 一口一口往下啃，melt 剩甜筒口一点在化
+    if stage == "bite":
+        eaten = stage_p
+    elif stage == "melt":
+        eaten = 1.0
+    else:
+        eaten = 0.0
+    n = 5
+    bites = min(n, int(eaten * n + 1e-6))  # 离散一口口 不是平滑缩
+    food_top = cone_top - bh * 0.26 - cw * 0.18  # 樱桃顶上一点
+    bite_y = food_top + (cone_top - food_top) * (bites / n)  # 啃线一格格下移到甜筒口
+
+    if bites < n:
+        # 啃线以下才画——上面被吃掉了
+        painter.save()
+        painter.setClipRect(QRectF(cx - cw * 1.4, bite_y, cw * 2.8, bh))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(245, 200, 215))  # 粉球
+        painter.drawEllipse(QPointF(cx, cone_top - bh * 0.01), cw * 1.05, bh * 0.16)
+        painter.setBrush(QColor(250, 236, 205))  # 奶油球
+        painter.drawEllipse(QPointF(cx, cone_top - bh * 0.15), cw * 0.82, bh * 0.13)
+        painter.setBrush(QColor(232, 96, 112))  # 樱桃
+        painter.drawEllipse(QPointF(cx, cone_top - bh * 0.26), cw * 0.18, cw * 0.18)
+        painter.restore()
+        if bites > 0:
+            # 啃线上一排小扇贝 露出被咬的断面
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(255, 228, 238))
+            scn = 4
+            sw = cw * 1.8 / scn
+            for i in range(scn):
+                painter.drawEllipse(QPointF(cx - cw * 0.9 + sw * (i + 0.5), bite_y), sw * 0.55, bh * 0.024)
+
     if stage == "melt":
+        # 甜筒口残留的一点在化、往下滴
         d = ease_out(stage_p)
-        painter.setBrush(QColor(245, 200, 215, 220))
-        painter.drawEllipse(QPointF(cx + cw * 0.7, cone_top + bh * 0.05 + d * bh * 0.10),
-                            bw * 0.02, bh * 0.04 + d * bh * 0.05)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(245, 200, 215, 230))
+        painter.drawEllipse(QPointF(cx, cone_top - bh * 0.02), cw * 0.5 * (1 - d * 0.5), bh * 0.04)
+        painter.setBrush(QColor(245, 200, 215, 200))
+        painter.drawEllipse(QPointF(cx + cw * 0.55, cone_top + d * bh * 0.08),
+                            bw * 0.018, bh * 0.03 + d * bh * 0.05)
 
 
 def draw_bubbletea(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
