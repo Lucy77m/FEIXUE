@@ -9,7 +9,7 @@ import threading
 from datetime import datetime
 
 
-from desktop_pet import i18n, occasions, presence
+from desktop_pet import i18n, occasions, presence, stats
 from desktop_pet.emotion.state import emotion
 from desktop_pet.eyes.radar import radar
 from desktop_pet.proactive import proactive
@@ -20,8 +20,10 @@ _AWAY_S = 150.0
 _AWAY_NIGHT_S = 75.0
 _PROACTIVE_RAPPORT_GATE = {"安静": 0.45, "正常": 0.30, "话痨": 0.15}
 _PROACTIVE_RAPPORT_GATE_DEFAULT = 0.30
+_HONEYMOON_GATE = 0.15  # 蜜月期把关系门槛压到地板 让新桌宠从第一天就开口
 _EXPLORE_CHANCE = 0.3
 _PEEK_MIN_INTERVAL_S = 600.0
+_LONG_AWAY_S = 3 * 3600.0  # 离开超过这个时长 回来时热络一点
 
 
 class AutonomyMixin:
@@ -42,6 +44,7 @@ class AutonomyMixin:
         if presence.idle_seconds() >= away:
             if not self._pet.is_asleep:
                 self._pet.fall_asleep()
+                self._asleep_since = datetime.now()  # 记下睡着的时刻 回来时据此分级招呼
         elif self._pet.is_asleep and not self._pet.is_catnapping:
             self._wake()
             self._just_returned = True
@@ -228,6 +231,8 @@ class AutonomyMixin:
         level = s.proactive_level
         _val, _aro, rapport = emotion.snapshot()
         gate = _PROACTIVE_RAPPORT_GATE.get(level, _PROACTIVE_RAPPORT_GATE_DEFAULT)
+        if stats.is_honeymoon():
+            gate = min(gate, _HONEYMOON_GATE)  # 新桌宠先靠在场挣关系 别先要关系才肯露面
         if rapport < gate:
             return
         now = datetime.now()
@@ -236,7 +241,8 @@ class AutonomyMixin:
             self._just_returned = False
             proactive.record(now, level)
             dream = self._dreams.take_dream_hint()  # 睡着时做了梦就迷糊提一句
-            self.request_proactive.emit("welcome_back", (context + "\n" + dream) if dream else context)
+            bits = [b for b in (context, self._away_note(now), dream) if b]
+            self.request_proactive.emit("welcome_back", "\n".join(bits))
             return
         self._just_returned = False
         if not proactive.ready(now, level):
@@ -260,6 +266,18 @@ class AutonomyMixin:
         if not title or len(title) > 120:
             return ""
         return f"（此刻 ta 正在用的窗口是：「{title}」——可作为你搭话的由头，但别照念窗口标题。）"
+
+    def _away_note(self, now: datetime) -> str:
+        """据离开时长给回来招呼分级 短暂离开不加料 久别/跨天才热络"""
+        since = getattr(self, "_asleep_since", None)
+        if since is None:
+            return ""
+        if now.date() != since.date():
+            return "（ta 跨了一天才回来——像久违重逢那样热络一点，但仍只一句话。）"
+        gone = (now - since).total_seconds()
+        if gone >= _LONG_AWAY_S:
+            return f"（ta 离开了大约 {int(gone // 3600)} 个小时才回来——可以说得更想它/想念一点，别夸张，一句话。）"
+        return ""
 
     @staticmethod
     def _pick_proactive_mode(now: datetime) -> str:

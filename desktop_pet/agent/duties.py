@@ -72,8 +72,9 @@ class DutiesMixin:
         nudge = prompts.spontaneous_nudge(mode)
         if context.strip():
             nudge = context.strip() + "\n" + nudge
+        # 拿当下情境当线索 让记忆召回聚焦在"此刻相关"的事上 而非泛泛取一把
         messages = copy.deepcopy(self._messages) + [
-            {"role": "user", "content": self._turn_context() + "\n\n" + nudge}
+            {"role": "user", "content": self._turn_context(context or None) + "\n\n" + nudge}
         ]
         try:
             resp = self._client().chat.completions.create(

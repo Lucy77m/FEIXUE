@@ -98,5 +98,12 @@ def snapshot() -> dict:
     }
 
 
+def is_honeymoon(days_max: int = 3, inter_max: int = 20) -> bool:
+    """新桌宠的蜜月期 头几天或互动还少时为真——主动性别被关系门槛卡死
+    让它先靠在场和陪伴挣关系 而不是先要关系才肯露面"""
+    s = snapshot()
+    return s["days"] <= days_max or s["interactions"] < inter_max
+
+
 def clear() -> None:
     _save({})
