@@ -319,11 +319,14 @@ class LifecycleMixin:
             pass
         self._thread.quit()
         self._thread.wait(3000)
+        # 硬退之前干净关掉两个 SQLite 库——锁住等后台反思的在途 commit 收尾再关。
+        # 关完磁盘上的库就是一致的，进程随后退出也不会把它截断成 malformed（库损坏根因）
+        for db in (store, docs):
+            try:
+                db.close()
+            except Exception:
+                pass
+        # os._exit 直接走 C _exit 立即终止 不跑 Qt 析构/不对自身 TerminateProcess
+        # ——那两样都在多线程退出时引发过 access violation；os._exit 可靠且不触发析构故障
         self._app.quit()
-        # 正常quit卡死时兜底硬杀
-        try:
-            import ctypes
-            ctypes.windll.kernel32.TerminateProcess(ctypes.windll.kernel32.GetCurrentProcess(), 0)
-        except Exception:
-            pass
         os._exit(0)

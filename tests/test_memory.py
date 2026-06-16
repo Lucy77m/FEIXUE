@@ -330,3 +330,35 @@ def test_fts_backfill_on_existing_db(tmp_path, monkeypatch):
     m2 = MemoryStore(db)
     out = m2.recall_relevant("KeyError", k=2)
     assert any("KeyError" in c for c in out), "重开后历史数据该被FTS回填能召回"
+
+
+def test_close_keeps_db_consistent_under_concurrent_writes(mem, tmp_path):
+    """退出根治:close() 锁住等在途写收尾再关——后台反思在写时关闭 也不把库截断成 malformed"""
+    import sqlite3
+    import threading
+    import time
+
+    for _ in range(8):
+        mem.remember("今天天气很好", salience=0.5)
+    stop = [False]
+
+    def hammer():
+        while not stop[0]:
+            try:
+                mem.remember("我平时用npm管包", salience=0.3)
+            except Exception:
+                break  # close 后写失败是正常的(被吞)
+
+    threading.Thread(target=hammer, daemon=True).start()
+    time.sleep(0.02)
+    mem.close()          # 带锁关:等在途 commit 收尾
+    stop[0] = True
+    time.sleep(0.03)
+
+    # 重开:库可读 + integrity_check=ok 证明没被截断成损坏
+    conn = sqlite3.connect(tmp_path / "m.db")
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM experiences").fetchone()[0] >= 1
+        assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    finally:
+        conn.close()

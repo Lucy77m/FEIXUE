@@ -230,6 +230,19 @@ class MemoryStore:
                 # 库损坏(异常退出常留下)时 DELETE 走不通——整个重建 保证重置一定清干净
                 self._rebuild()
 
+    def close(self) -> None:
+        """退出前干净关闭——锁住等任何在途写(如后台反思的 commit)收尾再关。
+        关完磁盘上的库就是一致的 之后进程被硬杀也不会把 SQLite 截断成 malformed(损坏根因)"""
+        with self._lock:
+            try:
+                self._conn.commit()
+            except Exception:
+                pass
+            try:
+                self._conn.close()
+            except Exception:
+                pass
+
     def _rebuild(self) -> None:
         """删掉损坏的库文件 重连建空表 让重置在库坏掉时也一定生效"""
         try:

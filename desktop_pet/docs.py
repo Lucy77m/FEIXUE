@@ -304,6 +304,18 @@ class DocStore:
             self._conn.commit()
         return cur.rowcount
 
+    def close(self) -> None:
+        """退出前干净关闭——锁住等在途写收尾再关 防硬杀截断成损坏库"""
+        with self._lock:
+            try:
+                self._conn.commit()
+            except Exception:
+                pass
+            try:
+                self._conn.close()
+            except Exception:
+                pass
+
 
 def read_file_text(path: str) -> str | None:
     """取文件纯文本 pdf走抽取ocr 读不出给None"""
