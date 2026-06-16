@@ -119,6 +119,7 @@ class DocStore:
     def __init__(self) -> None:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
+        self._closing = False  # close() 置位 在途入库 daemon 据此别往已关连接写
         self._conn = sqlite3.connect(_DB_PATH, check_same_thread=False)
         self._fts = False
         try:
@@ -269,6 +270,8 @@ class DocStore:
             return -1
         # 短事务:锁内只做删旧块 + 批量插新块 不碰网络
         with self._lock:
+            if self._closing:  # 退出已开始关库:别往(即将)关掉的连接写 投喂入库的 daemon 没被 join 可能晚到这
+                return -1
             self._conn.execute("DELETE FROM chunks WHERE source = ?", (source,))
             self._conn.executemany(
                 "INSERT INTO chunks(source, idx, content, embedding) VALUES (?, ?, ?, ?)", prepared
@@ -362,6 +365,7 @@ class DocStore:
     def close(self) -> None:
         """退出前干净关闭——锁住等在途写收尾再关 防硬杀截断成损坏库"""
         with self._lock:
+            self._closing = True  # 置位后在途入库的锁内段会早退 不再 INSERT 到即将关掉的连接
             try:
                 self._conn.commit()
             except Exception:

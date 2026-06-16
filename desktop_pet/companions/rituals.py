@@ -94,7 +94,7 @@ class Rituals(QObject):
             try:
                 today = datetime.now().date().isoformat()
                 for it in reversed(journal.recent(6)):
-                    if str(it.get("ts", "")).startswith(today):
+                    if str(it.get("at", "")).startswith(today):  # journal 存的是 "at" 不是 "ts"——用错键 带日记的告别永远不触发
                         line = str(it.get("text", ""))[:42]
                         break
             except Exception:
