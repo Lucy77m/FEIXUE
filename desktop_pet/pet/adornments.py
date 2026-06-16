@@ -53,25 +53,27 @@ def draw_weather(painter: QPainter, bw: float, bh: float, kind: str, e: float, t
     """天气装饰 雨伞 雪人 化水"""
     kind = kind or ("rain" if e > 0 else "")
     if kind == "rain":
-        # 头顶小伞 伞下安全 周围雨丝
+        # 伞偏左、举在左手里 罩住头 周围雨丝
         k = ease_out(e)
+        ux = -bw * 0.20                 # 伞往左偏 不在正中
         top = -bh * (0.55 + 0.32 * k)
         painter.setPen(QPen(_INK, max(1.5, bw * 0.015)))
         painter.setBrush(QColor(122, 108, 255, int(235 * e)))
-        span = bw * 0.55
-        painter.drawChord(QRectF(-span, top, span * 2, bh * 0.5), 0, 180 * 16)
-        # 伞骨尖和柄
+        span = bw * 0.5
+        painter.drawChord(QRectF(ux - span, top, span * 2, bh * 0.5), 0, 180 * 16)
+        # 伞骨尖
         painter.setBrush(Qt.BrushStyle.NoBrush)
         for i in range(3):
-            px = -span + span * i
+            px = ux - span + span * i
             painter.drawLine(QPointF(px, top + bh * 0.25), QPointF(px, top + bh * 0.28))
-        grip_y = -bh * 0.36
-        painter.drawLine(QPointF(0, top + bh * 0.25), QPointF(0, grip_y))
-        # 一只圆圆的小手攥住伞柄——别让伞柄悬空插进身体
+        # 长伞柄：从伞面一路斜下来 到左下方的左手（手臂高度 不在头上）
+        hand_x, hand_y = -bw * 0.36, bh * 0.22
+        painter.drawLine(QPointF(ux, top + bh * 0.25), QPointF(hand_x, hand_y))
+        # 左手攥住伞柄末端
         bob = math.sin(t * 1.6) * bh * 0.008
         painter.setPen(_hand_pen(bw))
         painter.setBrush(_SKIN)
-        painter.drawEllipse(QPointF(bw * 0.035, grip_y + bob), bw * 0.09, bw * 0.082)
+        painter.drawEllipse(QPointF(hand_x, hand_y + bob), bw * 0.095, bw * 0.088)
         # 雨丝 伞外落
         pen = QPen(QColor(140, 180, 235, int(190 * e)))
         pen.setWidthF(max(1.3, bw * 0.012))
@@ -79,7 +81,7 @@ def draw_weather(painter: QPainter, bw: float, bh: float, kind: str, e: float, t
         for i in range(5):
             ph = (t * 0.9 + i * 0.23) % 1.0
             side = -1 if i % 2 == 0 else 1
-            rx = side * (bw * 0.66 + (i % 3) * bw * 0.08)
+            rx = ux + side * (bw * 0.5 + (i % 3) * bw * 0.08)
             ry = -bh * 0.5 + ph * bh * 1.0
             painter.drawLine(QPointF(rx, ry), QPointF(rx - bw * 0.02, ry + bh * 0.07))
     elif kind == "snow":
