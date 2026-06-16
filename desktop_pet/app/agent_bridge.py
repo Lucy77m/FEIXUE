@@ -46,6 +46,8 @@ class AgentBridgeMixin:
         self._on_reply(raw)
 
     def _on_reply(self, raw: str) -> None:
+        if not self._shown:
+            return  # 关机/退出后才回来的回复(取消前排队的那一回合)别再弹气泡说话
         tag, text = _parse_emotion(raw)
         self._pet.express(tag)
         self._reset_lecture()

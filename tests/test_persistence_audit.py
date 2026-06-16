@@ -86,6 +86,32 @@ def test_wipe_bumps_reset_epoch(tmp_path):
     m.close()
 
 
+def test_bump_epoch_invalidates_inflight_writes(tmp_path):
+    """换话题(bump_epoch)/重置(wipe)后 带旧代数的反思写入应锁内丢弃(板块⑧:反思/合并把已丢弃记忆写回)"""
+    from desktop_pet.memory.store import MemoryStore
+    m = MemoryStore(tmp_path / "m.db")
+    e0 = m.reset_epoch()
+    assert "Remembered" in m.remember("带对代数", epoch=e0), "代数一致该正常写"
+    m.bump_epoch()  # 模拟换话题
+    for call in (lambda: m.remember("x", epoch=e0), lambda: m.set_preference("k", "v", epoch=e0),
+                 lambda: m.note_env("k", "v", epoch=e0), lambda: m.add_opinion("o", epoch=e0)):
+        assert "reset/topic changed" in call(), "带旧代数的写入该被丢弃"
+    # 无 epoch 参数的正常写入不受影响(工具直调路径)
+    assert "Remembered" in m.remember("普通写不传epoch")
+    m.close()
+
+
+def test_wipe_also_bumps_epoch_for_guard(tmp_path):
+    """wipe 同样推进代数 让带旧代数的在途反思写入失效"""
+    from desktop_pet.memory.store import MemoryStore
+    m = MemoryStore(tmp_path / "m.db")
+    e0 = m.reset_epoch()
+    m.wipe()
+    assert m.reset_epoch() == e0 + 1
+    assert "reset/topic changed" in m.add_opinion("旧看法", epoch=e0)
+    m.close()
+
+
 def test_store_writes_skip_when_closing(tmp_path):
     """关库进行中 各写入方法静默跳过 不往已关连接写(板块②#8)"""
     from desktop_pet.memory.store import MemoryStore

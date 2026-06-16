@@ -103,6 +103,7 @@ class Agent(HistoryMixin, ToolHandlersMixin, SubagentsMixin, DutiesMixin):
         self._oa_client: OpenAI | None = None
         self._oa_creds: tuple[str, str, str] | None = None
         self._client_lock = threading.Lock()
+        self._closing = False  # close()/cancel 置位:在途反思/压缩 daemon 据此别再造新 OpenAI client 漏掉 httpx 池
         self._retired_clients: list = []  # 配置变了换下来的旧 client——可能仍有线程在流式用着 不当场关 退出时统一收
         self._shell = shell.new_session()
         self._python = pycode.new_runner()
@@ -170,6 +171,7 @@ class Agent(HistoryMixin, ToolHandlersMixin, SubagentsMixin, DutiesMixin):
 
     def new_topic(self) -> None:
         """只清当前对话 长期记忆保留"""
+        store.bump_epoch()  # 让上一段对话在途的反思作废:它总结的是被丢弃的话题 不该再写进长期记忆/persona/journal
         self._reset_compressed()
         self._known_files.clear()
         self._clear_session_file()
@@ -239,6 +241,7 @@ class Agent(HistoryMixin, ToolHandlersMixin, SubagentsMixin, DutiesMixin):
         self._tools = self._build_tools()
 
     def close(self) -> None:
+        self._closing = True  # 终态:之后晚到的反思/压缩 daemon 调 _client() 会被拒 不再造没人关的 client
         if self._depth == 0:
             self._save_session()
         self._shell.close()
@@ -586,6 +589,9 @@ class Agent(HistoryMixin, ToolHandlersMixin, SubagentsMixin, DutiesMixin):
         """懒建缓存openai客户端 配置变了重建"""
         creds = (self._settings.api_key, self._settings.base_url, self._settings.proxy)
         with self._client_lock:
+            if self._closing and self._oa_client is None:
+                # 已关停:别再为晚到的反思/压缩 daemon 造一个没人会去关的 client(httpx 池泄漏)
+                raise RuntimeError("agent is closing")
             if self._oa_client is None or self._oa_creds != creds:
                 old = self._oa_client
                 self._oa_client = OpenAI(

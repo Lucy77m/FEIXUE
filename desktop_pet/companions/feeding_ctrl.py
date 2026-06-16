@@ -30,6 +30,7 @@ class FeedingCtrl(QObject):
         self._feed_pending: tuple[list, int] | None = None
         self._feed_doc: str | None = None
         self._sizing = False  # 正在后台量这次投喂的总大小 期间挡住叠加
+        self._stopped = False  # 退出已开始:别再在 farewell 的 1.7s 里启动会被 os._exit 截断的回收站删除
         self._feed_confirm = ConfirmBox()
         from desktop_pet.eyes import capture
         capture.register_own_window(int(self._feed_confirm.winId()))
@@ -43,7 +44,8 @@ class FeedingCtrl(QObject):
         pass
 
     def stop(self) -> None:
-        pass
+        # 置位:已排进队列的 _finish_eat(1.7s 延时)发现已停就不删了——别让 os._exit 把回收站操作截成半截
+        self._stopped = True
 
     @Slot(list)
     def _on_fed(self, paths: list) -> None:
@@ -129,6 +131,8 @@ class FeedingCtrl(QObject):
         QTimer.singleShot(1700, lambda: self._finish_eat(paths, total))
 
     def _finish_eat(self, paths: list, total: int) -> None:
+        if self._stopped:
+            return  # 退出中:这次咽下去就别真删了 留着文件 下次启动可重喂(好过 os._exit 把删除截半)
         # 真删文件:回收站 COM(SHFileOperation)+ 失败重试含 time.sleep + 占用诊断(逐个文件 CreateFile)
         # 全是慢的阻塞活 放后台线程做 别冻住 Qt 事件循环(否则拖个文件夹桌宠/动画/热键卡好几秒)
         def work() -> None:

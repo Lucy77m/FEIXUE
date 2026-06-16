@@ -267,16 +267,17 @@ class DutiesMixin:
             return
         try:
             snapshot = copy.deepcopy(self._messages)
+            peak = getattr(self, "_turn_emotion_peak", 0.5)  # 此刻就抓住本回合情绪峰值 别等 daemon 晚点去读(那时可能被下一回合覆盖)
             threading.Thread(
-                target=self._reflect, args=(snapshot,), daemon=True, name="star-reflect"
+                target=self._reflect, args=(snapshot, peak), daemon=True, name="star-reflect"
             ).start()
         except Exception:
             _REFLECT_SEMAPHORE.release()
 
-    def _reflect(self, snapshot: list[dict]) -> None:
+    def _reflect(self, snapshot: list[dict], peak: float = 0.5) -> None:
         """反思线程体 提炼json写进各存储"""
         try:
-            epoch0 = store.reset_epoch()  # 开工前记下重置代数 反思要花几秒网络 期间可能被重置
+            epoch0 = store.reset_epoch()  # 开工前记下重置代数 反思要花几秒网络 期间可能被重置/换话题
             core = store.core_memories(4)
             core_block = (
                 "\n\n[Your core memories — the formative moments that made you who you are; "
@@ -296,8 +297,7 @@ class DutiesMixin:
             if not data:
                 return
             if store.reset_epoch() != epoch0:
-                return  # 反思期间用户点了重置——别把刚清掉的记忆又写回去(重置静默失效)
-            peak = getattr(self, "_turn_emotion_peak", 0.5)
+                return  # 反思期间用户重置/换了话题——别把已丢弃的记忆又写回去(重置静默失效)
             for experience in (data.get("experiences") or [])[:5]:
                 text, weight = "", 0.3
                 if isinstance(experience, dict):  # 新格式 {text, weight}
@@ -309,22 +309,25 @@ class DutiesMixin:
                 elif isinstance(experience, str):  # 兼容旧格式 纯字符串
                     text = experience.strip()
                 if text:
-                    # 模型判断的形成性为主 当下情绪强度为辅
+                    # 模型判断的形成性为主 当下情绪强度为辅;epoch 传进去 锁内再校验一次 嵌入期间被重置就丢弃
                     salience = max(0.0, min(1.0, 0.55 * weight + 0.45 * peak))
-                    store.remember(text, salience=salience)
+                    store.remember(text, salience=salience, epoch=epoch0)
             preferences = data.get("preferences")
             if isinstance(preferences, dict):
                 for key, value in preferences.items():
                     if isinstance(key, str) and isinstance(value, (str, int, float)):
-                        store.set_preference(key, str(value))
+                        store.set_preference(key, str(value), epoch=epoch0)
             env = data.get("env")
             if isinstance(env, dict):
                 for key, value in env.items():
                     if isinstance(key, str) and isinstance(value, (str, int, float)):
-                        store.note_env(key, str(value))
+                        store.note_env(key, str(value), epoch=epoch0)
             for op in (data.get("opinions") or [])[:3]:
                 if isinstance(op, str) and op.strip():
-                    store.add_opinion(op.strip())
+                    store.add_opinion(op.strip(), epoch=epoch0)
+            # journal/persona 没有 epoch 概念 写之前再核一次重置代数——重置/换话题后别把旧日记/旧自我画像写回去
+            if store.reset_epoch() != epoch0:
+                return
             episode = data.get("episode")
             if isinstance(episode, str) and episode.strip():
                 journal.add(episode.strip())

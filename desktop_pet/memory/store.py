@@ -237,8 +237,13 @@ class MemoryStore:
                 self._rebuild()
 
     def reset_epoch(self) -> int:
-        """当前重置代数——后台反思开工时取一份 写回前再取一份 不一致说明中途被重置了 该丢弃"""
+        """当前重置代数——后台反思/合并开工时取一份 写回前再比 不一致说明中途被重置(wipe)或换了话题 该丢弃"""
         return self._epoch
+
+    def bump_epoch(self) -> None:
+        """换话题也要让在途反思作废:它总结的是被丢弃的那段对话 不该再写进长期记忆(对齐 wipe 的自增)"""
+        with self._lock:
+            self._epoch += 1
 
     def close(self) -> None:
         """退出前干净关闭——锁住等任何在途写(如后台反思的 commit)收尾再关。
@@ -271,7 +276,7 @@ class MemoryStore:
 
     _OPINION_KEEP = 14
 
-    def add_opinion(self, content: str) -> str:
+    def add_opinion(self, content: str, epoch: int | None = None) -> str:
         """记一条它自己的看法 近似重复就刷新时间 超量裁老的"""
         content = (content or "").strip()
         if not content:
@@ -279,6 +284,8 @@ class MemoryStore:
         with self._lock:
             if self._closing:  # 关库进行中 别往(即将)关掉的连接写 防 ProgrammingError
                 return "(skipped — shutting down)"
+            if epoch is not None and epoch != self._epoch:
+                return "(skipped — memory was reset/topic changed)"
             rows = self._conn.execute(
                 "SELECT id, content FROM opinions ORDER BY id DESC LIMIT 30"
             ).fetchall()
@@ -335,10 +342,12 @@ class MemoryStore:
         tail = f" (+{len(removed) - 5} more)" if len(removed) > 5 else ""
         return f"Forgot {len(removed)} memory item(s): " + "; ".join(removed[:5]) + tail
 
-    def set_preference(self, key: str, value: str) -> str:
+    def set_preference(self, key: str, value: str, epoch: int | None = None) -> str:
         with self._lock:
             if self._closing:
                 return "(skipped — shutting down)"
+            if epoch is not None and epoch != self._epoch:
+                return "(skipped — memory was reset/topic changed)"
             self._conn.execute(
                 "INSERT INTO profile(key, value) VALUES (?, ?) "
                 "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -347,8 +356,9 @@ class MemoryStore:
             self._conn.commit()
         return f"Saved preference: {key} = {value}"
 
-    def remember(self, content: str, salience: float = 0.5) -> str:
-        """存一条经验 撞重复改更新 salience为情感显著性0~1"""
+    def remember(self, content: str, salience: float = 0.5, epoch: int | None = None) -> str:
+        """存一条经验 撞重复改更新 salience为情感显著性0~1
+        epoch:后台反思传入开工时的代数 嵌入(网络慢活)期间若发生重置/换话题 锁内会发现代数变了直接丢弃"""
         content = content.strip()
         if not content:
             return "(nothing to remember)"
@@ -358,13 +368,15 @@ class MemoryStore:
         with self._lock:
             if self._closing:
                 return "(skipped — shutting down)"
+            if epoch is not None and epoch != self._epoch:
+                return "(skipped — memory was reset/topic changed)"
             added = self._insert_experience(
                 content, ts=_now(), confidence=1.0, source="reflection", vector=vector, salience=salience
             )
             self._conn.commit()
         return f"Remembered: {content}" if added else f"(similar memory already exists; updated instead of duplicating: {content})"
 
-    def note_env(self, key: str, value: str) -> str:
+    def note_env(self, key: str, value: str, epoch: int | None = None) -> str:
         """记一条环境事实 同key覆盖"""
         key, value = key.strip(), value.strip()
         if not key:
@@ -372,6 +384,8 @@ class MemoryStore:
         with self._lock:
             if self._closing:
                 return "(skipped — shutting down)"
+            if epoch is not None and epoch != self._epoch:
+                return "(skipped — memory was reset/topic changed)"
             self._conn.execute(
                 "INSERT INTO env(key, value, ts, confidence, source) VALUES (?, ?, ?, 1.0, 'observed') "
                 "ON CONFLICT(key) DO UPDATE SET value = excluded.value, ts = excluded.ts, confidence = 1.0",
@@ -475,6 +489,7 @@ class MemoryStore:
         clusters = self._find_clusters()
         if not clusters:
             return 0
+        epoch0 = self._epoch  # 合并要做多次秒级 LLM 调用 期间可能被重置——发现代数变了就别把已删的旧经验揉一份写回去
         count = 0
         for members in clusters:
             texts = [c for _id, c in members]
@@ -490,6 +505,8 @@ class MemoryStore:
             member_ids = [rid for rid, _c in members]
             with self._lock:
                 if self._closing:  # 退出已开始关库 别再往(即将)关掉的连接写 这次合并丢了就丢了
+                    break
+                if self._epoch != epoch0:  # 合并途中库被重置了 别把刚清掉的经验又揉一条写回去
                     break
                 # 概括以高显著性入库 来源标consolidation 自带last_seen
                 self._conn.execute(

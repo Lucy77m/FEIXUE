@@ -291,15 +291,18 @@ class LifecycleMixin:
                 c.stop()
             except Exception:
                 pass
-        if self._rituals.farewell():
-            return
-        self._requeue_timed()  # 没派发的定时(do)任务写回 reminders 持久化 别随 os._exit 一起丢掉
+        # 在 farewell 挥手那 1.7s 之前就停掉四个核心轮询并标记取消——否则这段时间它们还会往 worker
+        # 排主动搭话/提醒/定时/看屏的活 一个刚起的回合可能正用着子进程 第二趟 shutdown 杀进程时就撞上了
+        self._cancelling = True
         for _t in (self._presence_timer, self._reminder_timer, self._proactive_timer,
                    self._watch_timer):
             try:
                 _t.stop()
             except Exception:
                 pass
+        if self._rituals.farewell():
+            return
+        self._requeue_timed()  # 没派发的定时(do)任务写回 reminders 持久化 别随 os._exit 一起丢掉
         self._hotkeys.stop()
         try:
             hearing.shutdown()
