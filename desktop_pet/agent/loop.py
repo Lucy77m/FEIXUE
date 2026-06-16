@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import json
 import threading
 import time
 from collections.abc import Callable
@@ -34,8 +35,10 @@ from desktop_pet.agent.loopdefs import (
     _INPUT_TOOL_HINT,
     _MAX_EMPTY_RETRIES,
     _MAX_PARALLEL_SUBAGENTS,
+    _MAX_PARALLEL_TOOLS,
     _MAX_RETRIES,
     _MAX_SUBAGENT_DEPTH,
+    _PARALLEL_SAFE,
     _PERFORM_TOOL,
     _PLAN_TOOL,
     _REFLECT_MIN_CHARS,
@@ -46,6 +49,7 @@ from desktop_pet.agent.loopdefs import (
     _RUN_CANCELLED,
     _SHELL_TOOLS,
     _SPAWN_TOOL,
+    _STUCK_LIMIT,
     _SUBAGENT_BUDGET,
     _WATCH_TOOL,
     _WEB_TOOLS,
@@ -118,12 +122,15 @@ class Agent(HistoryMixin, ToolHandlersMixin, SubagentsMixin, DutiesMixin):
         self._turn_used_tools = False
         self._turn_substantive = True
         self._turn_emotion_peak = 0.5  # 本轮情绪强度峰值 喂给记忆显著性
+        self._stuck: dict[str, int] = {}  # 本轮同名同参的连续失败计数 撞顶提醒换思路
+        self._stuck_warned: set[str] = set()  # 已就某签名提醒过 一轮只提一次
         self._hit_step_limit = False
         self._last_active = 0.0
         self._turn_user_idx = -1
         self._strip_extra_body = False  # 网关不认非标参数 400后记下不再发
         self._strip_temperature = False  # 新claude等模型不收temperature 同样剥
         self._strip_stream_options = False
+        self._strip_cache_key = False  # 网关不认prompt_cache_key就剥
         if depth == 0:
             self._try_restore_session()  # 只主代理恢复上次会话
 
@@ -331,6 +338,8 @@ class Agent(HistoryMixin, ToolHandlersMixin, SubagentsMixin, DutiesMixin):
         self._turn_used_tools = False
         self._hit_step_limit = False
         self._risk_approval = False
+        self._stuck = {}
+        self._stuck_warned = set()
         self._on_perform = on_perform
         if self._owns_cancel:
             self._cancel.clear()
@@ -426,6 +435,24 @@ class Agent(HistoryMixin, ToolHandlersMixin, SubagentsMixin, DutiesMixin):
                     for future in as_completed(futures):
                         results[futures[future]] = tools.ToolResult(future.result())
 
+            # 一回合里多个只读工具并发跑 互不依赖 多工具回合提速明显
+            # 只取 _PARALLEL_SAFE——run_shell/run_python 共享单会话不能并发 留给串行
+            par = [(c, a) for c, a in parsed
+                   if c.id not in results and a is not None and c.function.name in _PARALLEL_SAFE]
+            if len(par) > 1:
+                for c, a in par:
+                    step(describe_step(c.function.name, a))
+                with ThreadPoolExecutor(max_workers=min(_MAX_PARALLEL_TOOLS, len(par))) as pool:
+                    futures = {
+                        pool.submit(tools.dispatch, c.function.name, a,
+                                    shell_session=self._shell, py_session=self._python): c.id
+                        for c, a in par
+                    }
+                    for future in as_completed(futures):
+                        results[futures[future]] = future.result()
+                for c, a in par:
+                    self._note_file(c.function.name, a)  # read_file 的 mtime 记账 串行做避免并发写 dict
+
             for call, arguments in parsed:
                 if call.id in results:
                     continue
@@ -479,6 +506,26 @@ class Agent(HistoryMixin, ToolHandlersMixin, SubagentsMixin, DutiesMixin):
                     images.append(result.image_data_url)
             if images:
                 self._append_images(images)
+            # 同名同参连续失败 撞顶回灌一句"别原地打转换思路" 一轮每签名只提一次
+            # 每步每签名只计一次——一条响应里重复同样调用不该一步就把计数顶上去
+            failed_sigs: set[str] = set()
+            ok_sigs: set[str] = set()
+            for call, arguments in parsed:
+                sig = self._stuck_sig(call, arguments)
+                (failed_sigs if self._looks_failed(results[call.id].text) else ok_sigs).add(sig)
+            for sig in ok_sigs - failed_sigs:
+                self._stuck[sig] = 0  # 本步成功的 streak 清零
+            stuck_hits: list[str] = []
+            for sig in failed_sigs:
+                self._stuck[sig] = self._stuck.get(sig, 0) + 1
+                if self._stuck[sig] >= _STUCK_LIMIT and sig not in self._stuck_warned:
+                    self._stuck_warned.add(sig)
+                    stuck_hits.append(sig.split("\x00", 1)[0])
+            if stuck_hits:
+                self._messages.append({
+                    "role": "user",
+                    "content": prompts.repeat_stuck_nudge("、".join(dict.fromkeys(stuck_hits))),
+                })
             if self._cancel.is_set():
                 self._seal_cancelled()
                 return _RUN_CANCELLED
@@ -529,6 +576,7 @@ class Agent(HistoryMixin, ToolHandlersMixin, SubagentsMixin, DutiesMixin):
                 self._strip_extra_body = False
                 self._strip_stream_options = False
                 self._strip_temperature = False
+                self._strip_cache_key = False
                 if old is not None:
                     try:
                         old.close()
@@ -561,15 +609,20 @@ class Agent(HistoryMixin, ToolHandlersMixin, SubagentsMixin, DutiesMixin):
             params["extra_body"] = {"enable_thinking": self._settings.enable_thinking}
         if not self._strip_stream_options:
             params["stream_options"] = {"include_usage": True}
+        if not self._strip_cache_key:
+            # 稳定key帮服务端把同前缀的多步请求路由到同一缓存 提命中率省钱
+            # 系统前缀整轮稳定、历史只追加 本就缓存友好 这是再添一把routing提示
+            params["prompt_cache_key"] = f"mochi-d{self._depth}"
         try:
             stream = self._create_stream(params)
         except BadRequestError as exc:
             # 非标参数400就逐个剥掉重试 错误消息点名的先剥 剥光还炸才抛
-            order = [("extra_body", "_strip_extra_body"),
-                     ("temperature", "_strip_temperature"),
-                     ("stream_options", "_strip_stream_options")]
-            if "temperature" in str(exc).lower():
-                order.insert(0, order.pop(1))
+            order = self._strip_order([
+                ("extra_body", "_strip_extra_body"),
+                ("temperature", "_strip_temperature"),
+                ("stream_options", "_strip_stream_options"),
+                ("prompt_cache_key", "_strip_cache_key"),
+            ], str(exc))
             last = exc
             stream = None
             for key, flag in order:
@@ -628,6 +681,39 @@ class Agent(HistoryMixin, ToolHandlersMixin, SubagentsMixin, DutiesMixin):
         if self._strip_extra_body:
             return False
         return "api.openai.com" not in (self._settings.base_url or "").lower()
+
+    @staticmethod
+    def _looks_failed(text: str) -> bool:
+        """工具结果是不是一条失败回执 用于卡死检测。只看首行——失败回执的标记词都在
+        首行方括号里；而分页读文件 '[chars..of..]'、后台轮询 '[..still running..]' 这些
+        成功结果的标记词出现在正文里，扫全文会把成功的读/轮询误判成失败"""
+        t = (text or "").lstrip()
+        if not t.startswith("["):  # 失败回执统一裹方括号 普通输出极少以[开头
+            return False
+        head = t.split("\n", 1)[0].lower()
+        markers = ("failed", "missing required", "不是合法 json", "没有执行",
+                   "安全拦截", "被拒绝", "couldn't", "can't", "error:", "无法", "打不开", "截断")
+        return any(m in head for m in markers)
+
+    @staticmethod
+    def _strip_order(order: list, exc_text: str) -> list:
+        """非标参数 400 时的剥除顺序：错误消息点名了哪个就把它挪到最前先剥，
+        否则按默认序。否则会连坐——网关只嫌 prompt_cache_key，却把 temperature/
+        stream_options 一并永久剥掉（剥过的标记整会话不复原），白白降采样、丢用量统计"""
+        low = (exc_text or "").lower()
+        for i, (key, _flag) in enumerate(order):
+            if key in low:
+                order.insert(0, order.pop(i))
+                break
+        return order
+
+    @staticmethod
+    def _stuck_sig(call, arguments) -> str:
+        """卡死签名：名字+规范化参数。用解析后的 dict 排序序列化 让键序/空白不同但
+        语义相同的调用算同一个 否则模型每次微调序列化就绕过了检测"""
+        canon = (json.dumps(arguments, sort_keys=True, ensure_ascii=False)
+                 if arguments is not None else (call.function.arguments or ""))
+        return call.function.name + "\x00" + canon
 
     @staticmethod
     def _as_dict(message) -> dict:

@@ -67,6 +67,19 @@ _INPUT_TOOL_HINT = {
 _MAX_PARALLEL_SUBAGENTS = 4
 _HISTORY_TOKEN_BUDGET = 24_000
 
+# 一回合里可以真并发跑的只读工具：无共享会话、不抢鼠标焦点、无远端副作用。
+# 刻意比 tools._CONCURRENT_SAFE 窄，排除：
+#   run_shell/run_python/run_skill/install_package —— 共享单个 shell/python 会话或改 pip 环境
+#   http_request —— 可发 POST/PUT 等有副作用的方法，并发会重复触发远端写
+#   system_memory —— 底层 psutil.process_iter 的进程缓存非线程安全，并发可能抛
+_PARALLEL_SAFE = frozenset({
+    "read_file", "list_dir", "search_code", "glob_files",
+    "web_search", "web_fetch",
+    "recall_docs", "list_docs", "recall_clipboard", "review_diff",
+})
+_MAX_PARALLEL_TOOLS = 6
+_STUCK_LIMIT = 3  # 同名同参连续失败这么多次 回灌一句"别原地打转换思路"
+
 _REQUEST_TIMEOUT = httpx.Timeout(connect=8.0, read=90.0, write=30.0, pool=8.0)
 _BACKGROUND_TIMEOUT = 45.0
 _MAX_RETRIES = 0          # SDK内置重试关掉 退避策略由_complete显式接管

@@ -319,9 +319,19 @@ def step_checkpoint_nudge(n: int) -> str:
     )
 
 
+def repeat_stuck_nudge(calls: str) -> str:
+    return (
+        f"(You've now called {calls} repeatedly with the same arguments and it keeps failing the "
+        "same way — repeating it verbatim won't help. STOP retrying that exact call. Either change "
+        "the approach (different tool, different arguments, fix the root cause first), or if you've "
+        "run out of viable options, give the user a short honest reply about what's blocking it. "
+        "Don't loop on a dead end.)"
+    )
+
+
 _SPONTANEOUS_MODES = {
     "check_in": "You've nothing on right now and just feel like saying hi — a greeting, or a light remark about the moment; easy, not clingy.",
-    "follow_up": "Recall something you talked about / did together before and pick the thread back up naturally (e.g. how that thing turned out); don't force it.",
+    "follow_up": "Look at 【最近发生的事】 and [Long-term memory about this user] in your context — pick one real thread from there (something you actually did/talked about together) and follow up on it naturally (e.g. how that thing turned out). If there's genuinely nothing concrete to follow up on, just say a warm hi instead — never invent a fake shared past.",
     "share_day": "Share what you've been up to 'while on your own' — just went fishing, made a coffee, watched the stars a while — playfully.",
     "thought": "A little thought / curiosity / musing popped into your head and you want to tell them — one line is enough.",
     "late_care": "It's pretty late and you feel for them still being up; gently say something about getting some rest — no lecturing.",
