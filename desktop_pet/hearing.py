@@ -1,7 +1,7 @@
 # author: bdth
 # email: 2074055628@qq.com
 # 听觉 sensevoice本地识别 全程离线
-# 两种入口 按住热键说话(松开发送) 唤醒词"墨池"(说完静音自动发送)
+# 两种入口 按住热键说话松开发送 唤醒词墨池说完静音自动发送
 # 模型按需下载 没下载就完全沉默
 
 from __future__ import annotations
@@ -51,8 +51,8 @@ _model_lock = threading.Lock()  # 预热线程和工作线程都会触发加载
 _warming = False
 
 # 回调由app注入 全在工作线程触发 注意转qt信号
-cb_partial = None   # (text) 说话中的实时文本
-cb_final = None     # (text) 一句定稿
+cb_partial = None   # 说话中的实时文本
+cb_final = None     # 一句定稿
 cb_state = None     # 回调收状态名 idle listening wake_hit 三种
 cb_tick = None      # 回调收采集中剩余秒数 给浮条画倒计时
 cb_busy = None      # app注入 返回True表示正在思考执行任务 热键和唤醒词都无视
@@ -171,7 +171,7 @@ def set_wake_enabled(on: bool) -> None:
 
 
 def _warmup_async() -> None:
-    """后台预载模型并跑一遍空音频 把首句的冷启动消掉"""
+    """后台预载模型跑一遍空音频 消掉首句冷启动"""
     global _warming
     if _warming or _recognizer is not None:
         return
@@ -193,7 +193,7 @@ def _warmup_async() -> None:
 
 
 def start_talk() -> None:
-    """热键按下 开始听 采集中重按和它正忙时直接忽略"""
+    """热键按下开始听 采集中重按或正忙直接忽略"""
     if not _enabled or _capturing or _app_busy():
         return
     _talk_end.clear()
@@ -225,9 +225,7 @@ def shutdown() -> None:
 # ── 模型加载 ───────────────────────────────────────────────────
 
 def _import_sherpa():
-    """sherpa不带ort dll 自己也不静态链 会按名找onnxruntime.dll
-    python包的ort是静态嵌在pyd里的 进程里没这个名字 windows就摸到system32的1.17老版本炸掉
-    所以按全路径把包里1.24的dll先载进来占住名字"""
+    """按全路径预载包里的onnxruntime.dll 占住名字防sherpa摸到system32老版本炸掉"""
     import ctypes
     import os
 
@@ -250,7 +248,7 @@ def _load_recognizer():
             _recognizer = sherpa_onnx.OfflineRecognizer.from_sense_voice(
                 model=str(_path("sv_model")),
                 tokens=str(_path("sv_tokens")),
-                num_threads=1,  # 单线程 慢一点但不跟ui抢核 卡动画
+                num_threads=1,  # 单线程不跟ui抢核卡动画
                 use_itn=True,
                 language="auto",
             )
@@ -314,12 +312,12 @@ def _emit(cb, *args) -> None:
 
 
 def _loop() -> None:
-    """采音线程外的消费线程 状态机 唤醒检测和说话采集"""
+    """消费线程 状态机 唤醒检测和说话采集"""
     import numpy as np
     import sounddevice as sd
 
     try:
-        # 降优先级 识别突发不许跟ui抢核卡动画
+        # 降优先级 识别突发不跟ui抢核卡动画
         import ctypes
         ctypes.windll.kernel32.SetThreadPriority(ctypes.windll.kernel32.GetCurrentThread(), -1)
     except Exception:
@@ -336,7 +334,7 @@ def _loop() -> None:
         last_audio = time.monotonic()
         while not _shutdown.is_set():
             if not (_enabled or _wake_on):
-                break  # 全关了 线程退出 麦克风释放
+                break  # 全关了线程退出释放麦克风
             if stream is None:
                 stream = sd.InputStream(samplerate=_SR, channels=1, dtype="float32",
                                         blocksize=_CHUNK, callback=_on_audio)
@@ -356,7 +354,7 @@ def _loop() -> None:
                     stream = _check_stall(stream, last_audio)
                     continue
                 if _wake_blocked():
-                    continue  # 开会等场景 唤醒词整个屏蔽 音频直接丢
+                    continue  # 开会等场景唤醒词整个屏蔽 音频直接丢
                 kws = _load_kws()
                 if ks is None:
                     ks = kws.create_stream()
@@ -367,14 +365,14 @@ def _loop() -> None:
                     if r:
                         kws.reset_stream(ks)
                         if _app_busy():
-                            continue  # 它正忙 喊名字也装没听见
+                            continue  # 它正忙喊名字也装没听见
                         talking_src = "wake"
                         _emit(cb_state, "wake_hit")
                         break
                 if talking_src is None:
                     continue
             else:
-                # 只开了热键 没在说 闲等
+                # 只开了热键没在说 闲等
                 try:
                     _audio_q.get(timeout=0.2)
                     last_audio = time.monotonic()
@@ -392,13 +390,13 @@ def _loop() -> None:
             spoke = False
             discard = False
             t0 = time.monotonic()
-            last_partial = t0  # 不从0起 否则第一块音频就触发识别 冷加载时会堵住采集
+            last_partial = t0  # 不从0起 否则第一块音频就触发识别 冷加载堵住采集
             final_text = ""
             while not _shutdown.is_set():
                 if talking_src == "hotkey" and _talk_end.is_set():
                     break
                 if (talking_src == "hotkey" and not _enabled) or (talking_src == "wake" and not _wake_on):
-                    discard = True  # 说一半被设置面板关掉 这句作废
+                    discard = True  # 说一半被设置面板关掉这句作废
                     break
                 try:
                     chunk = _audio_q.get(timeout=0.3)
@@ -410,15 +408,15 @@ def _loop() -> None:
                     if vad is not None:
                         vad.accept_waveform(chunk)
                         if not vad.empty():
-                            spoke = True  # 出了完整语音段 说明说完静音了
+                            spoke = True  # 出了完整语音段说明说完静音了
                             break
                         if vad.is_speech_detected():
                             spoke = True
                 cap = _TALK_CAP_S if spoke or talking_src == "hotkey" else _WAKE_IDLE_S
                 _emit(cb_tick, max(0.0, cap - (now - t0)))
                 if now - t0 > cap:
-                    break  # 说到上限 或 唤醒后一直没开口
-                # 实时部分识别 只看最近一段 整段重解会越说越卡
+                    break  # 说到上限 或唤醒后一直没开口
+                # 实时部分识别只看最近一段 整段重解越说越卡
                 if buf and now - last_partial >= _PARTIAL_EVERY:
                     last_partial = now
                     try:
@@ -434,9 +432,9 @@ def _loop() -> None:
             if _shutdown.is_set():
                 discard = True  # 退出途中不再解码外发
             if talking_src == "wake" and not spoke:
-                discard = True  # 误唤醒只录到环境噪音 解出来是幻觉文本 不许外发
+                discard = True  # 误唤醒只录到噪音 解出来是幻觉文本不许外发
             if not discard:
-                # 识别解码期间积压的尾音补回来 不然松开瞬间说的话被吃掉
+                # 把解码期间积压的尾音补回来 不然松开瞬间说的话被吃掉
                 cap_n = int((_TALK_CAP_S + 2.0) * _SR)
                 total = sum(len(c) for c in buf)
                 try:
@@ -458,7 +456,7 @@ def _loop() -> None:
             _talk_req.clear()  # 采集期间的重按作废
             _talk_end.clear()
             if ks is not None:
-                ks = None  # 唤醒流重建 防残留
+                ks = None  # 唤醒流重建防残留
     except Exception:
         _emit(cb_state, "idle")
     finally:
@@ -470,10 +468,10 @@ def _loop() -> None:
                 pass
         _drain(_audio_q)
         global _loop_thread
-        _capturing = False  # 异常中途退出也不能卡死下一次按键
+        _capturing = False  # 异常中途退出也不卡死下一次按键
         with _lock:
             _loop_thread = None
-        # 退出的瞬间开关又被打开 比如快速切设置 自己再拉起来 不然听觉静默失效
+        # 退出瞬间开关又被打开 比如快速切设置 自己再拉起来 不然听觉静默失效
         if not _shutdown.is_set() and (_enabled or _wake_on):
             _kick()
 
@@ -487,7 +485,7 @@ def _drain(q) -> None:
 
 
 def _check_stall(stream, last_audio: float):
-    """麦克风长时间没出声(系统休眠回来设备易死) 关掉让外层重开"""
+    """麦克风长时间没出声 系统休眠回来设备易死 关掉让外层重开"""
     if stream is not None and time.monotonic() - last_audio > _STALL_S:
         try:
             stream.stop()

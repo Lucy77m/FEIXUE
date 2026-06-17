@@ -133,7 +133,7 @@ def test_hotkey_full_path():
 
 
 def test_wake_word_full_path(monkeypatch):
-    """唤醒词链路真声学版 用音频里真实出现的'开放'当临时唤醒词"""
+    """唤醒词链路真声学版 用音频里真实出现的开放当临时唤醒词"""
     monkeypatch.setattr(hearing, "_WAKE_KEYWORD", "k āi f àng @开放")
     monkeypatch.setattr(hearing, "_kws", None)  # 换关键词要重建
     finals, states = [], []
@@ -152,7 +152,7 @@ def test_wake_word_full_path(monkeypatch):
 
 
 def test_busy_ignores_wake(monkeypatch):
-    """它正忙 唤醒词必命中(假kws)也得装没听见"""
+    """它正忙 唤醒词必命中也得装没听见"""
     fake = _FakeKws(hit_after=3)
     monkeypatch.setattr(hearing, "_load_kws", lambda: fake)
     states = []

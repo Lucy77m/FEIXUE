@@ -85,7 +85,7 @@ class Rituals(QObject):
             QTimer.singleShot(2600, lambda: self._host._pet.set_cake(False))
 
     def farewell(self) -> bool:
-        """退出前挥手告别 播了告别返回真。只有夜里才道晚安 白天说回头见"""
+        """退出前挥手告别 播了告别返回真 夜里道晚安白天说回头见"""
         if self._host._entered and self._host._pet.isVisible() and not getattr(self, "_farewell_done", False):
             # 走之前挥个手再真正退
             self._farewell_done = True
@@ -94,7 +94,7 @@ class Rituals(QObject):
             try:
                 today = datetime.now().date().isoformat()
                 for it in reversed(journal.recent(6)):
-                    if str(it.get("at", "")).startswith(today):  # journal 存的是 "at" 不是 "ts"——用错键 带日记的告别永远不触发
+                    if str(it.get("at", "")).startswith(today):  # journal 存的是 at 不是 ts 用错键带日记的告别永远不触发
                         line = str(it.get("text", ""))[:42]
                         break
             except Exception:

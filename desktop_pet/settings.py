@@ -29,9 +29,7 @@ def atomic_write_text(path: Path, text: str) -> None:
 
 
 def sweep_stale_tmp(directory: Path | None = None, max_age_s: float = 300.0) -> None:
-    """清掉 atomic_write_text 留下的孤儿临时文件。
-    进程在 write_text 和 os.replace 之间被硬杀(退出走 os._exit、或崩溃)时 那个唯一命名的
-    .{name}.{uuid}.tmp 不会被 except 清理 长期累积。启动扫一遍删够旧的(还在写的新 tmp 不碰)"""
+    """清掉 atomic_write_text 留下的孤儿临时文件 启动扫一遍删够旧的"""
     import time
     base = directory if directory is not None else DATA_DIR
     try:
@@ -51,11 +49,10 @@ def sweep_stale_tmp(directory: Path | None = None, max_age_s: float = 300.0) -> 
 
 
 def delete_db_files(path: Path) -> None:
-    """删一个 sqlite 库文件连同它的 -wal/-shm——重建损坏库前用。
-    sqlite 连接 close 后 Windows 释放句柄有延迟 unlink 会撞 WinError 32 被占用 故带退避重试"""
+    """删一个 sqlite 库文件连同它的 -wal -shm 带退避重试避开句柄占用"""
     import gc
     import time
-    gc.collect()  # 催一下 让已 close 的连接对象尽快释放底层文件句柄
+    gc.collect()  # 催已 close 的连接尽快释放文件句柄
     for suffix in ("", "-wal", "-shm"):
         target = Path(str(path) + suffix)
         for _ in range(8):
@@ -124,7 +121,7 @@ class Settings:
     proactive_enabled: bool = True
     proactive_level: str = "正常"
     ui_language: str = "中文"
-    weather_enabled: bool = False  # 天气拟态默认关 IP定位遇到代理和CGNAT常常离谱 宁可不显也不显错的
+    weather_enabled: bool = False  # 天气拟态默认关 ip定位常离谱
     watch_screen: bool = False
     clip_sampler: bool = False
     clip_alchemy: bool = False

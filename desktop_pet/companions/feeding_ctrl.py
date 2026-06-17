@@ -21,8 +21,8 @@ from desktop_pet.pet.confirm import ConfirmBox
 
 class FeedingCtrl(QObject):
     _feed_note = Signal(str)
-    _feed_result = Signal(object)  # 后台删文件的结果回主线程演出 (err, lockname, holder, paths, total)
-    _feed_sized = Signal(object)   # 后台算完总大小回主线程决定弹确认还是直接吃 (paths, total, truncated)
+    _feed_result = Signal(object)  # 后台删文件结果回主线程演出 err lockname holder paths total
+    _feed_sized = Signal(object)   # 后台算完总大小回主线程决定弹确认还是直接吃 paths total truncated
 
     def __init__(self, host) -> None:
         super().__init__()
@@ -30,7 +30,7 @@ class FeedingCtrl(QObject):
         self._feed_pending: tuple[list, int] | None = None
         self._feed_doc: str | None = None
         self._sizing = False  # 正在后台量这次投喂的总大小 期间挡住叠加
-        self._stopped = False  # 退出已开始:别再在 farewell 的 1.7s 里启动会被 os._exit 截断的回收站删除
+        self._stopped = False  # 退出已开始 别再启动会被 os._exit 截断的回收站删除
         self._feed_confirm = ConfirmBox()
         from desktop_pet.eyes import capture
         capture.register_own_window(int(self._feed_confirm.winId()))
@@ -44,14 +44,13 @@ class FeedingCtrl(QObject):
         pass
 
     def stop(self) -> None:
-        # 置位:已排进队列的 _finish_eat(1.7s 延时)发现已停就不删了——别让 os._exit 把回收站操作截成半截
+        # 置位 已排队的 _finish_eat 发现已停就不删 别让 os._exit 把回收站操作截半
         self._stopped = True
 
     @Slot(list)
     def _on_fed(self, paths: list) -> None:
         """投喂入口 按类型分流"""
-        # 上一次投喂的确认框还没答 别再叠一个:doc 和大餐共用一个 ConfirmBox 叠加会串话
-        # ——看到的是文件夹的问题 答下去执行的却是先前那个文档(动作和提示不符 还丢掉这次投喂)
+        # 上次确认框还没答别再叠 doc 和大餐共用一个 ConfirmBox 叠加会串话答错对象
         if self._feed_doc is not None or self._feed_pending is not None or self._sizing:
             self._host._feed_pop(i18n.t("feed_busy"))
             return
@@ -80,7 +79,7 @@ class FeedingCtrl(QObject):
             screen = self._host._app.primaryScreen().availableGeometry()
             self._feed_confirm.ask(i18n.t("feed_doc_ask").format(name=Path(paths[0]).name), self._host._pet, screen)
             return
-        # total_size 会 os.walk 最多两万个文件 在 UI 线程做会冻住——丢后台线程量 量完回主线程决定
+        # total_size 会 os.walk 最多两万个文件 在 ui 线程做会冻住 丢后台量完回主线程决定
         self._sizing = True
         threading.Thread(target=self._size_then_decide, args=(paths,), daemon=True, name="mochi-feed-size").start()
 
@@ -90,7 +89,7 @@ class FeedingCtrl(QObject):
 
     @Slot(object)
     def _on_feed_sized(self, data: object) -> None:
-        """后台量完总大小 回主线程:大餐/文件夹弹确认 小份直接吃"""
+        """后台量完总大小回主线程 大餐文件夹弹确认 小份直接吃"""
         paths, total, truncated = data
         self._sizing = False
         if total > feeding._BIG_BYTES or feeding.has_dir(paths) or truncated:
@@ -132,28 +131,27 @@ class FeedingCtrl(QObject):
 
     def _finish_eat(self, paths: list, total: int) -> None:
         if self._stopped:
-            return  # 退出中:这次咽下去就别真删了 留着文件 下次启动可重喂(好过 os._exit 把删除截半)
-        # 真删文件:回收站 COM(SHFileOperation)+ 失败重试含 time.sleep + 占用诊断(逐个文件 CreateFile)
-        # 全是慢的阻塞活 放后台线程做 别冻住 Qt 事件循环(否则拖个文件夹桌宠/动画/热键卡好几秒)
+            return  # 退出中这次别真删 留着文件下次启动可重喂 好过 os._exit 把删除截半
+        # 真删文件 回收站 COM 失败重试占用诊断全是慢阻塞活 放后台别冻住 qt 事件循环
         def work() -> None:
             err = feeding.recycle(paths)
             name = who = ""
             if err and not err.startswith(("path not found", "no valid path")):
-                name, who = feeding.diagnose_lock(paths)  # 真锁住才诊断 谁锁的
+                name, who = feeding.diagnose_lock(paths)  # 真锁住才诊断谁锁的
             self._feed_result.emit((err, name, who, paths, total))
         threading.Thread(target=work, daemon=True, name="mochi-feed-eat").start()
 
     @Slot(object)
     def _on_feed_result(self, data: object) -> None:
-        """后台删完回主线程:演出吃饱或被占用"""
+        """后台删完回主线程 演出吃饱或被占用"""
         err, name, who, paths, total = data
         if err:
             self._host._pet.react("droop")
             if err.startswith(("path not found", "no valid path")):
-                msg = i18n.t("feed_missing")  # 路径不对/没了 别说"占用"
+                msg = i18n.t("feed_missing")  # 路径不对或没了别说占用
             else:
                 msg = (i18n.t("feed_eat_locked").format(name=name, who=who or i18n.t("feed_lock_unknown"))
-                       if name else i18n.t("feed_eat_fail"))  # 真锁住了才点名 谁都没锁才退回含糊
+                       if name else i18n.t("feed_eat_fail"))  # 真锁住才点名 谁都没锁才退回含糊
             self._host._feed_pop(msg)
             audit.reply(f"feed recycle failed: {err} [locked={name!r} holder={who!r}]")
             return

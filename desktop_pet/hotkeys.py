@@ -70,8 +70,8 @@ class GlobalHotkeys(QObject):
     def stop(self) -> None:
         thread = self._thread
         if thread is not None:
-            # 等 _run 把 _tid 赋好再投 WM_QUIT——否则快速 restart 时 _tid 还是0 投了个空 线程会卡死在
-            # GetMessageW 里且热键不反注册 变成占着热键 id 的孤儿线程(下次注册同键会失败 热键静默失灵)
+            # 等 _run 把 _tid 赋好再投 WM_QUIT 否则快速 restart 时 _tid 还是0 投了个空 线程会卡死在
+            # GetMessageW 里且热键不反注册 变成占着热键 id 的孤儿线程 下次注册同键会失败 热键静默失灵
             self._ready.wait(timeout=2.0)
         if self._tid:
             try:
@@ -102,7 +102,7 @@ class GlobalHotkeys(QObject):
             user32.RegisterHotKey.argtypes = [wintypes.HWND, ctypes.c_int, wintypes.UINT, wintypes.UINT]
             user32.GetMessageW.argtypes = [ctypes.POINTER(wintypes.MSG), wintypes.HWND, wintypes.UINT, wintypes.UINT]
             self._tid = kernel32.GetCurrentThreadId()  # 留给stop投WM_QUIT
-            self._ready.set()  # _tid 已就绪 放行 stop() 的等待
+            self._ready.set()  # _tid 已就绪 放行 stop 的等待
             status: dict[str, bool] = {}
             for index, action in enumerate(self._ACTIONS, start=1):  # id从1起
                 parsed = parse_combo(self._keys.get(action, ""))
@@ -133,7 +133,7 @@ class GlobalHotkeys(QObject):
         except Exception:
             pass
         finally:
-            self._ready.set()  # 即便注册前就崩了也放行 stop() 别让它干等满 2s
+            self._ready.set()  # 即便注册前就崩了也放行 stop 别让它干等满 2s
             if user32 is not None:
                 for index in id_map:
                     try:

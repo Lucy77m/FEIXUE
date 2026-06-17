@@ -11,7 +11,7 @@ from pathlib import Path
 from desktop_pet.settings import DATA_DIR
 
 _IMAGE_EXTS = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"})
-_DOC_EXTS = frozenset({".pdf", ".md", ".doc", ".docx", ".pptx"})  # txt等含糊的当食物
+_DOC_EXTS = frozenset({".pdf", ".md", ".doc", ".docx", ".pptx"})  # txt 等含糊的当食物
 _RISKY_EXTS = frozenset({".exe", ".msi", ".bat", ".cmd", ".ps1", ".vbs", ".dll", ".sys", ".lnk", ".scr"})
 _BIG_BYTES = 200 * 1024 * 1024
 _SIZE_SCAN_CAP = 20000  # 文件夹算大小最多走这么多个文件
@@ -173,17 +173,13 @@ def _shfileop(items: str) -> str | None:
     except Exception as exc:
         return str(exc)
     if rc != 0 or aborted:
-        # rc 多半是 0x7C(DE_INVALIDFILES) 或 0x20(共享冲突)——其实都是"里面有文件正被打开"
+        # rc 多半是 0x7C DE_INVALIDFILES 或 0x20 共享冲突 其实都是里面有文件正被打开
         return f"SHFileOperation rc={rc} (0x{rc & 0xFFFFFFFF:X}) aborted={aborted}"
     return None
 
 
 def _abs_clean(raw: str) -> str | None:
-    """规范出能交给 SHFileOperation 的绝对路径。
-    关键是先 strip——路径带首尾空白时 Path.resolve() 不把它当绝对路径，会拼上当前工作
-    目录变成一条垃圾路径(如 '...\\MOCHI\\ C:\\...\\Folder')，SHFileOperation 报 124 非法，
-    老代码把这个误当成"被占用"。绝对路径只做 normpath，不走 resolve(resolve 会跟符号链接、
-    还会对"看着不绝对"的路径拼 CWD)"""
+    """规范出能交给 SHFileOperation 的绝对路径 先 strip 再 normpath 不走 resolve"""
     s = (raw or "").strip()
     if not s:
         return None
@@ -200,15 +196,15 @@ def recycle(paths: list[str]) -> str | None:
     if not cleaned:
         return "no valid path"
     missing = [c for c in cleaned if not os.path.exists(c)]
-    if missing:  # 路径根本不在 别拿"占用"糊弄 直说找不到
+    if missing:  # 路径根本不在 别拿占用糊弄 直说找不到
         return f"path not found: {missing[:2]}"
-    # pFrom 必须双 null 结尾 pywin32 只给 Python 串补一个 末尾再手动补一个
+    # pFrom 必须双 null 结尾 pywin32 只补一个 末尾再手动补一个
     items = "\0".join(cleaned) + "\0"
     err = _shfileop(items)
     if err is not None and not err.startswith("shell unavailable"):
-        time.sleep(0.4)  # 可能只是瞬时锁(杀软扫描/资源管理器刚松手) 等一下再试一次
+        time.sleep(0.4)  # 可能只是瞬时锁 等一下再试一次
         err = _shfileop(items)
-    if err is not None:  # 失败时把真实路径记进原因 下次直接看清
+    if err is not None:  # 失败时把真实路径记进原因 下次看清
         err += f" | paths={cleaned[:2]}"
     return err
 
@@ -234,7 +230,7 @@ def _is_locked(path: str) -> bool:
 
 
 def _lock_holder(path: str) -> str:
-    """尽力找出谁开着这个文件 找不到/没权限返回空串"""
+    """尽力找出谁开着这个文件 找不到或没权限返回空串"""
     try:
         import psutil
     except ImportError:
@@ -257,7 +253,7 @@ def _lock_holder(path: str) -> str:
 
 
 def diagnose_lock(paths: list[str], cap: int = 400) -> tuple[str, str]:
-    """投喂失败时找出第一个被占用的文件名和占用它的进程名 都找不到返回('', '')"""
+    """投喂失败时找出第一个被占用的文件名和占用它的进程名 都找不到返回空"""
     files: list[str] = []
     for raw in paths:
         p = Path(raw).expanduser()

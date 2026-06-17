@@ -68,7 +68,7 @@ class Sensors(QObject):
         self._weather_busy = False
         self._weather_kind = ""
         self._weather_ready.connect(self._on_weather)
-        self._stopped = False  # stop() 置位:这个匿名 singleShot 取消不掉 靠标志在 _check_weather 早退
+        self._stopped = False  # stop 置位 这个匿名 singleShot 取消不掉 靠标志在 _check_weather 早退
         QTimer.singleShot(60_000, self._check_weather)
         self._hot_on = False
         self._cpu_high_n = 0
@@ -92,7 +92,7 @@ class Sensors(QObject):
 
     def stop(self) -> None:
         """退出前停全部轮询 不再孵新线程"""
-        self._stopped = True  # 挡住取消不掉的匿名 singleShot(_check_weather)在关停后还孵 HTTP 线程
+        self._stopped = True  # 挡住取消不掉的匿名 singleShot 在关停后还孵 http 线程
         for t in (self._shy_timer, self._vitals_timer, self._dl_timer,
                   self._mic_timer, self._desk_timer, self._weather_timer):
             try:
@@ -292,7 +292,7 @@ class Sensors(QObject):
                                     in_use = True
                                     break
                         except (OSError, ValueError, TypeError):
-                            continue  # 值类型异常(非QWORD)别让 int() 抛出去漏掉下面的 CloseKey
+                            continue  # 值类型异常 非QWORD 别让 int 抛出去漏掉下面的 CloseKey
                 finally:
                     winreg.CloseKey(root)  # 不管中途抛什么 都关掉 root 句柄
             if in_use != self._host._meeting_mode:
@@ -343,7 +343,7 @@ class Sensors(QObject):
         self._host.request_message.emit(agent_prompts.DESK_TIDY_MSG.format(n=n))
 
     def _check_weather(self) -> None:
-        """两小时问一次天气 拟态跟着换 —— 默认关(IP定位常常离谱)；开了才按IP查它自己小世界的天气"""
+        """两小时问一次天气 拟态跟着换 默认关 ip定位常常离谱 开了才按ip查它自己小世界的天气"""
         if self._stopped or self._weather_busy or not self._host._settings.allow_web:
             return
         if not getattr(self._host._settings, "weather_enabled", False):
@@ -369,7 +369,7 @@ class Sensors(QObject):
                     kind = "snow" if temp <= 2 else "rain"
                 self._weather_ready.emit(kind)
             finally:
-                client.close()  # 关掉 httpx 连接池 别每 2h 漏一个 client + socket(对齐 updater 的写法)
+                client.close()  # 关掉 httpx 连接池 别每 2h 漏一个 client socket 对齐 updater 的写法
         except Exception:
             pass
         finally:

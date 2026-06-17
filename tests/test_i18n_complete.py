@@ -1,6 +1,6 @@
 # author: bdth
 # email: 2074055628@qq.com
-# i18n 键完整性——三种语言的键集合必须一致 缺键会让面板显示 raw key(板块④b 加 docs_del_fail 时差点漏)
+# i18n 键完整性 三种语言键集合必须一致 缺键会让面板显示 raw key
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from desktop_pet.i18n import UI_LANGUAGES, _STRINGS
 
 
 def _lang_to_code():
-    # _STRINGS 的内层 key 是语言码;通过设语言再读一个已知键反推不可靠 直接用 _STRINGS 的顶层结构
+    # _STRINGS 内层 key 是语言码 设语言再读已知键反推不可靠 直接用 _STRINGS 顶层结构
     return _STRINGS
 
 
@@ -28,7 +28,7 @@ def test_all_languages_have_same_keys():
 
 
 def test_audit_added_keys_present_everywhere():
-    # 板块④b 新增 docs_del_fail——三语都得有 否则面板会显示键名本身
+    # 新增 docs_del_fail 三语都得有 否则面板会显示键名本身
     for keys in _STRINGS.values():
         assert "docs_del_fail" in keys
         assert "feed_busy" in keys  # 投喂再入保护复用的提示键

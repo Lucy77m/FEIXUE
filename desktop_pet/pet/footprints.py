@@ -41,7 +41,7 @@ class FootprintLayer(QWidget):
             hwnd = int(self.winId())
             GWL_EXSTYLE = -20
             style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-            ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style | 0x20 | 0x80000)  # TRANSPARENT|LAYERED
+            ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style | 0x20 | 0x80000)  # TRANSPARENT LAYERED
         except Exception:
             pass
 

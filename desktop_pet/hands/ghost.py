@@ -81,8 +81,8 @@ def bg_click(top_hwnd: int, sx: int, sy: int, kind: str = "click") -> bool:
         return False
     lp = _pack_lparam(cx, cy)
 
-    # 先补一发mousemove触发hover——尽力而为 不计入成败:它只是预热 真正决定点没点成的是按键消息
-    # 折进 ok 会被它偶发的失败(队列瞬时满等)污染 让明明点成了的 click 被误报为失败 走错回退
+    # 先补一发mousemove触发hover 尽力而为不计入成败 只是预热
+    # 折进 ok 会被它偶发失败污染 让点成的 click 误报失败走错回退
     _post(target, _WM_MOUSEMOVE, 0, lp)
     if kind == "right":
         ok = _post(target, _WM_RBUTTONDOWN, _MK_RBUTTON, lp)

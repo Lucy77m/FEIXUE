@@ -1,13 +1,13 @@
 # author: bdth
 # email: 2074055628@qq.com
-# 板块⑤ 伴生行为重审隐患回归——somatic 跨线程迭代加锁;docs 关库中入库不写已关连接
+# 板块⑤ 伴生行为重审隐患回归 somatic 跨线程迭代加锁 docs 关库中入库不写已关连接
 
 from __future__ import annotations
 
 import threading
 
 
-# ---------- somatic:worker 读 context 时主线程狂写 不该 RuntimeError ----------
+# ---------- somatic worker 读 context 时主线程狂写 不该 RuntimeError ----------
 
 def test_somatic_concurrent_note_and_context():
     import desktop_pet.somatic as somatic
@@ -31,7 +31,7 @@ def test_somatic_concurrent_note_and_context():
     t.start()
     try:
         for _ in range(4000):
-            somatic.context()  # 加锁前这里会撞 deque/dict changed size during iteration
+            somatic.context()  # 加锁前这里会撞 deque dict changed size during iteration
     finally:
         stop[0] = True
         t.join(timeout=1.0)
@@ -39,7 +39,7 @@ def test_somatic_concurrent_note_and_context():
     assert not errors, f"并发读写 somatic 不该抛: {errors[:3]}"
 
 
-# ---------- docs:关库进行中 入库静默跳过 不写已关连接 ----------
+# ---------- docs 关库进行中 入库静默跳过 不写已关连接 ----------
 
 def test_docs_ingest_skips_when_closing(tmp_path, monkeypatch):
     import desktop_pet.docs as docs_mod
@@ -51,8 +51,8 @@ def test_docs_ingest_skips_when_closing(tmp_path, monkeypatch):
     folder.mkdir()
     (folder / "a.txt").write_text("关键词菠萝", encoding="utf-8")
 
-    ds._closing = True  # 模拟 close() 已置位
-    ds._ingest_file(folder / "a.txt", 100)  # 锁内段该早退 不写
+    ds._closing = True  # 模拟 close 已置位
+    ds._ingest_file(folder / "a.txt", 100)  # 锁内段该早退不写
     assert ds.count() == 0, "关库中不该写入 chunks"
 
     ds._closing = False

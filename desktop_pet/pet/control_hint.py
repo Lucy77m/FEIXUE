@@ -67,7 +67,7 @@ class ControlHint(QWidget):
         outer.addWidget(card)
 
     def show_hint(self, detail: str, screen) -> None:
-        """顶部居中弹出；detail 是当前动作（点击/输入文字…），空则只显主文案"""
+        """顶部居中弹出 detail 是当前动作 空则只显主文案"""
         detail = (detail or "").strip()[:60]
         self._sub.setText(detail)
         self._sub.setVisible(bool(detail))

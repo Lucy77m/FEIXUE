@@ -169,8 +169,7 @@ class ReminderStore:
                 continue
             try:
                 datetime.fromisoformat(str(entry["fire_at"]))  # fire_at 解析不了的整条扔掉
-                # id/字段构造也放进 try:坏 id(手改/外部损坏成 "1.0"/"abc"/null)别让 int() 抛到
-                # 模块级 reminders=ReminderStore() 把整个 app 卡在 import——其它 loader 都是坏了退空 这里也对齐
+                # 字段构造也放进 try 坏 id 别让 int 抛到模块级初始化卡住 import 坏了退空
                 item = Reminder(
                     id=int(entry["id"]),
                     fire_at=str(entry["fire_at"]),

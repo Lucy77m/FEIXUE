@@ -26,7 +26,7 @@ def _hand_pen(bw: float) -> QPen:
 
 
 def hold_hand(painter: QPainter, bw: float, bh: float, gx: float, gy: float, t: float, r: float = 0.088) -> None:
-    """一只圆圆的小手攥住道具——画在道具底部握点 别让举着的东西浮空。gx/gy 是 bw/bh 系数"""
+    """一只圆圆的小手攥住道具 画在道具底部握点 gx gy 是 bw bh 系数"""
     bob = math.sin(t * 1.6 + gx * 3.0) * bh * 0.006
     painter.setPen(_hand_pen(bw))
     painter.setBrush(_SKIN)
@@ -61,7 +61,7 @@ def draw_weather(painter: QPainter, bw: float, bh: float, kind: str, e: float, t
     """天气装饰 雨伞 雪人 化水"""
     kind = kind or ("rain" if e > 0 else "")
     if kind == "rain":
-        # 伞偏左、举在左手里 罩住头 周围雨丝
+        # 伞偏左 举在左手里 罩住头 周围雨丝
         k = ease_out(e)
         ux = -bw * 0.20                 # 伞往左偏 不在正中
         top = -bh * (0.55 + 0.32 * k)
@@ -74,7 +74,7 @@ def draw_weather(painter: QPainter, bw: float, bh: float, kind: str, e: float, t
         for i in range(3):
             px = ux - span + span * i
             painter.drawLine(QPointF(px, top + bh * 0.25), QPointF(px, top + bh * 0.28))
-        # 长伞柄：从伞面一路斜下来 到左下方的左手（手臂高度 不在头上）
+        # 长伞柄从伞面斜下来 到左下方的左手 手臂高度 不在头上
         hand_x, hand_y = -bw * 0.36, bh * 0.22
         painter.drawLine(QPointF(ux, top + bh * 0.25), QPointF(hand_x, hand_y))
         # 左手攥住伞柄末端

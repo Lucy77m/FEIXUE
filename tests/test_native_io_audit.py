@@ -1,6 +1,6 @@
 # author: bdth
 # email: 2074055628@qq.com
-# 板块⑦ 原生IO 重审隐患回归——_geom/_LAST 线程本地隔离、clipboard 恢复守卫、hotkeys 就绪事件
+# 板块⑦ 原生IO 重审隐患回归 _geom 和 _LAST 线程本地隔离 clipboard 恢复守卫 hotkeys 就绪事件
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import threading
 import pytest
 
 
-# ---------- capture._geom 线程本地:并发 agent 的截图->点击坐标互不污染 ----------
+# ---------- capture._geom 线程本地 并发 agent 的截图点击坐标互不污染 ----------
 
 def test_geom_is_thread_local():
     from desktop_pet.eyes import capture
@@ -28,7 +28,7 @@ def test_geom_is_thread_local():
     assert seen["B"] == (1920, 0, 2560, 1440), "B 线程的 geom 被别的线程覆盖了"
 
 
-# ---------- elements._last 线程本地:act_element 不会解析到别的 agent 的元素表 ----------
+# ---------- elements._last 线程本地 act_element 不会解析到别的 agent 的元素表 ----------
 
 def test_elements_last_is_thread_local():
     from desktop_pet.eyes import elements
@@ -47,7 +47,7 @@ def test_elements_last_is_thread_local():
     assert seen["B"] == [{"idx": 9, "tag": "B"}], "B 的元素表被别的线程覆盖了"
 
 
-# ---------- clipboard 恢复守卫:None / 空快照是 no-op(不碰真实剪贴板) ----------
+# ---------- clipboard 恢复守卫 None 或空快照是 no-op 不碰真实剪贴板 ----------
 
 def test_clipboard_restore_noop_on_empty():
     from desktop_pet.executor import clipboard
@@ -57,7 +57,7 @@ def test_clipboard_restore_noop_on_empty():
     assert hasattr(clipboard, "snapshot_clipboard")
 
 
-# ---------- hotkeys 就绪事件存在:stop() 投 WM_QUIT 前能等 _tid 就位 ----------
+# ---------- hotkeys 就绪事件存在 stop 投 WM_QUIT 前能等 _tid 就位 ----------
 
 def test_hotkeys_has_ready_event():
     from desktop_pet.hotkeys import GlobalHotkeys

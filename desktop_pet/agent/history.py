@@ -142,7 +142,7 @@ class HistoryMixin:
         content = _strip_think_leak(content)
         if content:
             return content
-        note = "(有一段更早的对话因超长被丢弃，且摘要生成失败，细节已不可考。)"
+        note = prompts.SUMMARY_LOST_NOTE
         return prior if note in prior else (prior + "\n" + note).strip()
 
     def _save_session(self) -> None:

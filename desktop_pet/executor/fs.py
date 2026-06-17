@@ -28,8 +28,7 @@ _TEXT_EXT = frozenset(
 
 
 def _read_with_encoding(target: Path) -> tuple[str, str]:
-    """读文本并猜编码 返回(文本, 回写该用的编码)
-    真带 BOM 的回 utf-8-sig 让 edit_file 回写时保留 BOM;不带 BOM 的回 utf-8 别凭空加一个"""
+    """读文本并猜编码 返回文本和回写该用的编码 带 BOM 回 utf-8-sig 保留 BOM"""
     raw = target.read_bytes()
     if raw.startswith(b"\xef\xbb\xbf"):
         return raw.decode("utf-8-sig"), "utf-8-sig"
@@ -42,9 +41,7 @@ def _read_with_encoding(target: Path) -> tuple[str, str]:
 
 
 def _atomic_write(target: Path, text: str, encoding: str, newline: str | None) -> None:
-    """原子写:先写同目录临时文件再 os.replace 顶上去。
-    中途失败(GBK 编码不了的字符、磁盘满、进程被杀)只毁掉临时文件 原文件分毫不动——
-    edit_file 直接 write_text 会先把原文截成 0 字节再写 一旦回写抛异常用户的源文件就没了"""
+    """原子写 先写同目录临时文件再 os.replace 顶上去 中途失败只毁临时文件原文件不动"""
     target.parent.mkdir(parents=True, exist_ok=True)
     tmp = target.parent / f".{target.name}.{uuid.uuid4().hex}.tmp"
     try:
@@ -216,7 +213,7 @@ def edit_file(path: str, old: str, new: str, replace_all: bool = False) -> str:
         note = " (matched by ignoring whitespace differences — double-check the diff)"
 
     try:
-        _atomic_write(target, updated, encoding, nl)  # 原子写:回写编码失败也不会把原文件截没
+        _atomic_write(target, updated, encoding, nl)  # 原子写 回写编码失败也不会把原文件截没
     except Exception as exc:
         return f"[write failed: {exc}]"
     return f"Replaced {count if replace_all else 1} occurrence(s) in {path}.{note}"

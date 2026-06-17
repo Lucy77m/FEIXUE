@@ -14,7 +14,7 @@ from desktop_pet.pet.props.common import draw_note
 
 
 def draw_camera(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
-    """举相机拍照 取景->咔嚓闪光"""
+    """举相机拍照 取景 咔嚓闪光"""
     if stage == "flash":
         k = max(0.0, 1.0 - stage_p * 1.6)
         if k > 0.0:
@@ -41,7 +41,7 @@ def draw_camera(painter: QPainter, bw: float, bh: float, t: float, stage: str, s
 
 
 def draw_guitar(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
-    """抱吉他 调弦->扫弦(带音符)"""
+    """抱吉他 调弦 扫弦带音符"""
     painter.save()
     painter.translate(bw * 0.04, bh * 0.10)
     painter.rotate(-22)
@@ -211,7 +211,7 @@ def draw_phone(painter: QPainter, bw: float, bh: float, t: float, stage: str, st
 
 
 def draw_watering(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
-    """浇花 举喷壶->浇水->嫩芽冒头"""
+    """浇花 举喷壶 浇水 嫩芽冒头"""
     px = bw * 0.40
     grow = ease_out(stage_p) if stage == "grow" else (0.4 if stage == "pour" else 0.2)
     painter.setPen(QPen(QColor(170, 110, 80), max(1.0, bw * 0.008)))
@@ -242,7 +242,7 @@ def draw_watering(painter: QPainter, bw: float, bh: float, t: float, stage: str,
 
 
 def draw_dandelion(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
-    """吹蒲公英 举着->吹散->看种子飘"""
+    """吹蒲公英 举着 吹散 看种子飘"""
     head = QPointF(bw * 0.30, -bh * 0.06)
     painter.setPen(QPen(QColor(120, 170, 110), max(1.2, bw * 0.01)))
     painter.drawLine(QPointF(head.x(), head.y() + bw * 0.05), QPointF(head.x() - bw * 0.04, bh * 0.30))

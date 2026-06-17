@@ -158,7 +158,7 @@ def test_dedup_still_works(mem):
     assert _row(mem, "npm管包")[0] == pytest.approx(0.8), "重复写入显著性取max"
 
 
-# 记忆合并 一簇同主题且互不重复的经验 两两余弦落在related带[0.80,0.92)里
+# 记忆合并 一簇同主题且互不重复的经验 两两余弦落在related带 0.80 到 0.92
 # 不能太像 否则remember时被当重复合掉 三个偏移0.32在yz面120度分开 两两cos约0.86
 _THEME_VECS = {
     "周一要交方案 时间紧": _unit(1.0, 0.32, 0.0),
@@ -233,7 +233,7 @@ def test_consolidation_respects_none(mem_theme):
 
 
 def test_consolidation_needs_min_size(mem_theme):
-    # 只放两条赶工 不够CLUSTER_MIN(3) 不成簇
+    # 只放两条赶工 不够CLUSTER_MIN 不成簇
     for t in list(_THEME_VECS)[:2]:
         mem_theme.remember(t, salience=0.4)
     n = mem_theme.consolidate(lambda texts: "不该被调用")
@@ -333,7 +333,7 @@ def test_fts_backfill_on_existing_db(tmp_path, monkeypatch):
 
 
 def test_close_keeps_db_consistent_under_concurrent_writes(mem, tmp_path):
-    """退出根治:close() 锁住等在途写收尾再关——后台反思在写时关闭 也不把库截断成 malformed"""
+    """close 锁住等在途写收尾再关 后台反思在写时关闭也不把库截断成 malformed"""
     import sqlite3
     import threading
     import time
@@ -347,15 +347,15 @@ def test_close_keeps_db_consistent_under_concurrent_writes(mem, tmp_path):
             try:
                 mem.remember("我平时用npm管包", salience=0.3)
             except Exception:
-                break  # close 后写失败是正常的(被吞)
+                break  # close 后写失败是正常的被吞
 
     threading.Thread(target=hammer, daemon=True).start()
     time.sleep(0.02)
-    mem.close()          # 带锁关:等在途 commit 收尾
+    mem.close()          # 带锁关 等在途 commit 收尾
     stop[0] = True
     time.sleep(0.03)
 
-    # 重开:库可读 + integrity_check=ok 证明没被截断成损坏
+    # 重开 库可读 integrity_check=ok 证明没被截断成损坏
     conn = sqlite3.connect(tmp_path / "m.db")
     try:
         assert conn.execute("SELECT COUNT(*) FROM experiences").fetchone()[0] >= 1
@@ -365,8 +365,7 @@ def test_close_keeps_db_consistent_under_concurrent_writes(mem, tmp_path):
 
 
 def _malform_db(path):
-    """造一个头有效、中间页损坏的 sqlite 文件——模拟异常退出 mid-write 留下的 malformed 库
-    (真实损坏:头是 'SQLite format 3'、坏的是数据页;不是整文件垃圾)"""
+    """造一个头有效中间页损坏的 sqlite 文件 模拟异常退出 mid-write 留下的 malformed 库"""
     import sqlite3
     path.parent.mkdir(parents=True, exist_ok=True)
     c = sqlite3.connect(str(path))
@@ -382,8 +381,7 @@ def _malform_db(path):
 
 
 def test_corrupt_db_self_heals_on_construct(tmp_path, monkeypatch):
-    """库在磁盘上已损坏(上次异常退出留下) 构造时该删坏库重建空库 而不是崩在启动
-    根因:失败的语句会泄漏文件句柄 close 后必须丢掉死连接引用让 gc 回收 否则 unlink 删不掉坏文件"""
+    """库在磁盘上已损坏时构造该删坏库重建空库而不是崩在启动"""
     monkeypatch.setattr(store_mod, "embed_texts", lambda texts: None)
     db = tmp_path / "rot.db"
     _malform_db(db)
@@ -391,7 +389,7 @@ def test_corrupt_db_self_heals_on_construct(tmp_path, monkeypatch):
     with pytest.raises(sqlite3.DatabaseError):  # 先确认这库确实坏了
         sqlite3.connect(str(db)).execute("SELECT count(*) FROM t").fetchone()
 
-    m = MemoryStore(db)  # 唯一连接 应自愈:删坏库重建
+    m = MemoryStore(db)  # 唯一连接 应自愈 删坏库重建
     m.remember("自愈后还能记住这条")
     out = m.recall_relevant("自愈后", k=3)
     assert any("自愈" in c for c in out), "重建后该能正常写入/召回"
@@ -401,11 +399,11 @@ def test_corrupt_db_self_heals_on_construct(tmp_path, monkeypatch):
 
 
 def test_corrupt_docs_db_self_heals_on_construct(tmp_path, monkeypatch):
-    """文档知识库同样:磁盘上 docs.db 已损坏时 DocStore 构造该重建而不是崩"""
+    """磁盘上 docs.db 已损坏时 DocStore 构造该重建而不是崩"""
     import desktop_pet.docs as docs_mod
     fresh = tmp_path / "docs_rot.db"
     _malform_db(fresh)
-    # 把模块级 _DB_PATH 指向坏文件;原模块单例连的是别的路径 不会挡这次 unlink
+    # 把模块级 _DB_PATH 指向坏文件 原模块单例连的是别的路径 不会挡这次 unlink
     monkeypatch.setattr(docs_mod, "_DB_PATH", fresh)
     monkeypatch.setattr(docs_mod, "embed_texts", lambda texts: None)
 

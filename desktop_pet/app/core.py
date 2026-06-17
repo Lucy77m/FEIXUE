@@ -64,7 +64,7 @@ class PetApp(QuickActionsMixin, VoiceMixin, AgentBridgeMixin,
     request_confirm = Signal(str)
     request_rewrite = Signal(str)
     request_clip_alchemy = Signal(str, str)
-    request_new_topic = Signal()    # 换话题/重置改走队列进 worker 线程 别在 UI 线程直接动 agent 消息历史
+    request_new_topic = Signal()    # 换话题 重置改走队列进 worker 线程 别在 UI 线程直接动 agent 消息历史
     request_forget_all = Signal()
     _hear_partial = Signal(str)
     _hear_final = Signal(str)
@@ -333,7 +333,7 @@ class PetApp(QuickActionsMixin, VoiceMixin, AgentBridgeMixin,
 
     def run(self) -> int:
         from desktop_pet.settings import sweep_stale_tmp
-        sweep_stale_tmp()  # 清掉上次硬退/崩溃在 write→replace 间留下的孤儿 .tmp 别长期累积
+        sweep_stale_tmp()  # 清掉上次硬退崩溃在 write replace 间留下的孤儿 .tmp 别长期累积
         stats.mark_first_seen()
         hearing.set_enabled(self._settings.hear_enabled)
         hearing.set_wake_enabled(self._settings.hear_enabled and self._settings.wake_enabled)

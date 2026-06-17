@@ -21,7 +21,7 @@ def type_text(text: str) -> str:
     if all(ord(c) < 128 for c in text):
         pyautogui.write(text, interval=0.01)
         return f"typed {len(text)} chars"
-    snap = clipboard.snapshot_clipboard()  # 连图片一起存(不只文本)粘完原样还回去 别把用户复制的图弄丢
+    snap = clipboard.snapshot_clipboard()  # 连图片一起存 粘完原样还回去 别把用户复制的图弄丢
     clipboard.write_clipboard(text)
     time.sleep(0.06)  # 等剪贴板刷新
     pyautogui.hotkey("ctrl", "v")

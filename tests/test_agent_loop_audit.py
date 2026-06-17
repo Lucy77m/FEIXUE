@@ -1,6 +1,6 @@
 # author: bdth
 # email: 2074055628@qq.com
-# 板块③ Agent循环与工具 重审隐患回归——取消时丢半截tool_calls、过期定时提醒拒收、后台任务排队不算已跑
+# 板块③ Agent循环与工具 重审隐患回归 取消时丢半截tool_calls 过期定时提醒拒收 后台任务排队不算已跑
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ import pytest
 from desktop_pet.agent.streaming import reassemble
 
 
-# ---------- 取消中途断流:别把攒到一半的 tool_calls(截断JSON)拼进消息 ----------
+# ---------- 取消中途断流 别把攒到一半的 tool_calls 拼进消息 ----------
 
 class _Fn:
     def __init__(self, name=None, arguments=None):
@@ -49,7 +49,7 @@ class _Chunk:
 
 
 def test_reassemble_drops_partial_toolcalls_on_cancel():
-    # 第一片给半截 arguments,随后取消——不该把 '{"command": "git pu' 当成 tool_call 拼出来
+    # 第一片给半截 arguments 随后取消 不该把半截当成 tool_call 拼出来
     chunks = [
         _Chunk([_Choice(_Delta(content="正在", tool_calls=[
             _TC(0, cid="call_1", name="run_shell", args='{"command": "git pu')]))]),
@@ -81,7 +81,7 @@ def test_reassemble_keeps_toolcalls_without_cancel():
     assert msg.tool_calls[0].function.arguments == '{"command": "ls"}'
 
 
-# ---------- 过期的带日期定时提醒:别假装设好了(due 会静默丢弃) ----------
+# ---------- 过期的带日期定时提醒 别假装设好了 due 会静默丢弃 ----------
 
 def test_schedule_reminder_rejects_stale_dated(monkeypatch):
     import desktop_pet.agent.tools as tools_mod
@@ -98,13 +98,13 @@ def test_schedule_reminder_rejects_stale_dated(monkeypatch):
     tools_mod._schedule_reminder("买面包", future, None)
     assert any(m == "买面包" for _, m, _ in added), "未来时间该入库"
 
-    # 宽限内(30分钟前)仍入库——due 会带迟到提示送达 不该拦
+    # 宽限内仍入库 due 会带迟到提示送达 不该拦
     recent = (datetime.now() - timedelta(minutes=30)).strftime("%Y-%m-%d %H:%M")
     tools_mod._schedule_reminder("喝水", recent, None)
     assert any(m == "喝水" for _, m, _ in added), "2h宽限内的过期时间仍该入库"
 
 
-# ---------- 后台任务:排队未开跑时"已跑"记0 抢到槽才计时 ----------
+# ---------- 后台任务 排队未开跑时已跑记0 抢到槽才计时 ----------
 
 def test_bgtask_queued_not_counted_as_running():
     from desktop_pet.agent.bgtasks import _BgRegistry

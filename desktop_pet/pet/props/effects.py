@@ -414,7 +414,7 @@ def draw_butterfly(painter: QPainter, bw: float, bh: float, t: float, stage: str
 
 
 def draw_fireworks(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
-    """放烟花 升空->炸开"""
+    """放烟花 升空炸开"""
     if stage == "launch":
         y = bh * 0.1 - bh * 1.3 * stage_p
         painter.setPen(QPen(QColor(255, 210, 120), max(1.4, bw * 0.012)))

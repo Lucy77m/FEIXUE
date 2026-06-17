@@ -11,8 +11,8 @@ _OCR_MAX_SIDE = 3200
 _MIN_OCR_SCORE = 0.5
 _ocr_engine = None
 _ocr_lock = threading.Lock()
-# 推理串行化:同一个 RapidOCR 实例被 worker 线程(ocr_screen)和入库 daemon 线程(ocr_boxes 来自 PDF OCR)同时调
-# 并发 __call__ 会让结果错乱或抛异常(被吞成空结果 喂进库的文档丢字)。OCR 本就是瓶颈 串行无妨
+# 推理串行化 同一个 RapidOCR 实例被 worker 线程和入库 daemon 线程同时调
+# 并发 __call__ 会结果错乱或抛异常 串行无妨
 _infer_lock = threading.Lock()
 
 

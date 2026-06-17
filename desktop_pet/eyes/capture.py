@@ -26,7 +26,7 @@ _WDA_EXCLUDEFROMCAPTURE = 0x11
 _RECOMPOSE_S = 0.06  # 撤标志后等dwm重新合成的间隔
 
 _own_hwnds: set[int] = set()
-# 主线程登记/注销自家窗口(球、虫子随生随灭) worker 线程截图时遍历——加锁+遍历副本 防"set changed size during iteration"
+# 主线程登记注销自家窗口 worker 线程截图时遍历 加锁加遍历副本防 set changed size during iteration
 _own_lock = threading.Lock()
 
 _user32 = ctypes.windll.user32
@@ -43,8 +43,8 @@ class _MONITORINFO(ctypes.Structure):
     ]
 
 
-# 截图用的监视器矩形:做线程本地——每个 agent(前台 worker、后台 daemon、并行子agent)各跑在自己的线程上
-# 它们的"截图->点击"坐标变换必须用各自这次截的监视器 geom;共享一个全局会被另一个 agent 的截图改掉 导致点错位置/点到别的屏
+# 截图用的监视器矩形做线程本地 每个 agent 各跑在自己的线程上
+# 截图到点击的坐标变换得用各自这次截的 geom 共享全局会被别的 agent 改掉点错位置
 _geom_default: tuple[int, int, int, int] = (0, 0, _SM(0) or 1, _SM(1) or 1)
 _geom_tls = threading.local()
 
@@ -84,8 +84,7 @@ def register_own_window(hwnd: int) -> None:
 
 
 def unregister_own_window(hwnd: int) -> None:
-    """注销随生随灭的自家窗口(球/虫子关闭时)——否则 _own_hwnds 无限堆积死句柄
-    Windows 会回收 HWND 数值 堆积的旧句柄可能被复用到别家窗口 截图时误把人家排除掉"""
+    """注销随生随灭的自家窗口 否则死句柄堆积被回收复用会误排除别家窗口"""
     if not hwnd:
         return
     with _own_lock:
@@ -220,7 +219,7 @@ def grab_active_geom() -> tuple[Image.Image, tuple[int, int, int, int]]:
 def _grab(include_self: bool) -> Image.Image:
     """抓屏 include_self时临时放开自家窗口"""
     with _own_lock:
-        hwnds = list(_own_hwnds)  # 拍一份快照再遍历 主线程此刻 add/discard 都不会撞 RuntimeError
+        hwnds = list(_own_hwnds)  # 拍快照再遍历 主线程此刻 add discard 都不撞 RuntimeError
     if not (include_self and hwnds):
         return grab_active()
     for hwnd in hwnds:

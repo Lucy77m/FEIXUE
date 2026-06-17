@@ -210,7 +210,7 @@ class AutonomyMixin:
             return False
         now = datetime.now()
         if getattr(self, "_fired_date", None) != now.date():
-            # 跨天清掉去重集——节日键只有月日没年份 不清的话长期不重启时同一节日整个进程一辈子只触发一次
+            # 跨天清掉去重集 节日键只有月日没年份 不清的话不重启时同一节日整个进程只触发一次
             self._fired_date = now.date()
             self._fired_occasions.clear()
         key = occasions.today_key(now)
@@ -249,7 +249,7 @@ class AutonomyMixin:
                 dream = self._dreams.take_dream_hint()  # 睡着时做了梦就迷糊提一句
                 bits = [b for b in (context, self._away_note(now), dream) if b]
                 self.request_proactive.emit("welcome_back", "\n".join(bits))
-            # 还欠着欢迎但限流没到点:先不主动说别的 也别把标志白白清掉 等下次轮询再看(否则这次回来的欢迎永远丢了)
+            # 还欠着欢迎但限流没到点 先不主动说别的 也别把标志白白清掉 等下次轮询再看
             return
         if not proactive.ready(now, level):
             return
@@ -274,7 +274,7 @@ class AutonomyMixin:
         return f"（此刻 ta 正在用的窗口是：「{title}」——可作为你搭话的由头，但别照念窗口标题。）"
 
     def _away_note(self, now: datetime) -> str:
-        """据离开时长给回来招呼分级 短暂离开不加料 久别/跨天才热络"""
+        """据离开时长给回来招呼分级 短暂离开不加料 久别跨天才热络"""
         since = getattr(self, "_asleep_since", None)
         if since is None:
             return ""

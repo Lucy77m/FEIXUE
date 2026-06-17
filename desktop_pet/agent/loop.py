@@ -71,13 +71,12 @@ from desktop_pet.settings import AUTONOMY_BUDGETS, Settings, build_http_client
 from desktop_pet.skills import skills
 from desktop_pet.usage import meter as usage_meter
 
-# 这些是值得等一等再试的瞬时错误 限流 5xx 网络抖动 超时
-# 不含 400 参数错 401 鉴权 404 模型名错 那些重试多少次都一样 该快速失败
+# 值得重试的瞬时错误 限流 5xx 网络抖动 超时 不含 400 401 404 那些快速失败
 _TRANSIENT_ERRORS = (RateLimitError, InternalServerError, APITimeoutError, APIConnectionError)
 
 
 def _retry_after_seconds(exc: Exception) -> float | None:
-    """从限流响应头里抠 Retry-After 服务端让等多久就等多久 抠不到返回None"""
+    """从限流响应头抠 Retry-After 抠不到返回None"""
     resp = getattr(exc, "response", None)
     headers = getattr(resp, "headers", None)
     if not headers:
@@ -103,15 +102,15 @@ class Agent(HistoryMixin, ToolHandlersMixin, SubagentsMixin, DutiesMixin):
         self._oa_client: OpenAI | None = None
         self._oa_creds: tuple[str, str, str] | None = None
         self._client_lock = threading.Lock()
-        self._closing = False  # close()/cancel 置位:在途反思/压缩 daemon 据此别再造新 OpenAI client 漏掉 httpx 池
-        self._retired_clients: list = []  # 配置变了换下来的旧 client——可能仍有线程在流式用着 不当场关 退出时统一收
+        self._closing = False  # close cancel 置位 在途反思和压缩别再造新 OpenAI client 漏 httpx 池
+        self._retired_clients: list = []  # 配置变了换下来的旧 client 可能仍有线程在流式用 退出时统一收
         self._shell = shell.new_session()
         self._python = pycode.new_runner()
         self._compressed = ""
         self._compress_lock = threading.Lock()
         self._pending_compress: list[str] = []  # 待摘要的被裁段 后台串行消化
         self._compress_busy = False
-        self._compress_gen = 0  # 换话题/遗忘会自增 在途摘要发现代差变了就丢弃不回写
+        self._compress_gen = 0  # 换话题或遗忘自增 在途摘要发现代差变了就丢弃不回写
         self._risk_approval = False
         self._known_files: dict[str, float] = {}
         self._messages: list[dict] = [self._system_message()]
@@ -160,7 +159,7 @@ class Agent(HistoryMixin, ToolHandlersMixin, SubagentsMixin, DutiesMixin):
             try:
                 wipe()
             except Exception as exc:
-                # 别再静默吞——某步清不掉(如库损坏)要留痕 否则像重置没生效
+                # 某步清不掉要留痕 否则像重置没生效
                 audit.system("forget_all step failed", step=getattr(wipe, "__name__", str(wipe)), error=repr(exc))
         self._reset_compressed()
         self._known_files.clear()
@@ -171,7 +170,7 @@ class Agent(HistoryMixin, ToolHandlersMixin, SubagentsMixin, DutiesMixin):
 
     def new_topic(self) -> None:
         """只清当前对话 长期记忆保留"""
-        store.bump_epoch()  # 让上一段对话在途的反思作废:它总结的是被丢弃的话题 不该再写进长期记忆/persona/journal
+        store.bump_epoch()  # 让上一段对话在途的反思作废 它总结的是被丢弃的话题 不该再写进长期记忆
         self._reset_compressed()
         self._known_files.clear()
         self._clear_session_file()
@@ -241,7 +240,7 @@ class Agent(HistoryMixin, ToolHandlersMixin, SubagentsMixin, DutiesMixin):
         self._tools = self._build_tools()
 
     def close(self) -> None:
-        self._closing = True  # 终态:之后晚到的反思/压缩 daemon 调 _client() 会被拒 不再造没人关的 client
+        self._closing = True  # 终态 之后晚到的反思和压缩调 _client 会被拒 不再造没人关的 client
         if self._depth == 0:
             self._save_session()
         self._shell.close()
@@ -285,16 +284,13 @@ class Agent(HistoryMixin, ToolHandlersMixin, SubagentsMixin, DutiesMixin):
         if journal_context:
             parts.append(journal_context)
         if self._compressed:
-            parts.append(
-                "[前情摘要] 本次对话更早的部分因超长被压缩成了下面这份备忘——"
-                "这些事真实发生过，里面的约束和决定仍然有效：\n" + self._compressed
-            )
+            parts.append(prompts.COMPRESSED_PREFIX + self._compressed)
         return {"role": "system", "content": "\n\n".join(parts)}
 
     def _turn_context(self, query: str | None = None) -> str:
         """每轮现算的状态注记"""
         parts = [emotion.tone_hint(), prompts.time_hint()]
-        mood_reason = emotion.mood_note()  # 心情明显时附上"为什么" 让它说得出因
+        mood_reason = emotion.mood_note()  # 心情明显时附上为什么 让它说得出因
         if mood_reason:
             parts.append(mood_reason)
         from desktop_pet import somatic
@@ -304,7 +300,7 @@ class Agent(HistoryMixin, ToolHandlersMixin, SubagentsMixin, DutiesMixin):
         memory_context = store.as_context(query)
         if memory_context:
             parts.append(memory_context)
-        return "[当前状态注记——以这条最新的为准，历史消息里的同类注记已过期]\n" + "\n\n".join(parts)
+        return prompts.STATE_NOTE_HEADER + "\n\n".join(parts)
 
     def run(
         self,
@@ -461,8 +457,8 @@ class Agent(HistoryMixin, ToolHandlersMixin, SubagentsMixin, DutiesMixin):
                     for future in as_completed(futures):
                         results[futures[future]] = tools.ToolResult(future.result())
 
-            # 一回合里多个只读工具并发跑 互不依赖 多工具回合提速明显
-            # 只取 _PARALLEL_SAFE——run_shell/run_python 共享单会话不能并发 留给串行
+            # 一回合多个只读工具并发跑 互不依赖
+            # 只取 _PARALLEL_SAFE run_shell 和 run_python 共享单会话不能并发 留给串行
             par = [(c, a) for c, a in parsed
                    if c.id not in results and a is not None and c.function.name in _PARALLEL_SAFE]
             if len(par) > 1:
@@ -532,8 +528,8 @@ class Agent(HistoryMixin, ToolHandlersMixin, SubagentsMixin, DutiesMixin):
                     images.append(result.image_data_url)
             if images:
                 self._append_images(images)
-            # 同名同参连续失败 撞顶回灌一句"别原地打转换思路" 一轮每签名只提一次
-            # 每步每签名只计一次——一条响应里重复同样调用不该一步就把计数顶上去
+            # 同名同参连续失败 撞顶回灌一句别原地打转换思路 一轮每签名只提一次
+            # 每步每签名只计一次 一条响应里重复同样调用不该一步就把计数顶上去
             failed_sigs: set[str] = set()
             ok_sigs: set[str] = set()
             for call, arguments in parsed:
@@ -575,7 +571,7 @@ class Agent(HistoryMixin, ToolHandlersMixin, SubagentsMixin, DutiesMixin):
             audit.reply(f"[step-limit 收尾调用失败: {type(exc).__name__}: {exc}]")
             reply = ""
         if not reply:
-            reply = "[confused]\n这个任务我试了好多步还是没搞定，先停一下——可能太复杂、或者得用管理员权限再来。"
+            reply = prompts.STEP_LIMIT_FALLBACK
         audit.reply(reply)
         return reply
 
@@ -590,7 +586,7 @@ class Agent(HistoryMixin, ToolHandlersMixin, SubagentsMixin, DutiesMixin):
         creds = (self._settings.api_key, self._settings.base_url, self._settings.proxy)
         with self._client_lock:
             if self._closing and self._oa_client is None:
-                # 已关停:别再为晚到的反思/压缩 daemon 造一个没人会去关的 client(httpx 池泄漏)
+                # 已关停 别再为晚到的反思和压缩造没人关的 client 漏 httpx 池
                 raise RuntimeError("agent is closing")
             if self._oa_client is None or self._oa_creds != creds:
                 old = self._oa_client
@@ -607,8 +603,8 @@ class Agent(HistoryMixin, ToolHandlersMixin, SubagentsMixin, DutiesMixin):
                 self._strip_temperature = False
                 self._strip_cache_key = False
                 if old is not None:
-                    # 别在这关:可能正有 worker 线程在用 old 做流式补全 当场 close 会掐断它那一轮
-                    # 先留着 等 close()/cancel 收尾时统一关(配置变更很少 顶多攒下寥寥几个)
+                    # 别在这关 可能有 worker 线程在用 old 流式补全 当场 close 掐断它那一轮
+                    # 先留着 等 close cancel 收尾时统一关
                     self._retired_clients.append(old)
             return self._oa_client
 
@@ -638,8 +634,7 @@ class Agent(HistoryMixin, ToolHandlersMixin, SubagentsMixin, DutiesMixin):
         if not self._strip_stream_options:
             params["stream_options"] = {"include_usage": True}
         if not self._strip_cache_key:
-            # 稳定key帮服务端把同前缀的多步请求路由到同一缓存 提命中率省钱
-            # 系统前缀整轮稳定、历史只追加 本就缓存友好 这是再添一把routing提示
+            # 稳定key帮服务端同前缀请求路由到同一缓存 提命中率
             params["prompt_cache_key"] = f"mochi-d{self._depth}"
         try:
             stream = self._create_stream(params)
@@ -650,8 +645,7 @@ class Agent(HistoryMixin, ToolHandlersMixin, SubagentsMixin, DutiesMixin):
                 ("stream_options", "_strip_stream_options"),
                 ("prompt_cache_key", "_strip_cache_key"),
             ]
-            # 错误消息一个非标参数都没点名 -> 这个 400 跟它们无关(上下文超长/内容策略/模型名错等)
-            # 别盲剥四个参数把整会话永久降级(降采样、丢用量统计、丢缓存路由) 直接抛出真错误让上层看见
+            # 错误消息一个非标参数都没点名 这个 400 跟它们无关 直接抛出真错误让上层看见
             if not any(key in str(exc).lower() for key, _flag in candidates):
                 raise
             # 非标参数400就逐个剥掉重试 错误消息点名的先剥 剥光还炸才抛
@@ -676,7 +670,7 @@ class Agent(HistoryMixin, ToolHandlersMixin, SubagentsMixin, DutiesMixin):
         return message
 
     def _create_stream(self, params: dict):
-        """发起补全 瞬时错误指数退避重试 400原样抛给上层剥参数 退避期间可被取消打断"""
+        """发起补全 瞬时错误指数退避重试 400抛给上层剥参数"""
         delay = _RETRY_BASE_S
         attempt = 0
         while True:
@@ -717,9 +711,7 @@ class Agent(HistoryMixin, ToolHandlersMixin, SubagentsMixin, DutiesMixin):
 
     @staticmethod
     def _looks_failed(text: str) -> bool:
-        """工具结果是不是一条失败回执 用于卡死检测。只看首行——失败回执的标记词都在
-        首行方括号里；而分页读文件 '[chars..of..]'、后台轮询 '[..still running..]' 这些
-        成功结果的标记词出现在正文里，扫全文会把成功的读/轮询误判成失败"""
+        """工具结果是不是失败回执 只看首行"""
         t = (text or "").lstrip()
         if not t.startswith("["):  # 失败回执统一裹方括号 普通输出极少以[开头
             return False
@@ -730,9 +722,7 @@ class Agent(HistoryMixin, ToolHandlersMixin, SubagentsMixin, DutiesMixin):
 
     @staticmethod
     def _strip_order(order: list, exc_text: str) -> list:
-        """非标参数 400 时的剥除顺序：错误消息点名了哪个就把它挪到最前先剥，
-        否则按默认序。否则会连坐——网关只嫌 prompt_cache_key，却把 temperature/
-        stream_options 一并永久剥掉（剥过的标记整会话不复原），白白降采样、丢用量统计"""
+        """非标参数 400 的剥除顺序 错误点名的先剥"""
         low = (exc_text or "").lower()
         for i, (key, _flag) in enumerate(order):
             if key in low:
@@ -742,8 +732,7 @@ class Agent(HistoryMixin, ToolHandlersMixin, SubagentsMixin, DutiesMixin):
 
     @staticmethod
     def _stuck_sig(call, arguments) -> str:
-        """卡死签名：名字+规范化参数。用解析后的 dict 排序序列化 让键序/空白不同但
-        语义相同的调用算同一个 否则模型每次微调序列化就绕过了检测"""
+        """卡死签名 名字加规范化参数"""
         canon = (json.dumps(arguments, sort_keys=True, ensure_ascii=False)
                  if arguments is not None else (call.function.arguments or ""))
         return call.function.name + "\x00" + canon

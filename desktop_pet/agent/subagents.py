@@ -33,10 +33,10 @@ class SubagentsMixin:
             return "(No subtask given — nothing to delegate.)"
         lang = (self._settings.language or "").strip()
         if lang and lang != "跟随":
-            task = f"{task}\n\n(Write your final answer in {lang}.)"
+            task = f"{task}\n\n" + prompts.subagent_lang_instr(lang)
         schema = result_schema.strip() if isinstance(result_schema, str) else ""
         if schema:
-            task = f"{task}\n\n(Return your final answer as ONLY a JSON object of this shape — no prose, no code fence: {schema})"
+            task = f"{task}\n\n" + prompts.subagent_schema_instr(schema)
         worker = Agent(self._settings, depth=self._depth + 1, cancel_event=self._cancel)
         try:
             result = worker.run(task, on_step=step)

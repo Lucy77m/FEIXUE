@@ -30,9 +30,7 @@ def read_clipboard() -> str:
 
 
 def snapshot_clipboard() -> dict | None:
-    """快照剪贴板上可可靠回写的格式(文本 + 位图 DIB)。
-    type_text 借剪贴板粘贴 CJK 前后用——之前只存 CF_UNICODETEXT 文本 用户复制的【图片】会被
-    EmptyClipboard 永久销毁且不还原。返回 {} 表示空剪贴板 None 表示读失败"""
+    """快照剪贴板可回写的格式 文本加位图 DIB 空剪贴板返回空字典 读失败返回 None"""
     try:
         import win32clipboard
         import win32con

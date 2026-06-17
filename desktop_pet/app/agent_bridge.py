@@ -42,12 +42,12 @@ class AgentBridgeMixin:
 
     def _on_proactive_reply(self, raw: str) -> None:
         if not self._shown or self._foreground_busy() or self._lecturing:
-            return  # 关机隐藏时 即便有在途的主动回复返回 也不弹气泡
+            return  # 关机隐藏时即便有在途的主动回复返回也不弹气泡
         self._on_reply(raw)
 
     def _on_reply(self, raw: str) -> None:
         if not self._shown:
-            return  # 关机/退出后才回来的回复(取消前排队的那一回合)别再弹气泡说话
+            return  # 关机或退出后才回来的回复别再弹气泡说话
         tag, text = _parse_emotion(raw)
         self._pet.express(tag)
         self._reset_lecture()
@@ -163,7 +163,7 @@ class AgentBridgeMixin:
         self._pet.perform(name)
 
     def _on_control(self, active: bool, label: str) -> None:
-        """agent 借用鼠标/键盘时 顶部弹"正在帮你操作"浮层 让你心里有数"""
+        """agent 借用鼠标键盘时顶部弹正在帮你操作浮层"""
         if active:
             if not self._shown:
                 return  # 关机隐藏时不弹
@@ -171,7 +171,7 @@ class AgentBridgeMixin:
             screen = (self._app.screenAt(QCursor.pos()) or self._app.primaryScreen()).availableGeometry()
             self._control_hint.show_hint(label, screen)
         else:
-            # 留个零点九秒让你看清 紧接着的下一次操作会取消这次收起 不闪
+            # 留个零点九秒让你看清 下一次操作会取消这次收起 不闪
             self._control_hide_timer.start(900)
 
     def _confirm(self, action: str) -> bool:
@@ -202,17 +202,17 @@ class AgentBridgeMixin:
 
     def _feed_pop(self, text: str) -> None:
         if self._meeting_mode or not self._shown or self._engaged():
-            return  # 开会 关机 忙于任务或对话时 主动气泡全咽下去 不打断
+            return  # 开会 关机 忙于任务或对话时主动气泡全咽下去 不打断
         self._thought.pop(text, self._pet)
 
     def _feed_react(self, name: str) -> None:
-        """伴生的自发小动作 —— 忙/对话/关机/开会时不放，免得打断思考姿势"""
+        """伴生的自发小动作 忙或对话或关机或开会时不放 免得打断思考姿势"""
         if self._meeting_mode or not self._shown or self._engaged():
             return
         self._pet.react(name)
 
     def _feed_perform(self, name: str) -> None:
-        """伴生的自发表演 —— 同上，忙时不打断"""
+        """伴生的自发表演 同上 忙时不打断"""
         if self._meeting_mode or not self._shown or self._engaged():
             return
         self._pet.perform(name)

@@ -1,8 +1,7 @@
 # author: bdth
 # email: 2074055628@qq.com
-# 混合检索的两件纯算法工具 把自然语言查询变成安全的FTS5查询 把多路排序RRF融合
-# 字面检索走SQLite自带的trigram分词 语言无关 零依赖 中英日数字代码一视同仁
-# 它和向量检索互补 trigram精确命中具体的词 文件名报错码英文术语数字 向量管语义
+# 混合检索两件纯算法工具 自然语言查询变安全 FTS5 查询 多路排序 RRF 融合
+# 字面检索走 SQLite trigram 分词 语言无关 和向量检索互补
 
 from __future__ import annotations
 
@@ -23,8 +22,7 @@ def _is_cjk_run(tok: str) -> bool:
 
 
 def fts_query(text: str) -> str | None:
-    """把用户的话拆成安全的trigram MATCH查询 取不出有效词返回None就跳过字面路
-    长中日韩整句不进FTS 那是向量的活 这里只收能精确命中的具体词"""
+    """把用户的话拆成安全的 trigram MATCH 查询 取不出有效词返回 None 跳过字面路"""
     if not text:
         return None
     phrases: list[str] = []
@@ -48,9 +46,7 @@ def fts_query(text: str) -> str | None:
 
 
 def rrf_fuse(rank_lists: list[list], k: int = 60) -> list:
-    """倒数排名融合 每路给每个条目按名次贡献 1/(k+名次) 累加后重排
-    名次靠前贡献大 多路都命中的自然冒头 只在一路命中的也不丢 这是hybrid的核心
-    k默认60是RRF常用值 平滑掉头部名次的过度主导"""
+    """倒数排名融合 每路按名次贡献 1/(k+名次) 累加后重排 多路命中的自然冒头"""
     scores: dict = {}
     for lst in rank_lists:
         for rank, item in enumerate(lst):

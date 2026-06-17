@@ -58,7 +58,7 @@ def recent(n: int = _CONTEXT_N) -> list[dict]:
 
 
 def diary(n: int = 20) -> list[dict]:
-    """给控制面板翻的日记：最近n条，新的在上，带口语日期"""
+    """给控制面板翻的日记 最近n条 新的在上 带口语日期"""
     entries = _load()[-n:]
     return [{"when": _friendly(e.get("at", "")).strip(), "text": e.get("text", "")}
             for e in reversed(entries)]

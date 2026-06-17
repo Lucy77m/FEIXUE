@@ -39,7 +39,7 @@ class BallWindow(QWidget):
         self._timer.timeout.connect(self._tick)
 
     def closeEvent(self, event) -> None:
-        # 注销自家窗口登记 别让死句柄堆在 capture._own_hwnds 里(会被 Windows 回收复用误伤别家窗口)
+        # 注销自家窗口登记 别让死句柄堆在 capture._own_hwnds 里被 Windows 回收复用误伤别家窗口
         capture.unregister_own_window(int(self.winId()))
         super().closeEvent(event)
 

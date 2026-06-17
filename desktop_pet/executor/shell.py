@@ -232,7 +232,7 @@ def new_session() -> _PowerShell:
 
 _BG_CAP = 100_000
 _BG_KEEP_DONE = 8
-_BG_MAX_RUNNING = 8  # 同时在跑的后台 shell 上限 防 agent 起一堆永不收的服务/循环 把进程句柄堆爆
+_BG_MAX_RUNNING = 8  # 同时在跑的后台 shell 上限 防 agent 起一堆永不收的服务循环把句柄堆爆
 
 
 class _BgShell:
@@ -302,7 +302,7 @@ class _BgShell:
         return self.proc.poll() is None
 
     def kill(self) -> None:
-        # 先杀进程树但【不关管道】 让 pump 把管道里残留的最后几行读完——刚被杀的命令尾部输出往往最相关
+        # 先杀进程树不关管道 让 pump 把残留的最后几行读完 刚被杀的尾部输出往往最相关
         try:
             if self.proc.pid is not None:
                 subprocess.run(["taskkill", "/F", "/T", "/PID", str(self.proc.pid)],
@@ -315,7 +315,7 @@ class _BgShell:
             pass
         if self._pump_thread is not None:
             self._pump_thread.join(timeout=0.4)  # 进程已死 pump 读完残留即 EOF 退出
-        _kill_proc(self.proc)  # 收尾:关管道 + 异步收尸(taskkill 重复一次无害 进程已没了)
+        _kill_proc(self.proc)  # 收尾关管道加异步收尸 taskkill 重复一次无害 进程已没了
 
 
 _bg_tasks: dict[int, _BgShell] = {}
@@ -396,9 +396,7 @@ def background_snapshot() -> list[dict]:
 
 
 def shutdown_background() -> None:
-    """退出前杀掉所有后台 shell 进程树。
-    _BgShell 是独立 Popen 没挂在 Job 对象里 父进程 os._exit 不会带走它们 会留下孤儿(占端口/吃CPU);
-    每次退出都漏 跨会话累积。kill() 走 taskkill /F /T 连子孙一起收"""
+    """退出前杀掉所有后台 shell 进程树"""
     with _bg_lock:
         tasks = list(_bg_tasks.values())
         _bg_tasks.clear()

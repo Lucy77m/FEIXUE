@@ -121,6 +121,25 @@ Then report the result as clear, concise text — the key outputs / paths / numb
 """
 
 
+# 系统消息里注入的两段前缀 拼在最新状态和压缩备忘前面
+STATE_NOTE_HEADER = "[当前状态注记——以这条最新的为准，历史消息里的同类注记已过期]\n"
+COMPRESSED_PREFIX = (
+    "[前情摘要] 本次对话更早的部分因超长被压缩成了下面这份备忘——"
+    "这些事真实发生过，里面的约束和决定仍然有效：\n"
+)
+
+
+def subagent_lang_instr(language: str) -> str:
+    return f"(Write your final answer in {language}.)"
+
+
+def subagent_schema_instr(schema: str) -> str:
+    return (
+        "(Return your final answer as ONLY a JSON object of this shape — "
+        f"no prose, no code fence: {schema})"
+    )
+
+
 _LANG_HINT = {
     "中文": (
         "[OUTPUT LANGUAGE] This controls only the language your reply is written in (overriding any language implied above) — not what you do or whether to confirm. Regardless of the "
@@ -165,6 +184,9 @@ COMPRESS_PROMPT = (
     "丢弃寒暄、试错过程、已被推翻的内容。用条目式中文，400 字以内；"
     "直接输出备忘本身，不要任何前后缀或解释。"
 )
+
+# 摘要生成也失败时塞进备忘的占位
+SUMMARY_LOST_NOTE = "(有一段更早的对话因超长被丢弃，且摘要生成失败，细节已不可考。)"
 
 
 def schema_retry_nudge(schema: str) -> str:
@@ -294,6 +316,11 @@ STEP_LIMIT_NUDGE = (
     "to finish it, say what you got done or what's blocking it (e.g. it needs administrator rights, "
     "or it's trickier than it looked), and suggest a next step if there is one. Be honest and short — "
     "no play-by-play of what you tried. Start with an emotion tag as usual.)"
+)
+
+# 撞步数顶 收尾调用也失败时的兜底回复
+STEP_LIMIT_FALLBACK = (
+    "[confused]\n这个任务我试了好多步还是没搞定，先停一下——可能太复杂、或者得用管理员权限再来。"
 )
 
 

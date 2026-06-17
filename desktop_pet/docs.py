@@ -119,14 +119,14 @@ class DocStore:
     def __init__(self) -> None:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
-        self._closing = False  # close() 置位 在途入库 daemon 据此别往已关连接写
+        self._closing = False  # close 置位 在途入库 daemon 别往已关连接写
         self._conn = sqlite3.connect(_DB_PATH, check_same_thread=False)
         self._fts = False
         try:
             self._create_schema()
             self._setup_fts()
         except sqlite3.DatabaseError:
-            self._rebuild()  # 库损坏(异常退出留下)就重建空库 别让 app 起不来
+            self._rebuild()  # 库损坏就重建空库 别让 app 起不来
 
     def _create_schema(self) -> None:
         with self._lock:
@@ -138,12 +138,12 @@ class DocStore:
             self._conn.commit()
 
     def _rebuild(self) -> None:
-        """库损坏时删文件重建空库——损坏后照样能起、能清(对齐 MemoryStore._rebuild)"""
+        """库损坏时删文件重建空库 损坏后照样能起能清 对齐 MemoryStore._rebuild"""
         try:
             self._conn.close()
         except Exception:
             pass
-        self._conn = None  # 丢掉死连接引用 否则 delete_db_files 里的 gc 收不掉它 文件句柄不放 unlink 必失败
+        self._conn = None  # 丢掉死连接引用 否则 delete_db_files 里的 gc 收不掉它 unlink 必失败
         delete_db_files(_DB_PATH)
         self._conn = sqlite3.connect(_DB_PATH, check_same_thread=False)
         self._fts = False
@@ -151,8 +151,7 @@ class DocStore:
         self._setup_fts()
 
     def _setup_fts(self) -> None:
-        """给chunk内容建trigram全文索引 triggers跟chunks表同步 没FTS5就退化纯向量
-        和记忆库同一套路 字面路语言无关零依赖 补向量漏掉的精确词"""
+        """给chunk内容建trigram全文索引 triggers跟chunks表同步 没FTS5就退化纯向量"""
         try:
             with self._lock:
                 self._conn.execute(
@@ -226,7 +225,7 @@ class DocStore:
         return f"Ingested {done_files} file(s), {total_chunks} chunks into the knowledge base{tail}."
 
     def _drop_source(self, source: str) -> None:
-        """清掉某来源的旧块——之前入过库的文件现在读不出/超大了 别让 recall 继续供陈旧内容"""
+        """清掉某来源的旧块 文件读不出或超大了 别让 recall 继续供陈旧内容"""
         with self._lock:
             self._conn.execute("DELETE FROM chunks WHERE source = ?", (source,))
             self._conn.commit()
@@ -243,17 +242,17 @@ class DocStore:
         source = str(file)
         text = _read_pdf(file) if file.suffix.lower() == ".pdf" else _read_text(file)
         if text is None or len(text) > _MAX_FILE:
-            self._drop_source(source)  # 同名文件曾入库 现在读不出/超大 清掉旧块 别留陈旧知识
+            self._drop_source(source)  # 同名文件曾入库 现在读不出或超大 清掉旧块 别留陈旧知识
             return -1
         chunks = _chunk_text(text)[:budget]  # 超出剩余配额截断
         if not chunks:
             self._drop_source(source)
             return -1
-        # 先无锁把所有 (source,idx,content,embedding) 算好——embedding 是几十秒的网络慢活
-        # 绝不能持锁做:否则主线程的 docs.sources()/count() 会卡在锁上 整个 UI 冻住
+        # 先无锁把所有块算好 embedding 是几十秒的网络慢活
+        # 绝不能持锁做 否则主线程的 docs.sources count 会卡在锁上 整个 ui 冻住
         prepared: list[tuple] = []
         any_ok = False   # 这次至少有一批拿到了真向量
-        any_fail = False  # 这次至少有一批没拿到(嵌入进了冷却)
+        any_fail = False  # 这次至少有一批没拿到 嵌入进了冷却
         for start in range(0, len(chunks), _EMBED_BATCH):
             batch = chunks[start : start + _EMBED_BATCH]
             vectors = embed_texts(batch)
@@ -264,13 +263,13 @@ class DocStore:
                 any_ok = True
             for offset, (content, vector) in enumerate(zip(batch, vectors)):
                 prepared.append((source, start + offset, content, pack(vector) if vector else None))
-        # 部分嵌入(前几批成功 后几批进了冷却返回 None):别拿半成品覆盖掉之前已全嵌入的旧块
-        # ——保留旧块 等嵌入恢复后重新入库补全;首次入库(没有旧嵌入)则照常存 内容/FTS 仍可用
+        # 部分嵌入时别拿半成品覆盖掉之前已全嵌入的旧块
+        # 保留旧块 等嵌入恢复后重新入库补全 首次入库则照常存
         if any_ok and any_fail and self._source_has_embeddings(source):
             return -1
-        # 短事务:锁内只做删旧块 + 批量插新块 不碰网络
+        # 短事务 锁内只做删旧块加批量插新块 不碰网络
         with self._lock:
-            if self._closing:  # 退出已开始关库:别往(即将)关掉的连接写 投喂入库的 daemon 没被 join 可能晚到这
+            if self._closing:  # 退出已开始关库 别往即将关掉的连接写 投喂入库的 daemon 没被 join 可能晚到这
                 return -1
             self._conn.execute("DELETE FROM chunks WHERE source = ?", (source,))
             self._conn.executemany(
@@ -280,8 +279,7 @@ class DocStore:
         return len(chunks)
 
     def recall(self, query: str, k: int = _RECALL_K) -> str:
-        """混合召回 向量语义和trigram字面两路RRF融合 断网或没命中逐级兜底
-        字面路语言无关 专补向量漏的精确词 文件名报错码英文术语数字"""
+        """混合召回 向量语义和trigram字面两路RRF融合 断网或没命中逐级兜底"""
         query = (query or "").strip()
         if not query:
             return "(no search query given)"
@@ -306,7 +304,7 @@ class DocStore:
 
         if vec_rank or fts_rank:
             fused = rrf_fuse([vec_rank, fts_rank])[:k]
-            # cid in by_id 兜底:快照取完才被并发 ingest 插进来的新块 不在 by_id 里 别 KeyError
+            # cid in by_id 兜底 快照取完才被并发 ingest 插进来的新块 不在 by_id 里 别 KeyError
             parts = [f"【{Path(by_id[cid][0]).name}】\n{by_id[cid][1]}" for cid in fused if cid in by_id]
             if parts:
                 return "\n\n".join(parts)
@@ -329,7 +327,7 @@ class DocStore:
                 self._conn.commit()
                 return "Cleared the knowledge base."
             except sqlite3.DatabaseError:
-                # 库损坏 DELETE 走不通——重建空库 保证"清知识库/重置"一定生效(对齐 store.wipe)
+                # 库损坏 DELETE 走不通 重建空库 保证清知识库重置一定生效 对齐 store.wipe
                 self._rebuild()
                 return "Cleared the knowledge base (rebuilt a corrupt index)."
 
@@ -363,7 +361,7 @@ class DocStore:
         return cur.rowcount
 
     def close(self) -> None:
-        """退出前干净关闭——锁住等在途写收尾再关 防硬杀截断成损坏库"""
+        """退出前干净关闭 锁住等在途写收尾再关 防硬杀截断成损坏库"""
         with self._lock:
             self._closing = True  # 置位后在途入库的锁内段会早退 不再 INSERT 到即将关掉的连接
             try:

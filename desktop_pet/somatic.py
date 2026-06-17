@@ -11,8 +11,8 @@ from collections import deque
 _events: deque = deque(maxlen=8)
 _states: dict[str, str] = {}
 _LOOK_BACK = 15 * 60
-# 主线程(传感器/心流/抚摸等 @Slot、定时器)在写 worker 线程每轮 context() 在读
-# 不加锁 worker 迭代时撞上写 -> RuntimeError: dict/deque changed size during iteration 整轮对话失败
+# 主线程在写 worker 线程每轮 context 在读
+# 不加锁 worker 迭代时撞上写会 changed size during iteration 整轮对话失败
 _lock = threading.Lock()
 
 

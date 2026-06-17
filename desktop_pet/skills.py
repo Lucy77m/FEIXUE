@@ -33,8 +33,7 @@ class SkillStore:
     """AI 自创代码仓库 每个技能一个 py 文件 元信息进注册表"""
 
     def __init__(self) -> None:
-        # 并行子智能体(fanout 最多4个)共享这一个 skills 单例 没锁会:json.dumps 迭代 registry 时
-        # 另一线程插键 -> RuntimeError dictionary changed size during iteration;两次写 registry.json 互覆盖
+        # 并行子智能体共享这一个 skills 单例 没锁会迭代 registry 时被插键崩或两次写互覆盖
         self._lock = threading.RLock()
         self._registry: dict = _read_registry()
 

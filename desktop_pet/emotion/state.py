@@ -53,18 +53,17 @@ _NEGATORS = ("不", "没", "别", "勿", "甭", "无须", "毫不", "并不",
              "not ", "n't", "no ", "never")
 _SELF_REF = ("我", "俺", "咱", "自己", "i'm", "i am", "myself")
 _CUE_LOOKBACK = 4
-# 按标点切小句——否定只在同一小句内才管得着线索词
+# 按标点切小句 否定只在同一小句内才管得着线索词
 _CLAUSE_SPLIT = re.compile(r"[。！？!?.,，、；;:：\n]+")
 
 
 def _cue_hit(low: str, cues: tuple[str, ...]) -> bool:
-    """命中夸骂线索词。否定按整小句前缀扫(远一点的否定也算，如'没有理由说你笨'里的'没'),
-    自指只看紧邻几字(避免'我觉得你棒'被'我'误当成自指而漏掉)"""
+    """命中夸骂线索词 否定按整小句前缀扫 自指只看紧邻几字"""
     for clause in _CLAUSE_SPLIT.split(low):
         for cue in cues:
             start = clause.find(cue)
             while start != -1:
-                pre = clause[:start]                                # 同小句里 线索词之前的全部
+                pre = clause[:start]                                # 同小句里线索词之前的全部
                 near = clause[max(0, start - _CUE_LOOKBACK):start]  # 紧邻几字
                 negated = any(n in pre for n in _NEGATORS)
                 selfref = any(r in near for r in _SELF_REF)
@@ -155,7 +154,7 @@ class EmotionEngine:
         return _tone_hint(_state_name(valence, arousal), rapport)
 
     def mood_note(self) -> str:
-        """心情明显偏离基线时 给一句'为什么'——最近一小时哪些事动了它 平淡就返回空串"""
+        """心情明显偏离基线时给一句为什么 最近一小时哪些事动了它 平淡就返回空串"""
         valence, arousal, _ = self.snapshot()
         if abs(valence - _BASELINE_VALENCE) < 0.18 and arousal < 0.55:
             return ""  # 心情平淡 不必解释

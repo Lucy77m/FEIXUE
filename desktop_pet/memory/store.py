@@ -26,32 +26,31 @@ _DEDUP_COSINE = 0.92  # 向量去重阈值
 _DEDUP_RATIO = 0.86   # 没向量退字面相似度的阈值
 _DEDUP_SCAN = 600     # 去重只回扫最近600条
 
-_RELATED_COSINE = 0.80   # 同主题但不到重复的带宽下沿 新信息进来旧条目降权
-_SUPERSEDE_FACTOR = 0.6  # 被顶掉的旧条目显著性打的折
-_SUPERSEDE_MAX = 2       # 一次最多降权几条 防误伤一大片
-_MAX_EXPERIENCES = 1500  # 经验表容量上限 超了裁显著性最低的老条目
-_RECALL_BONUS = 0.01     # 被真召回一次显著性回一点血
+_RELATED_COSINE = 0.80   # 同主题不到重复的下沿 新信息进来旧条目降权
+_SUPERSEDE_FACTOR = 0.6  # 被顶掉的旧条目显著性打折
+_SUPERSEDE_MAX = 2       # 一次最多降权几条
+_MAX_EXPERIENCES = 1500  # 经验表容量上限 超了裁显著性最低的
+_RECALL_BONUS = 0.01     # 被召回一次显著性回血
 _RECALL_POOL = 30        # 两路各召回这么多候选 再RRF融合精排到k
-_HYBRID_W_REL = 0.60     # 融合相关性的权重 语义和字面都进这一项
-_HYBRID_W_SAL = 0.25     # 衰减后显著性的权重
-_HYBRID_W_REC = 0.15     # 新近度的权重
+_HYBRID_W_REL = 0.60     # 融合相关性权重
+_HYBRID_W_SAL = 0.25     # 衰减后显著性权重
+_HYBRID_W_REC = 0.15     # 新近度权重
 
-_CLUSTER_COSINE = 0.80   # 成簇下沿 同主题的几个侧面才揉 不到这条不算一簇
-_CLUSTER_MIN = 3         # 至少这么多条才值得合并成一条概括
-_CLUSTER_MAX = 8         # 一簇最多收几条 给LLM的料有上限
-_CLUSTER_RUNS = 2        # 一次consolidation最多揉几簇 控LLM调用数
+_CLUSTER_COSINE = 0.80   # 成簇下沿 同主题几个侧面才揉
+_CLUSTER_MIN = 3         # 至少这么多条才合并成一条概括
+_CLUSTER_MAX = 8         # 一簇最多收几条
+_CLUSTER_RUNS = 2        # 一次consolidation最多揉几簇
 _CLUSTER_SCAN = 400      # 只在最近这么多条未合并经验里找簇
-_CONSOLIDATED_DEMOTE = 0.5  # 被揉进概括的原始条目显著性打的折
+_CONSOLIDATED_DEMOTE = 0.5  # 被揉进概括的原始条目显著性打折
 
 
 def _effective_salience(sal: float, last_seen: str, now: datetime) -> float:
-    """显著性随冷落时间半衰 越重要的记忆半衰期越长
-    形成性记忆几个月才掉一半 鸡毛蒜皮几周就沉底 被召回会刷新last_seen回血"""
+    """显著性随冷落时间半衰 越重要半衰期越长"""
     try:
         age_days = max(0.0, (now - datetime.fromisoformat(last_seen)).total_seconds() / 86400.0)
     except (ValueError, TypeError):
         return sal
-    tau = 14.0 + 76.0 * sal  # 半衰期14~90天随显著性走
+    tau = 14.0 + 76.0 * sal  # 半衰期14到90天随显著性走
     return sal * 0.5 ** (age_days / tau)
 
 
@@ -75,8 +74,8 @@ class MemoryStore:
         path.parent.mkdir(parents=True, exist_ok=True)
         self._path = path
         self._lock = threading.RLock()
-        self._closing = False  # close() 置位 后台合并 daemon 据此别往已关连接写
-        self._epoch = 0  # 重置代数 wipe() 自增——后台反思据此判断快照后是否发生过重置 是则丢弃写入
+        self._closing = False  # close 置位 后台合并别往已关连接写
+        self._epoch = 0  # 重置代数 wipe 自增 后台反思据此判断快照后是否被重置
         # 连接跨线程共享 靠rlock串行
         self._conn = sqlite3.connect(path, check_same_thread=False)
         self._fts = False
@@ -86,12 +85,10 @@ class MemoryStore:
             self._migrate_legacy_json()
             self._setup_fts()
         except sqlite3.DatabaseError:
-            self._rebuild()  # 库损坏(异常退出留下)就重建空库 别让 app 起不来(自愈只能在跑起来后调)
+            self._rebuild()  # 库损坏就重建空库 别让 app 起不来
 
     def _setup_fts(self) -> None:
-        """给经验内容建trigram全文索引 triggers自动跟主表同步增删改
-        UPDATE只盯content列 显著性回血改其它列不会白白重建索引
-        这个sqlite没编译FTS5就退化纯向量 仍能用 不报错"""
+        """给经验内容建trigram全文索引 triggers跟主表同步增删改 没FTS5退纯向量"""
         try:
             with self._lock:
                 self._conn.execute(
@@ -112,7 +109,7 @@ class MemoryStore:
                     END;
                     """
                 )
-                # 老库回填 FTS空但主表有货就整体重建一次索引
+                # 老库回填 FTS空主表有货就整体重建索引
                 fts_n = self._conn.execute("SELECT count(*) FROM experiences_fts").fetchone()[0]
                 exp_n = self._conn.execute("SELECT count(*) FROM experiences").fetchone()[0]
                 if fts_n == 0 and exp_n > 0:
@@ -123,7 +120,7 @@ class MemoryStore:
             self._fts = False
 
     def _fts_search(self, query: str, pool: int) -> list[int]:
-        """字面路 trigram召回一批id 按bm25排 没FTS或没有效查询词返回空"""
+        """字面路 trigram召回一批id 按bm25排 没FTS或没查询词返回空"""
         if not self._fts:
             return []
         match = fts_query(query)
@@ -227,29 +224,28 @@ class MemoryStore:
 
     def wipe(self) -> None:
         with self._lock:
-            self._epoch += 1  # 标记一次重置 在途反思据此放弃把旧记忆重新写回(否则重置被静默撤销)
+            self._epoch += 1  # 标记一次重置 在途反思据此放弃把旧记忆写回
             try:
                 for table in ("profile", "experiences", "env", "opinions"):
                     self._conn.execute(f"DELETE FROM {table}")
                 self._conn.commit()
             except sqlite3.DatabaseError:
-                # 库损坏(异常退出常留下)时 DELETE 走不通——整个重建 保证重置一定清干净
+                # 库损坏 DELETE 走不通 整个重建保证清干净
                 self._rebuild()
 
     def reset_epoch(self) -> int:
-        """当前重置代数——后台反思/合并开工时取一份 写回前再比 不一致说明中途被重置(wipe)或换了话题 该丢弃"""
+        """当前重置代数 后台反思开工取一份 写回前再比 不一致说明被重置或换话题该丢弃"""
         return self._epoch
 
     def bump_epoch(self) -> None:
-        """换话题也要让在途反思作废:它总结的是被丢弃的那段对话 不该再写进长期记忆(对齐 wipe 的自增)"""
+        """换话题让在途反思作废 它总结的是被丢弃那段对话不该写进长期记忆"""
         with self._lock:
             self._epoch += 1
 
     def close(self) -> None:
-        """退出前干净关闭——锁住等任何在途写(如后台反思的 commit)收尾再关。
-        关完磁盘上的库就是一致的 之后进程被硬杀也不会把 SQLite 截断成 malformed(损坏根因)"""
+        """退出前干净关闭 锁住等在途写收尾再关 关完库一致硬杀也不会截断成 malformed"""
         with self._lock:
-            self._closing = True  # 置位后 consolidate 的锁内段会早退 不再 INSERT 到即将关掉的连接
+            self._closing = True  # 置位后 consolidate 锁内段早退 不再 INSERT 到即将关掉的连接
             try:
                 self._conn.commit()
             except Exception:
@@ -260,14 +256,14 @@ class MemoryStore:
                 pass
 
     def _rebuild(self) -> None:
-        """删掉损坏的库文件 重连建空表 让重置在库坏掉时也一定生效"""
+        """删掉损坏库文件 重连建空表 让重置在库坏时也生效"""
         try:
             self._conn.close()
         except Exception:
             pass
         path = self._path
-        self._conn = None  # 丢掉死连接引用 否则 delete_db_files 里的 gc 收不掉它 文件句柄不放 unlink 必失败
-        delete_db_files(path)  # 连 WAL/SHM 一起清 带退避重试绕开 Windows 句柄释放延迟
+        self._conn = None  # 丢掉死连接引用 否则 gc 收不掉它 文件句柄不放 unlink 必失败
+        delete_db_files(path)  # 连 WAL SHM 一起清 带退避重试绕开 Windows 句柄释放延迟
         self._conn = sqlite3.connect(path, check_same_thread=False)
         self._create_schema()
         self._migrate_columns()
@@ -282,7 +278,7 @@ class MemoryStore:
         if not content:
             return "(nothing)"
         with self._lock:
-            if self._closing:  # 关库进行中 别往(即将)关掉的连接写 防 ProgrammingError
+            if self._closing:  # 关库进行中 别往即将关掉的连接写 防 ProgrammingError
                 return "(skipped — shutting down)"
             if epoch is not None and epoch != self._epoch:
                 return "(skipped — memory was reset/topic changed)"
@@ -334,8 +330,7 @@ class MemoryStore:
                         removed.append(f"[env] {key}={value}"[:60])
                 self._conn.commit()
         except sqlite3.DatabaseError:
-            # 库损坏时定向删走不通——别静默吞成泛化工具失败(reset 那个 bug 就是这么来的)
-            # 也不像 wipe 那样整库重建(定向遗忘不该清空一切);明确告知去做整库重置
+            # 库损坏时定向删走不通 别静默吞成泛化失败 也不整库重建 告知去做整库重置
             return "(memory database looks corrupted — targeted forget can't run; use a full memory reset 重置记忆 to rebuild it)"
         if not removed:
             return f'(no memory matched "{query}" — nothing to forget)'
@@ -357,8 +352,7 @@ class MemoryStore:
         return f"Saved preference: {key} = {value}"
 
     def remember(self, content: str, salience: float = 0.5, epoch: int | None = None) -> str:
-        """存一条经验 撞重复改更新 salience为情感显著性0~1
-        epoch:后台反思传入开工时的代数 嵌入(网络慢活)期间若发生重置/换话题 锁内会发现代数变了直接丢弃"""
+        """存一条经验 撞重复改更新 salience为情感显著性0到1 epoch变了直接丢弃"""
         content = content.strip()
         if not content:
             return "(nothing to remember)"
@@ -398,8 +392,7 @@ class MemoryStore:
         self, content: str, *, ts: str, confidence: float, source: str,
         vector: list[float] | None, salience: float = 0.5,
     ) -> bool:
-        """插一条经验 重复就原地更新返回False 复现的记忆显著性取max越提越粘
-        同主题的旧条目降权加速淡出 表满裁掉最不重要的"""
+        """插一条经验 重复就原地更新返回False 显著性取max 同主题旧条目降权 表满裁最不重要的"""
         duplicate_id = self._find_duplicate(content, vector)
         blob = pack(vector) if vector else None
         if duplicate_id is not None:
@@ -419,14 +412,13 @@ class MemoryStore:
         return True
 
     def _supersede_related(self, vector: list[float] | None) -> None:
-        """新信息落地时给同主题旧条目打折 它们大概率被新的顶掉了
-        注意这不是严格的矛盾判定 只是语义相近 所以只降权不删 错了还能靠召回回血"""
+        """新信息落地给同主题旧条目打折 不是矛盾判定只是语义相近 只降权不删"""
         if vector is None:
             return
         rows = self._conn.execute(
             "SELECT id, embedding FROM experiences ORDER BY id DESC LIMIT ?", (_DEDUP_SCAN,)
         ).fetchall()
-        sims = cosine_batch(vector, [blob for _id, blob in rows])  # numpy批量 一次算完
+        sims = cosine_batch(vector, [blob for _id, blob in rows])  # numpy批量一次算完
         demoted = 0
         for (row_id, _blob), sim in zip(rows, sims):
             if _RELATED_COSINE <= sim < _DEDUP_COSINE:
@@ -439,7 +431,7 @@ class MemoryStore:
                     return
 
     def _prune_overflow(self) -> None:
-        """超容量就裁 显著性最低且最老的先走 召回扫表的成本也被这个上限锁死"""
+        """超容量就裁 显著性最低且最老的先走"""
         total = self._conn.execute("SELECT COUNT(*) FROM experiences").fetchone()[0]
         excess = int(total) - _MAX_EXPERIENCES
         if excess > 0:
@@ -450,8 +442,7 @@ class MemoryStore:
             )
 
     def _find_clusters(self) -> list[list[tuple[int, str]]]:
-        """在未合并经验里贪心找紧致的语义簇 每簇是同一主题的几个侧面
-        和去重不同 这里不是近义重复 是要把分散的touchpoint揉成一条更高阶的事实"""
+        """在未合并经验里贪心找语义簇 把分散侧面揉成一条更高阶事实 不是近义重复"""
         with self._lock:
             rows = self._conn.execute(
                 "SELECT id, content, embedding FROM experiences "
@@ -484,12 +475,11 @@ class MemoryStore:
         return clusters
 
     def consolidate(self, summarize) -> int:
-        """夜间合并 把成簇的零碎经验揉成更高阶概括 summarize是注入的LLM回调
-        聚类和落库在锁内 LLM和嵌入在锁外做 返回揉成了几条"""
+        """夜间合并 把成簇零碎经验揉成更高阶概括 聚类落库在锁内 LLM和嵌入在锁外 返回揉成几条"""
         clusters = self._find_clusters()
         if not clusters:
             return 0
-        epoch0 = self._epoch  # 合并要做多次秒级 LLM 调用 期间可能被重置——发现代数变了就别把已删的旧经验揉一份写回去
+        epoch0 = self._epoch  # 合并期间可能被重置 代数变了就别把已删旧经验揉一份写回
         count = 0
         for members in clusters:
             texts = [c for _id, c in members]
@@ -504,9 +494,9 @@ class MemoryStore:
             blob = pack(vector) if vector else None
             member_ids = [rid for rid, _c in members]
             with self._lock:
-                if self._closing:  # 退出已开始关库 别再往(即将)关掉的连接写 这次合并丢了就丢了
+                if self._closing:  # 退出已开始关库 别再往即将关掉的连接写
                     break
-                if self._epoch != epoch0:  # 合并途中库被重置了 别把刚清掉的经验又揉一条写回去
+                if self._epoch != epoch0:  # 合并途中库被重置 别把刚清掉的经验又揉一条写回
                     break
                 # 概括以高显著性入库 来源标consolidation 自带last_seen
                 self._conn.execute(
@@ -514,14 +504,14 @@ class MemoryStore:
                     "VALUES (?, ?, 1.0, 'consolidation', ?, 0.7, ?)",
                     (summary, _now(), blob, _now()),
                 )
-                # 原始条目标记已合并并降权 留着但沉底 具体细节偶尔还用得上
+                # 原始条目标记已合并并降权 留着但沉底
                 qmarks = ",".join("?" * len(member_ids))
                 self._conn.execute(
                     f"UPDATE experiences SET consolidated = 1, salience = salience * ? "
                     f"WHERE id IN ({qmarks})",
                     (_CONSOLIDATED_DEMOTE, *member_ids),
                 )
-                self._prune_overflow()  # 合并出的概括也服从容量上限 别让 consolidation 路径绕过裁剪
+                self._prune_overflow()  # 合并出的概括也服从容量上限
                 self._conn.commit()
             count += 1
         return count
@@ -565,9 +555,7 @@ class MemoryStore:
         return [str(r[0]) for r in rows]
 
     def recall_relevant(self, query: str, k: int = _INJECT) -> list[str]:
-        """混合召回 向量语义和trigram字面两路各取候选 RRF融合 再叠衰减显著性和新近精排
-        字面路语言无关零依赖 专补向量漏掉的精确词 文件名报错码英文术语数字
-        断网拿不到向量时单靠字面路仍能召回 被真命中的当场回血刷新冷落计时"""
+        """混合召回 向量语义和trigram字面两路各取候选 RRF融合 再叠衰减显著性和新近精排"""
         with self._lock:
             rows = self._conn.execute(
                 "SELECT id, content, embedding, salience, last_seen FROM experiences ORDER BY id"
@@ -596,7 +584,7 @@ class MemoryStore:
         fts_rank = self._fts_search(query, _RECALL_POOL)
 
         if not vec_rank and not fts_rank:
-            # 两路都空 退子串再退最近 这条多半是没配嵌入且无字面命中
+            # 两路都空 退子串再退最近
             needle = query.lower()
             hits = [(meta[rid][1], meta[rid][0]) for rid in ids if needle in meta[rid][0].lower()]
             if hits:
@@ -609,17 +597,17 @@ class MemoryStore:
         m = len(fused)
         scored = []
         for pos, rid in enumerate(fused):
-            entry = meta.get(rid)  # 快照取完后才被并发写(反思/合并)插进来的 id 不在 meta 里 跳过别 KeyError
+            entry = meta.get(rid)  # 快照后才被并发写插进来的 id 不在 meta 里 跳过别 KeyError
             if entry is None:
                 continue
             content, eff, recency = entry
-            rel = 1.0 - pos / m  # 融合名次转0~1相关性
+            rel = 1.0 - pos / m  # 融合名次转0到1相关性
             final = _HYBRID_W_REL * rel + _HYBRID_W_SAL * eff + _HYBRID_W_REC * recency
             scored.append((final, rid, content))
         scored.sort(key=lambda s: s[0], reverse=True)
         top = scored[:k]
 
-        # 真召回到的强化 都是两路捞出来的 给回血刷新计时
+        # 真召回到的回血刷新计时
         hit_ids = [rid for _f, rid, _c in top]
         if hit_ids:
             stamp = _now()
@@ -633,7 +621,7 @@ class MemoryStore:
         return [c for _f, _rid, c in top]
 
     def core_memories(self, n: int = 3, floor: float = 0.75) -> list[str]:
-        """取显著性最高的几条核心记忆——塑造"它是谁"的形成性时刻"""
+        """取显著性最高的几条核心记忆 塑造它是谁的形成性时刻"""
         with self._lock:
             rows = self._conn.execute(
                 "SELECT content FROM experiences WHERE salience >= ? ORDER BY salience DESC, id DESC LIMIT ?",
@@ -693,7 +681,7 @@ class MemoryStore:
             experiences = [content for (content,) in recent][::-1]  # 翻回正序
             label = "Recent experiences:"
         env_facts = self.recall_env(query or "")
-        # 核心记忆常驻 形成性时刻不被当轮召回冲掉 去重已展示的
+        # 核心记忆常驻 不被当轮召回冲掉 去重已展示的
         core = [c for c in self.core_memories(2) if c not in experiences]
         takes = self.opinions(4)
         if not prefs and not experiences and not env_facts and not core and not takes:

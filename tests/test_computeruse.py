@@ -1,7 +1,7 @@
 # author: bdth
 # email: 2074055628@qq.com
-# 高危 computer-use 路径的逻辑层测试:坐标变换(点错地方最致命)、幽灵点击 lparam 打包、
-# 点在元素框内判定、web 搜索降级链。真鼠标/UIA/网络在 CI 里测不到 但这些纯逻辑能测。
+# computer-use 路径的逻辑层测试 坐标变换 幽灵点击 lparam 打包 点在元素框内判定 web 搜索降级链
+# 真鼠标 UIA 网络在 CI 测不到 这些纯逻辑能测
 
 from __future__ import annotations
 
@@ -18,10 +18,10 @@ from desktop_pet.executor import web  # noqa: E402
 from desktop_pet.hands import ghost  # noqa: E402
 
 
-# ---------- 坐标变换:截图坐标 ↔ 屏幕坐标 ----------
+# ---------- 坐标变换 截图坐标和屏幕坐标 ----------
 
 def test_scale_no_downscale_when_within_cap():
-    # 长边不超 _MAX_LONG_EDGE 就 1:1
+    # 长边不超 _MAX_LONG_EDGE 就 1 1
     assert capture._scale(1920, 1080) == 1.0
     assert capture._scale(capture._MAX_LONG_EDGE, 100) == 1.0
 
@@ -46,12 +46,12 @@ def test_image_to_screen_applies_monitor_offset():
 
 
 def test_image_to_screen_undoes_downscale():
-    geom = (0, 0, capture._MAX_LONG_EDGE * 2, 1000)  # s=0.5 → 屏幕坐标是图像坐标的 2 倍
+    geom = (0, 0, capture._MAX_LONG_EDGE * 2, 1000)  # s=0.5 屏幕坐标是图像坐标的 2 倍
     assert capture.image_to_screen(100, 200, geom) == (200, 400)
 
 
 def test_screen_image_roundtrip():
-    # 屏幕→图像→屏幕 应回到原点附近(取整误差≤1)
+    # 屏幕图像屏幕往返 应回到原点附近 取整误差不超过1
     for geom in [(0, 0, 1920, 1080), (1920, 0, 2560, 1440), (0, 0, capture._MAX_LONG_EDGE * 3, 2000)]:
         for sx, sy in [(geom[0] + 10, geom[1] + 10), (geom[0] + geom[2] - 5, geom[1] + geom[3] - 5)]:
             ix, iy = capture.screen_to_image(sx, sy, geom)
@@ -59,7 +59,7 @@ def test_screen_image_roundtrip():
             assert abs(bx - sx) <= 1 and abs(by - sy) <= 1, (geom, sx, sy, bx, by)
 
 
-# ---------- 幽灵点击:坐标打进 lParam 的低/高字 ----------
+# ---------- 幽灵点击 坐标打进 lParam 的低高字 ----------
 
 def test_pack_lparam_low_high_words():
     lp = ghost._pack_lparam(10, 20)
@@ -73,24 +73,24 @@ def test_pack_lparam_zero_and_max():
 
 
 def test_pack_lparam_negative_wraps_16bit():
-    assert ghost._pack_lparam(-1, -1) == 0xFFFFFFFF  # -1 → 0xFFFF 双字
+    assert ghost._pack_lparam(-1, -1) == 0xFFFFFFFF  # -1 变 0xFFFF 双字
 
 
-# ---------- 点是否落在元素框(left,top,right,bottom)内 ----------
+# ---------- 点是否落在元素框 left top right bottom 内 ----------
 
 def test_inside_rect():
     rect = (10, 20, 110, 70)
-    assert elements._inside((10, 20), rect)      # 左上角(闭区间)
+    assert elements._inside((10, 20), rect)      # 左上角闭区间
     assert elements._inside((110, 70), rect)     # 右下角
     assert elements._inside((60, 45), rect)      # 正中
     assert not elements._inside((9, 45), rect)   # 左外
     assert not elements._inside((60, 71), rect)  # 下外
 
 
-# ---------- web 搜索降级链:一家抛/空就换下一家 ----------
+# ---------- web 搜索降级链 一家抛或空就换下一家 ----------
 
 def _backends(monkeypatch, spec):
-    """spec: [(name, behavior)]  behavior: 'throw' | [] | [results]"""
+    """造一组假后端"""
     def make(beh):
         def fn(q, n):
             if beh == "throw":

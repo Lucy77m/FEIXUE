@@ -62,7 +62,7 @@ def main() -> int:
     # 指到打不开的地址 逼出错误回复 链路本身必须完整走通
     pa._settings.api_key = "itest"
     pa._settings.base_url = "http://127.0.0.1:1"
-    pa._shown = True  # 真实里能打字就说明桌宠已在屏上(summon/点击都会 power_on);回复上屏前会校验 _shown
+    pa._shown = True  # 真实里能打字就说明桌宠已在屏上 回复上屏前会校验 _shown
     pa._thread.start()
 
     def on_reply(raw: str) -> None:

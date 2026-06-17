@@ -210,7 +210,7 @@ class AgentWorker(QObject):
 
     @Slot()
     def forget_all(self) -> None:
-        # 经队列在 worker 线程跑——必须和在途 run() 串行 不能从 UI 线程直接改 agent._messages(会撕裂消息历史)
+        # 经队列在 worker 线程跑 必须和在途 run 串行 不能从 UI 线程直接改 agent._messages 会撕裂消息历史
         self._agent.forget_all()
 
     @Slot()

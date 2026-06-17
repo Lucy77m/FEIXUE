@@ -17,7 +17,7 @@ _META_CHARSET = re.compile(rb'charset=["\']?\s*([a-z0-9_\-]+)', re.I)
 
 
 def _looks_binary(raw: bytes) -> bool:
-    """没声明 content-type 时嗅一下:含 NUL 或控制字节占比过高就当二进制 别解成乱码喂给模型"""
+    """没声明 content-type 时嗅一下 含 NUL 或控制字节占比过高就当二进制 别解成乱码喂给模型"""
     sample = raw[:2048]
     if not sample:
         return False
@@ -28,9 +28,8 @@ def _looks_binary(raw: bytes) -> bool:
 
 
 def _decode_body(response: httpx.Response, raw: bytes) -> str:
-    """按 头部charset -> body里<meta charset> -> utf-8 -> gbk 的顺序解码
-    别一律 response.encoding(头里没 charset 时它默认就是 'utf-8')把 GBK 页面解成乱码"""
-    header_cs = getattr(response, "charset_encoding", None)  # 仅当 Content-Type 头真带 charset 才非 None
+    """按头部charset body里meta charset utf-8 gbk 的顺序解码 别一律当utf-8把gbk页面解成乱码"""
+    header_cs = getattr(response, "charset_encoding", None)  # 仅当头真带 charset 才非 None
     if header_cs:
         try:
             return raw.decode(header_cs, errors="replace")

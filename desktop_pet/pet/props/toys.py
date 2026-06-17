@@ -13,7 +13,7 @@ from desktop_pet.pet.behaviors.easing import ease_in, ease_out
 
 
 def draw_bubbles(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
-    """吹泡泡 蘸->吹->看着飘->啵地破"""
+    """吹泡泡 蘸 吹 看着飘 啵地破"""
     wand = QPointF(bw * 0.30, bh * 0.08)
     # 嘴边蘸了泡泡水的小吹圈
     if stage in ("dip", "blow"):
@@ -52,7 +52,7 @@ def draw_bubbles(painter: QPainter, bw: float, bh: float, t: float, stage: str, 
 
 
 def draw_balloon(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
-    """攥着气球 抓->晃->拽->飘"""
+    """攥着气球 抓 晃 拽 飘"""
     lift = ease_out(stage_p) if stage == "float" else 0.0
     sway = math.sin(t * 1.5) * bw * 0.06
     bx = bw * 0.34 + sway
@@ -79,7 +79,7 @@ def draw_balloon(painter: QPainter, bw: float, bh: float, t: float, stage: str, 
 
 
 def draw_paperplane(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
-    """折->掷->弧线滑翔的小纸飞机"""
+    """折 掷 弧线滑翔的小纸飞机"""
     if stage == "fold":
         x, y, ang, sc = bw * 0.28, bh * 0.02, -10.0, 0.8
     elif stage == "throw":
@@ -103,7 +103,7 @@ def draw_paperplane(painter: QPainter, bw: float, bh: float, t: float, stage: st
 
 
 def draw_kite(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
-    """放风筝 跑->放线->高飞"""
+    """放风筝 跑 放线 高飞"""
     sway = math.sin(t * 1.2) * bw * 0.10
     if stage == "run":
         kx = bw * (0.15 + 0.32 * stage_p) + sway
@@ -139,7 +139,7 @@ def draw_kite(painter: QPainter, bw: float, bh: float, t: float, stage: str, sta
 
 
 def draw_yoyo(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
-    """玩悠悠球 抛->空转->收"""
+    """玩悠悠球 抛 空转 收"""
     hand = QPointF(bw * 0.28, bh * 0.04)
     if stage == "throw":
         d = ease_out(stage_p)

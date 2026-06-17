@@ -33,9 +33,7 @@ class DutiesMixin:
         on_perform: Callable[[str], bool] | None = None,
         on_control: Callable[[bool, str], None] | None = None,
     ) -> str:
-        """跑定时任务 跑完还原对话历史——整套会话状态都要存还原 别让定时任务污染真实对话
-        run() 会就地改消息dict(降级旧图片)、清compressed摘要、动known_files/last_active/turn_idx
-        所以必须深拷贝 _messages(浅拷贝挡不住就地改dict)并连带快照其它会话字段(对齐 deliver_reminder 的 deepcopy)"""
+        """跑定时任务 跑完还原整套会话状态 别让定时任务污染真实对话"""
         snap_messages = copy.deepcopy(self._messages)
         snap_compressed = self._compressed
         snap_known = dict(self._known_files)
@@ -84,7 +82,7 @@ class DutiesMixin:
         nudge = prompts.spontaneous_nudge(mode)
         if context.strip():
             nudge = context.strip() + "\n" + nudge
-        # 拿当下情境当线索 让记忆召回聚焦在"此刻相关"的事上 而非泛泛取一把
+        # 拿当下情境当线索 让记忆召回聚焦此刻相关的事
         messages = copy.deepcopy(self._messages) + [
             {"role": "user", "content": self._turn_context(context or None) + "\n\n" + nudge}
         ]
@@ -163,12 +161,11 @@ class DutiesMixin:
         return text[:200]
 
     def consolidate_memory(self) -> int:
-        """夜间记忆合并 把成簇的零碎经验各揉成一条高阶概括 返回揉成了几条
-        聚类store自己做 这里只提供给每簇做概括的LLM回调"""
+        """夜间记忆合并 成簇零碎经验各揉成一条高阶概括 返回揉成几条"""
         return store.consolidate(self._summarize_cluster)
 
     def _summarize_cluster(self, texts: list[str]) -> str:
-        """一簇同主题经验揉成一句概括 模型判定不成簇会回NONE 这里据此弃掉"""
+        """一簇同主题经验揉成一句概括 模型判定不成簇回NONE 据此弃掉"""
         try:
             resp = self._client().chat.completions.create(
                 model=self._settings.model,
@@ -267,7 +264,7 @@ class DutiesMixin:
             return
         try:
             snapshot = copy.deepcopy(self._messages)
-            peak = getattr(self, "_turn_emotion_peak", 0.5)  # 此刻就抓住本回合情绪峰值 别等 daemon 晚点去读(那时可能被下一回合覆盖)
+            peak = getattr(self, "_turn_emotion_peak", 0.5)  # 此刻抓住本回合情绪峰值 别等 daemon 晚点去读会被下一回合覆盖
             threading.Thread(
                 target=self._reflect, args=(snapshot, peak), daemon=True, name="star-reflect"
             ).start()
@@ -277,7 +274,7 @@ class DutiesMixin:
     def _reflect(self, snapshot: list[dict], peak: float = 0.5) -> None:
         """反思线程体 提炼json写进各存储"""
         try:
-            epoch0 = store.reset_epoch()  # 开工前记下重置代数 反思要花几秒网络 期间可能被重置/换话题
+            epoch0 = store.reset_epoch()  # 开工前记下重置代数 反思期间可能被重置或换话题
             core = store.core_memories(4)
             core_block = (
                 "\n\n[Your core memories — the formative moments that made you who you are; "
@@ -297,10 +294,10 @@ class DutiesMixin:
             if not data:
                 return
             if store.reset_epoch() != epoch0:
-                return  # 反思期间用户重置/换了话题——别把已丢弃的记忆又写回去(重置静默失效)
+                return  # 反思期间用户重置或换了话题 别把已丢弃的记忆又写回去
             for experience in (data.get("experiences") or [])[:5]:
                 text, weight = "", 0.3
-                if isinstance(experience, dict):  # 新格式 {text, weight}
+                if isinstance(experience, dict):  # 新格式 text weight
                     text = str(experience.get("text") or "").strip()
                     try:
                         weight = float(experience.get("weight", 0.3))
@@ -309,7 +306,7 @@ class DutiesMixin:
                 elif isinstance(experience, str):  # 兼容旧格式 纯字符串
                     text = experience.strip()
                 if text:
-                    # 模型判断的形成性为主 当下情绪强度为辅;epoch 传进去 锁内再校验一次 嵌入期间被重置就丢弃
+                    # 模型判断的形成性为主 当下情绪强度为辅 epoch 传进去锁内再校验一次 嵌入期间被重置就丢弃
                     salience = max(0.0, min(1.0, 0.55 * weight + 0.45 * peak))
                     store.remember(text, salience=salience, epoch=epoch0)
             preferences = data.get("preferences")
@@ -325,7 +322,7 @@ class DutiesMixin:
             for op in (data.get("opinions") or [])[:3]:
                 if isinstance(op, str) and op.strip():
                     store.add_opinion(op.strip(), epoch=epoch0)
-            # journal/persona 没有 epoch 概念 写之前再核一次重置代数——重置/换话题后别把旧日记/旧自我画像写回去
+            # journal persona 没有 epoch 概念 写之前再核一次重置代数 重置或换话题后别把旧日记旧自我画像写回去
             if store.reset_epoch() != epoch0:
                 return
             episode = data.get("episode")

@@ -192,7 +192,7 @@ class ControlPanel(QDialog):
     _update_checked = Signal(object)
     _gui_model_done = Signal(str)
     _gui_progress = Signal(int)
-    _docs_changed = Signal()  # 后台入库线程干完 回主线程刷文档列表(替代定死的 3.5s 延时)
+    _docs_changed = Signal()  # 后台入库线程干完 回主线程刷文档列表
 
     def __init__(self, settings: Settings, on_reset: Callable[[], None] | None = None,
                  on_apply: Callable[[], None] | None = None,
@@ -730,7 +730,7 @@ class ControlPanel(QDialog):
             self._docs_box.addWidget(row)
 
     def _stop_polling(self, *_args) -> None:
-        """关面板时停掉状态/听写下载轮询定时器——否则隐藏的死面板会一直在主线程查库到 GC 才停"""
+        """关面板停掉状态和听写下载轮询定时器"""
         for tname in ("_status_timer", "_hear_dl_timer"):
             timer = getattr(self, tname, None)
             if timer is not None:
@@ -751,7 +751,7 @@ class ControlPanel(QDialog):
         try:
             docs.forget_exact(source)
         except Exception as exc:
-            # 别像重置那个 bug 一样静默吞掉:留痕 + 按钮显失败 + 不刷新(行还在 用户看得见没删掉)
+            # 别静默吞掉 留痕加按钮显失败加不刷新 行还在用户看得见没删掉
             audit.system("docs forget_exact failed", source=source, error=repr(exc))
             btn.setText(self._t("docs_del_fail"))
             return
@@ -770,7 +770,7 @@ class ControlPanel(QDialog):
                     docs.ingest(p)
                 except Exception as exc:
                     audit.system("panel docs ingest failed", path=p, error=repr(exc))
-            self._docs_changed.emit()  # 真入完库才刷(嵌入是几十秒的网络慢活 定死 3.5s 会刷出陈旧/缺项列表)
+            self._docs_changed.emit()  # 真入完库才刷
         try:
             threading.Thread(target=work, daemon=True, name="panel-ingest").start()
         except RuntimeError:
@@ -1078,7 +1078,7 @@ class ControlPanel(QDialog):
         self._reset_btn.setText(self._t("reset_done"))
         self._reset_btn.setEnabled(False)
         self._reset_armed = False
-        # 数据清了 但上面那些显示是开面板时建的 不刷就还显示旧记忆/日记/知识库
+        # 数据清了 但上面那些显示是开面板时建的 不刷就还显示旧记忆 日记 知识库
         for refresh in (self._refresh_bond, self._refresh_docs, self._refresh_status):
             try:
                 refresh()

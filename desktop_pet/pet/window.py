@@ -304,8 +304,8 @@ class PetWindow(QWidget):
             if glance is not None:
                 self._blob.look_at(glance)
         elif self.windowOpacity() < 1.0:
-            # 自愈：没有入场/虫洞在跑 窗口就该满不透明
-            # 防某次动画被打断留下 opacity<1 让桌宠凭空消失(气泡是独立窗口照常显示)
+            # 自愈 没有入场或虫洞在跑 窗口就该满不透明
+            # 防动画被打断留下 opacity 小于1 让桌宠凭空消失
             self.setWindowOpacity(1.0)
         self.update()
 
@@ -370,7 +370,7 @@ class PetWindow(QWidget):
 
     def enterEvent(self, event: QEnterEvent) -> None:
         # 鼠标进来逗一下 拖拽睡着藏边时不打扰 带冷却
-        # 演小品时也不打扰:perk_up 是硬打断 一晃鼠标就会把正在钓鱼/读书的非点名小品整段掐掉(连收尾和奖励回调都丢)
+        # 演小品时也不打扰 perk_up 是硬打断 一晃鼠标会把非点名小品整段掐掉
         if (not self._is_dragging and not self._blob.is_asleep and self._hideout is None
                 and not self._blob.in_activity):
             now = time.perf_counter()

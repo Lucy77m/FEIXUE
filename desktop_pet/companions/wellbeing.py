@@ -1,7 +1,7 @@
 # author: bdth
 # email: 2074055628@qq.com
-# 数字陪伴伴生 读前台窗口判专注还是漂着 心流时身体安静且不打扰 它替你感受你这一天的质地
-# 注意前台窗口标题读取在前台窗口卡死时会阻塞 所以采样一律走daemon线程 绝不在UI线程裸调
+# 数字陪伴伴生 读前台窗口判专注还是漂着 心流时身体安静不打扰
+# 前台窗口标题读取会在前台卡死时阻塞 采样一律走daemon线程 绝不在UI线程裸调
 
 from __future__ import annotations
 
@@ -45,7 +45,7 @@ def _classify(title: str) -> str:
 
 
 class Wellbeing(QObject):
-    """读前台窗口的质地映射成身体状态 心流就安静不打扰 漂着就陪着但不说教 只读不落盘不外发"""
+    """读前台窗口映射成身体状态 心流就安静 漂着就陪着 只读不落盘不外发"""
 
     _sampled = Signal(str, float)  # 前台标题和空闲秒数 线程采完发回主线程
 
@@ -92,7 +92,7 @@ class Wellbeing(QObject):
         threading.Thread(target=self._probe, daemon=True, name="mochi-wellbeing").start()
 
     def _probe(self) -> None:
-        """daemon线程读前台窗口标题和空闲时长 前台卡死时这个调用会阻塞 绝不能在UI线程做"""
+        """daemon线程读前台窗口标题和空闲时长 会阻塞绝不能在UI线程做"""
         try:
             title = presence.foreground_window_title()
             idle = presence.idle_seconds()
@@ -107,7 +107,7 @@ class Wellbeing(QObject):
         """回到UI线程 拿采样结果跑状态机"""
         now = time.monotonic()
         cat = _classify(title)
-        if cat != self._cat:  # 换了类别 停留计时重置 这就是迟滞
+        if cat != self._cat:  # 换了类别停留计时重置
             self._cat = cat
             self._since = now
         dwell_min = (now - self._since) / 60.0
@@ -120,12 +120,12 @@ class Wellbeing(QObject):
         elif self._flow:
             if cat == "work" and active:
                 self._off_streak = 0
-            else:  # 离开专注类 给几次轮询缓冲 防短暂切窗抖动
+            else:  # 离开专注类给几次轮询缓冲 防短暂切窗抖动
                 self._off_streak += 1
                 if self._off_streak >= _OFF_GRACE:
                     self._set_flow(False)
 
-        # 漂着是媒体类窗口耗了很久且人在 只让身体蔫一下 不弹任何话 克制
+        # 漂着是媒体类窗口耗很久且人在 只让身体蔫一下不弹话
         self._set_drift(cat == "drift" and active and dwell_min >= _DRIFT_MINUTES)
 
     def _set_flow(self, on: bool) -> None:

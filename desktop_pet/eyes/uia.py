@@ -2,8 +2,7 @@
 # email: 2074055628@qq.com
 # uiautomation读前台可交互控件并执行操作
 # 所有UIA活全钉在一条常驻STA线程上 对外只发整数token不发live控件
-# 根由 COM对象在哪个套间建就只能在哪个套间用和放 跨线程释放直接段错误整个进程
-# agent跑在worker线程 子代理后台任务还会孵临时线程 都裸碰UIA必崩 这条独占线程是命门
+# COM对象只能在所属套间用和放 跨线程释放会崩
 
 from __future__ import annotations
 
@@ -247,8 +246,7 @@ def _do_set_value(ctrl, text: str) -> bool:
 
 
 def _do_scroll_into_view(ctrl) -> bool:
-    """把控件滚进可视区 长列表里目标在屏外时先滚出来才点得到
-    ScrollItemPattern最直接 退而求其次用SetFocus也常能带动滚动"""
+    """把控件滚进可视区 先试ScrollItemPattern再退到SetFocus"""
     try:
         pattern = ctrl.GetScrollItemPattern()
         if pattern is not None:

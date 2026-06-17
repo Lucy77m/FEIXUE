@@ -115,8 +115,7 @@ def reassemble(
             if call.function and call.function.arguments:
                 slot["args"].append(call.function.arguments)
     if cancelled:
-        # 中途取消断流:攒到一半的 tool_calls 其 arguments 多半是截断的非法JSON('{"command": "git pu')
-        # 一旦拼进消息就会被 append 进历史、落盘、下次启动重放给 API。直接丢掉 只回已收到的文本
+        # 中途取消攒到一半的 tool_calls arguments 多半是截断非法json 丢掉只回已收到的文本
         return StreamMessage("".join(content) or None, None, finish or "cancelled", usage)
     seen: set[str] = set()
     tool_calls: list[StreamToolCall] = []
@@ -125,6 +124,6 @@ def reassemble(
         if cid in seen:
             cid = f"{cid}_{i}"  # id撞了缀index拆开
         seen.add(cid)
-        args_text = "".join(calls[i]["args"]).strip() or "{}"  # 无参工具给空串 有些网关回发会炸 归一成{}
+        args_text = "".join(calls[i]["args"]).strip() or "{}"  # 无参工具给空串有些网关会炸 归一成空对象
         tool_calls.append(StreamToolCall(cid, calls[i]["name"], args_text))
     return StreamMessage("".join(content) or None, tool_calls or None, finish, usage)

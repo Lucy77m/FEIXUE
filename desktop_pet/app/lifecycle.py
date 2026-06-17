@@ -237,7 +237,7 @@ class LifecycleMixin:
         hearing.set_wake_enabled(self._settings.hear_enabled and self._settings.wake_enabled)
         sampler.set_enabled(self._settings.clip_sampler or self._settings.clip_alchemy)
         try:
-            self._sensors._check_weather()  # 天气开关切换后立即生效 关了就收伞 开了马上查 不必等2小时
+            self._sensors._check_weather()  # 天气开关切换后立即生效 不必等2小时
         except Exception:
             pass
         self._hotkeys.restart({
@@ -252,7 +252,7 @@ class LifecycleMixin:
     def _new_topic(self) -> None:
         if self._busy or self._worker.is_running:
             self._worker.cancel()
-        # 经队列进 worker 线程:cancel 让在途 run() 收尾后 再串行清消息历史 不和 run() 抢同一个 list
+        # 经队列进 worker 线程 cancel 让在途 run 收尾后再串行清消息历史 不和 run 抢同一个 list
         self.request_new_topic.emit()
         self._speech.interrupt()
         self._todo.dismiss()
@@ -261,7 +261,7 @@ class LifecycleMixin:
     def _reset_all(self) -> None:
         if self._busy or self._worker.is_running:
             self._worker.cancel()
-        self.request_forget_all.emit()  # 同上 改走队列进 worker 线程 别在 UI 线程直接 wipe + 改消息历史
+        self.request_forget_all.emit()  # 同上 改走队列进 worker 线程 别在 UI 线程直接 wipe 改消息历史
         emotion.reset()
         reminders.clear()
         stats.clear()
@@ -291,8 +291,7 @@ class LifecycleMixin:
                 c.stop()
             except Exception:
                 pass
-        # 在 farewell 挥手那 1.7s 之前就停掉四个核心轮询并标记取消——否则这段时间它们还会往 worker
-        # 排主动搭话/提醒/定时/看屏的活 一个刚起的回合可能正用着子进程 第二趟 shutdown 杀进程时就撞上了
+        # farewell 挥手前停掉四个核心轮询并标记取消 否则它们还会往 worker 排活 第二趟 shutdown 杀进程时撞上在途子进程
         self._cancelling = True
         for _t in (self._presence_timer, self._reminder_timer, self._proactive_timer,
                    self._watch_timer):
@@ -302,7 +301,7 @@ class LifecycleMixin:
                 pass
         if self._rituals.farewell():
             return
-        self._requeue_timed()  # 没派发的定时(do)任务写回 reminders 持久化 别随 os._exit 一起丢掉
+        self._requeue_timed()  # 没派发的定时任务写回 reminders 持久化 别随 os._exit 一起丢掉
         self._hotkeys.stop()
         try:
             hearing.shutdown()
@@ -317,28 +316,27 @@ class LifecycleMixin:
                 bg_tasks.stop(_tid)
         except Exception:
             pass
-        # 先停 worker 线程的事件循环并等它退出 run()——务必在 shutdown() 杀 shell/python 子进程之前
-        # 否则主线程的 close() 会和仍在 run() 里用着子进程的 worker 线程 对杀同一个 Popen(对杀曾引发 access violation)
+        # 先停 worker 线程事件循环并等它退出 run 务必在 shutdown 杀 shell python 子进程之前
+        # 否则主线程 close 会和仍在 run 用着子进程的 worker 线程对杀同一个 Popen 曾引发 access violation
         self._thread.quit()
         self._thread.wait(3000)
         self._worker.shutdown()  # 此刻 worker 已停 杀子进程不再撞在途调用
         try:
             from desktop_pet.executor import shell
-            shell.shutdown_background()  # 杀掉 agent 起的后台 shell——它们不在 Job 里 os._exit 不会带走 会变孤儿
+            shell.shutdown_background()  # 杀掉 agent 起的后台 shell 不在 Job 里 os._exit 不会带走 会变孤儿
         except Exception:
             pass
         try:
             mcp_hub.shutdown()
         except Exception:
             pass
-        # 硬退之前干净关掉两个 SQLite 库——锁住等后台反思的在途 commit 收尾再关。
-        # 关完磁盘上的库就是一致的，进程随后退出也不会把它截断成 malformed（库损坏根因）
+        # 硬退之前干净关掉两个 SQLite 库 等后台反思的在途 commit 收尾再关 否则退出会把库截断成 malformed
         for db in (store, docs):
             try:
                 db.close()
             except Exception:
                 pass
-        # os._exit 直接走 C _exit 立即终止 不跑 Qt 析构/不对自身 TerminateProcess
-        # ——那两样都在多线程退出时引发过 access violation；os._exit 可靠且不触发析构故障
+        # os._exit 直接走 C _exit 立即终止 不跑 Qt 析构 不对自身 TerminateProcess
+        # 那两样都在多线程退出时引发过 access violation os._exit 可靠且不触发析构故障
         self._app.quit()
         os._exit(0)

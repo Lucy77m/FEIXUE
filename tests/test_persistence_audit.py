@@ -1,6 +1,6 @@
 # author: bdth
 # email: 2074055628@qq.com
-# 板块①持久化重审找出的隐患回归——坏embedding/坏reminders.json/skills并发/forget坏库/重入库清陈旧/孤儿tmp
+# 板块①持久化重审隐患回归 坏embedding 坏reminders.json skills并发 forget坏库 重入库清陈旧 孤儿tmp
 # 全程不碰网络 向量按需造假
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 
-# ---------- 坏 embedding blob 不再崩掉召回/去重/聚类 ----------
+# ---------- 坏 embedding blob 不再崩掉召回 去重 聚类 ----------
 
 def test_unpack_rejects_truncated_blob():
     from desktop_pet.memory.embed import unpack
@@ -27,7 +27,7 @@ def test_unpack_rejects_truncated_blob():
 
 def test_cosine_batch_survives_corrupt_blob():
     from desktop_pet.memory.embed import cosine_batch
-    good = b"\x00\x00\x80\x3f\x00\x00\x00\x00"  # [1.0, 0.0]
+    good = b"\x00\x00\x80\x3f\x00\x00\x00\x00"  # 1.0 0.0
     # 混入一条 3 字节坏 blob 不该抛 ValueError
     sims = cosine_batch([1.0, 0.0], [good, b"bad", None])
     assert len(sims) == 3
@@ -41,7 +41,7 @@ def test_recall_and_remember_survive_corrupt_embedding_row(tmp_path, monkeypatch
     monkeypatch.setattr(store_mod, "embed_texts", lambda texts: [[1.0, 0.0, 0.0] for _ in texts])
     m = MemoryStore(tmp_path / "m.db")
     m.remember("正常的一条记忆 关键词苹果")
-    # 直接塞一条 embedding 字节数不是 4 的倍数的坏行(模拟字节级损坏)
+    # 直接塞一条 embedding 字节数不是 4 的倍数的坏行
     with m._lock:
         m._conn.execute(
             "INSERT INTO experiences(content, ts, confidence, source, embedding, salience, last_seen) "
@@ -49,7 +49,7 @@ def test_recall_and_remember_survive_corrupt_embedding_row(tmp_path, monkeypatch
             (datetime.now().isoformat(), b"\x01\x02\x03", datetime.now().isoformat()),
         )
         m._conn.commit()
-    # 召回 + 再写入(_find_duplicate 会扫到坏行)都不该抛
+    # 召回再写入 _find_duplicate 会扫到坏行 都不该抛
     out = m.recall_relevant("苹果", k=5)
     assert any("苹果" in c for c in out)
     m.remember("又一条 关键词香蕉")  # 不抛即通过
@@ -73,7 +73,7 @@ def test_forget_on_corrupt_db_reports_clearly(tmp_path):
 # ---------- consolidate 在 close 后不再往关掉的连接写 ----------
 
 def test_wipe_bumps_reset_epoch(tmp_path):
-    """重置代数:wipe 自增 普通读写不变——后台反思据此判断快照后是否被重置过(板块②#5)"""
+    """重置代数 wipe 自增 普通读写不变"""
     from desktop_pet.memory.store import MemoryStore
     m = MemoryStore(tmp_path / "m.db")
     e0 = m.reset_epoch()
@@ -87,7 +87,7 @@ def test_wipe_bumps_reset_epoch(tmp_path):
 
 
 def test_bump_epoch_invalidates_inflight_writes(tmp_path):
-    """换话题(bump_epoch)/重置(wipe)后 带旧代数的反思写入应锁内丢弃(板块⑧:反思/合并把已丢弃记忆写回)"""
+    """换话题 bump_epoch 或重置 wipe 后 带旧代数的反思写入锁内丢弃"""
     from desktop_pet.memory.store import MemoryStore
     m = MemoryStore(tmp_path / "m.db")
     e0 = m.reset_epoch()
@@ -96,7 +96,7 @@ def test_bump_epoch_invalidates_inflight_writes(tmp_path):
     for call in (lambda: m.remember("x", epoch=e0), lambda: m.set_preference("k", "v", epoch=e0),
                  lambda: m.note_env("k", "v", epoch=e0), lambda: m.add_opinion("o", epoch=e0)):
         assert "reset/topic changed" in call(), "带旧代数的写入该被丢弃"
-    # 无 epoch 参数的正常写入不受影响(工具直调路径)
+    # 无 epoch 参数的正常写入不受影响 工具直调路径
     assert "Remembered" in m.remember("普通写不传epoch")
     m.close()
 
@@ -113,7 +113,7 @@ def test_wipe_also_bumps_epoch_for_guard(tmp_path):
 
 
 def test_store_writes_skip_when_closing(tmp_path):
-    """关库进行中 各写入方法静默跳过 不往已关连接写(板块②#8)"""
+    """关库进行中 各写入方法静默跳过 不往已关连接写"""
     from desktop_pet.memory.store import MemoryStore
     m = MemoryStore(tmp_path / "m.db")
     m._closing = True
@@ -130,7 +130,7 @@ def test_consolidate_skips_write_after_close(tmp_path, monkeypatch):
     from desktop_pet.memory.store import MemoryStore
     monkeypatch.setattr(store_mod, "embed_texts", lambda texts: [[1.0, 0.0, 0.0] for _ in texts])
     m = MemoryStore(tmp_path / "m.db")
-    m._closing = True  # 模拟 close() 已置位
+    m._closing = True  # 模拟 close 已置位
     # 即便伪造出一个簇 consolidate 的锁内段也该因 _closing 早退 不写不抛
     monkeypatch.setattr(m, "_find_clusters", lambda: [[(1, "a"), (2, "b"), (3, "c")]])
     n = m.consolidate(lambda texts: "概括")
@@ -183,7 +183,7 @@ def test_skills_concurrent_create_no_crash(tmp_path, monkeypatch):
     assert store.count() == 100
 
 
-# ---------- 重新入库一个变得不可读/超大的文件 该清掉旧块 ----------
+# ---------- 重新入库一个变得不可读 超大的文件 该清掉旧块 ----------
 
 def test_reingest_unreadable_drops_stale_chunks(tmp_path, monkeypatch):
     import desktop_pet.docs as docs_mod
@@ -197,7 +197,7 @@ def test_reingest_unreadable_drops_stale_chunks(tmp_path, monkeypatch):
     note.write_text("原始可读内容 关键词西瓜", encoding="utf-8")
     kb.ingest(str(folder))
     assert "西瓜" in kb.recall("西瓜")
-    # 文件变超大 -> 重新入库被跳过 但旧块该被清掉 不再供陈旧
+    # 文件变超大 重新入库被跳过 但旧块该被清掉 不再供陈旧
     note.write_text("x" * (docs_mod._MAX_FILE + 10), encoding="utf-8")
     kb.ingest(str(folder))
     assert "西瓜" not in kb.recall("西瓜"), "陈旧旧块该在跳过时被清掉"

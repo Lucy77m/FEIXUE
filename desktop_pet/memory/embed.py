@@ -15,7 +15,7 @@ from desktop_pet.settings import Settings, build_http_client
 
 _client: OpenAI | None = None
 _client_key: tuple[str, str, str] | None = None
-_client_lock = threading.Lock()  # 序列化 client 首建/重建——多线程(worker/反思/合并/入库daemon)并发首调时防重复造 client 漏掉 httpx 连接池
+_client_lock = threading.Lock()  # 序列化 client 首建重建 多线程并发首调防重复造 client 漏 httpx 连接池
 _disabled_until = 0.0
 _DISABLE_COOLDOWN_S = 300.0  # 嵌入出错冷却5分钟
 
@@ -29,9 +29,9 @@ def _get_client(settings: Settings) -> OpenAI | None:
     if not settings.api_key:
         return None
     key = (settings.api_key, settings.base_url, settings.proxy)
-    with _client_lock:  # 加锁:两个线程同时见 _client is None 各造一个 后者覆盖前者会漏掉前者的 httpx client
+    with _client_lock:  # 加锁 两个线程同见 None 各造一个 后者覆盖会漏前者 httpx client
         if _client is None or _client_key != key:
-            if _client is not None:  # 配置变了 先关掉旧 client 的 httpx 连接池 别漏 socket/句柄
+            if _client is not None:  # 配置变了 先关旧 client 的 httpx 连接池 别漏 socket 句柄
                 try:
                     _client.close()
                 except Exception:
@@ -81,8 +81,7 @@ def cosine(a: list[float], b: list[float]) -> float:
 
 
 def cosine_batch(query_vec: list[float], blobs: list[bytes | None]) -> list[float]:
-    """一次算query对一批blob的余弦 维度不符或空blob给0 有numpy走矩阵没有退逐条
-    返回长度与blobs一致 顺序对齐 调用方拿去和阈值比"""
+    """一次算query对一批blob的余弦 维度不符或空blob给0 有numpy走矩阵没有退逐条"""
     dim = len(query_vec)
     n = len(blobs)
     try:
@@ -91,7 +90,7 @@ def cosine_batch(query_vec: list[float], blobs: list[bytes | None]) -> list[floa
         sims = [0.0] * n
         idxs, vecs = [], []
         for i, b in enumerate(blobs):
-            if not b or len(b) % 4:  # 空或截断(长度非4倍数)的blob跳过 别让np.frombuffer抛
+            if not b or len(b) % 4:  # 空或截断的blob跳过 别让np.frombuffer抛
                 continue
             v = np.frombuffer(b, dtype=np.float32)
             if v.shape[0] == dim:
@@ -151,8 +150,7 @@ def pack(vector: list[float]) -> bytes:
 
 
 def unpack(blob: bytes | None) -> list[float] | None:
-    """bytes还原成向量 长度不是4的倍数(截断/字节级损坏)当None跳过
-    别让一条坏blob抛 ValueError 崩掉召回/去重/聚类/反思整条链"""
+    """bytes还原成向量 长度不是4的倍数当None跳过 别让坏blob抛崩掉整条链"""
     if not blob or len(blob) % 4:
         return None
     vector = array("f")

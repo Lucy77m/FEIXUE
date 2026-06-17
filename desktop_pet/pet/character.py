@@ -178,7 +178,7 @@ class BlobPet(ThinkMixin, ReactFxMixin, FaceMixin):
 
     def set_costume(self, name: str | None) -> None:
         if self._activity is not None and self._act_sticky:
-            return  # 点名演出进行中 道具属于小品 别被回复气泡的随机戏服(常是 None)覆盖掉
+            return  # 点名演出进行中 道具属于小品 别被回复气泡的随机戏服覆盖掉
         self._costume = name if name in COSTUMES else None
         if self._costume:
             self._hold = max(self._hold, _EXPR_HOLD)
@@ -201,8 +201,8 @@ class BlobPet(ThinkMixin, ReactFxMixin, FaceMixin):
             self._dream_bubbles = []
             self._daydream_left = 0.0
             if self._activity is None:
-                # 清掉上一条回复留下的临时戏服:_hold 被清零后衰减清除路径就不再跑 否则戏服会一直挂着
-                # (活动道具由 _activity 管 不在这清)
+                # 清掉上一条回复留下的临时戏服 _hold 清零后衰减清除路径不再跑 否则戏服一直挂着
+                # 活动道具由 _activity 管 不在这清
                 self._costume = None
         elif self._expr == "thinking":
             self.set_expression("neutral")
@@ -377,9 +377,10 @@ class BlobPet(ThinkMixin, ReactFxMixin, FaceMixin):
             self._blanket_e = min(1.0, self._blanket_e + dt * 1.6)
         else:
             self._blanket_e = max(0.0, self._blanket_e - dt * 2.0)
-        # 只有真正演出时环境装饰才平滑退场 小品 反应 拖拽 藏起这几种算
+        # 只有真正演出时环境装饰才平滑退场 小品 反应 拖拽 藏起 睡着这几种算
         # 说话和思考不算 否则伞之类的持续装饰会随每句话一闪一闪
-        if self._dragging or self._hidden or self._react is not None or self._activity is not None:
+        if (self._dragging or self._hidden or self._react is not None
+                or self._activity is not None or self.is_asleep):
             self._calm_e = max(0.0, self._calm_e - dt * 3.5)
         else:
             self._calm_e = min(1.0, self._calm_e + dt * 2.0)
@@ -481,8 +482,8 @@ class BlobPet(ThinkMixin, ReactFxMixin, FaceMixin):
         if self._activity is not None:
             self._activity_age += dt
             stages = _ACTIVITIES[self._activity][3]
-            # 卡死兜底:演太久才强制收场 防 blob 缩没卡住。阈值取"自身阶段总时长 + 5s 余量"
-            # 不能用固定 25s——sprout 自身就 26s 会被误杀 收尾动作和回调永远播不到
+            # 卡死兜底 演太久才强制收场 防 blob 缩没卡住 阈值取自身阶段总时长加 5s 余量
+            # 不能用固定 25s sprout 自身就 26s 会被误杀 收尾动作和回调永远播不到
             if self._activity_age > sum(s[1] for s in stages) + 5.0:
                 self._end_activity()
                 return
@@ -523,7 +524,7 @@ class BlobPet(ThinkMixin, ReactFxMixin, FaceMixin):
                     else:
                         self._activity = name
                         self._activity_age = 0.0
-                        self._act_sticky = False  # 自发小品 软打断(说话/思考)就让位
+                        self._act_sticky = False  # 自发小品 软打断 说话思考 就让位
                         self._costume = _ACTIVITIES[name][0]
                         self._stage_i = 0
                         self._enter_stage(_ACTIVITIES[name][3][0])

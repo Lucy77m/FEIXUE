@@ -26,7 +26,7 @@ def draw_icecream(painter: QPainter, bw: float, bh: float, t: float, stage: str,
     for k in (-1, 0, 1):
         painter.drawLine(QPointF(cx + k * cw * 0.5, cone_top), QPointF(cx + k * cw * 0.18, cone_top + bh * 0.32))
 
-    # 吃到哪了：hold 没动，bite 一口一口往下啃，melt 剩甜筒口一点在化
+    # 吃到哪了 hold 没动 bite 一口一口往下啃 melt 剩甜筒口一点在化
     if stage == "bite":
         eaten = stage_p
     elif stage == "melt":
@@ -39,7 +39,7 @@ def draw_icecream(painter: QPainter, bw: float, bh: float, t: float, stage: str,
     bite_y = food_top + (cone_top - food_top) * (bites / n)  # 啃线一格格下移到甜筒口
 
     if bites < n:
-        # 啃线以下才画——上面被吃掉了
+        # 啃线以下才画 上面被吃掉了
         painter.save()
         painter.setClipRect(QRectF(cx - cw * 1.4, bite_y, cw * 2.8, bh))
         painter.setPen(Qt.PenStyle.NoPen)
@@ -60,7 +60,7 @@ def draw_icecream(painter: QPainter, bw: float, bh: float, t: float, stage: str,
                 painter.drawEllipse(QPointF(cx - cw * 0.9 + sw * (i + 0.5), bite_y), sw * 0.55, bh * 0.024)
 
     if stage == "melt":
-        # 甜筒口残留的一点在化、往下滴
+        # 甜筒口残留的一点在化 往下滴
         d = ease_out(stage_p)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QColor(245, 200, 215, 230))
@@ -71,7 +71,7 @@ def draw_icecream(painter: QPainter, bw: float, bh: float, t: float, stage: str,
 
 
 def draw_bubbletea(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
-    """奶茶 举杯->吸珍珠"""
+    """奶茶 举杯吸珍珠"""
     cx = bw * 0.30
     top, bot = -bh * 0.08, bh * 0.30
     wt, wbo = bw * 0.13, bw * 0.10
@@ -90,7 +90,7 @@ def draw_bubbletea(painter: QPainter, bw: float, bh: float, t: float, stage: str
 
 
 def draw_tanghulu(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
-    """糖葫芦 举串->一颗颗咬"""
+    """糖葫芦 举串一颗颗咬"""
     base = QPointF(bw * 0.16, bh * 0.30)
     tip = QPointF(bw * 0.44, -bh * 0.34)
     painter.setPen(QPen(QColor(196, 174, 142), max(1.2, bw * 0.01)))
@@ -109,7 +109,7 @@ def draw_tanghulu(painter: QPainter, bw: float, bh: float, t: float, stage: str,
 
 
 def draw_watermelon(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
-    """举西瓜片 一口口啃(红瓤往尖端缩)"""
+    """举西瓜片 一口口啃 红瓤往尖端缩"""
     cx = bw * 0.30
     apex = QPointF(cx - bw * 0.02, bh * 0.30)      # 拿在手里朝下的尖角
     L = QPointF(cx - bw * 0.18, -bh * 0.10)
@@ -136,7 +136,7 @@ def draw_watermelon(painter: QPainter, bw: float, bh: float, t: float, stage: st
 
 
 def draw_lollipop(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
-    """棒棒糖 举着->舔(转圈纹)"""
+    """棒棒糖 举着舔 转圈纹"""
     head = QPointF(bw * 0.30, -bh * 0.06)
     painter.setPen(QPen(QColor(230, 225, 220), max(1.4, bw * 0.012)))
     painter.drawLine(head, QPointF(head.x() - bw * 0.04, bh * 0.28))
@@ -164,7 +164,7 @@ def draw_lollipop(painter: QPainter, bw: float, bh: float, t: float, stage: str,
 
 
 def draw_popcorn(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
-    """爆米花 捧桶->抛着吃"""
+    """爆米花 捧桶抛着吃"""
     cx = bw * 0.30
     painter.setPen(QPen(QColor(190, 70, 80), max(1.0, bw * 0.008)))
     for k in range(5):
@@ -184,7 +184,7 @@ def draw_popcorn(painter: QPainter, bw: float, bh: float, t: float, stage: str, 
 
 
 def draw_donut(painter: QPainter, bw: float, bh: float, t: float, stage: str, stage_p: float) -> None:
-    """甜甜圈 举着啃 中间是真空心(环形路径 不用背景色挖洞)"""
+    """甜甜圈 举着啃 中间是真空心 环形路径不用背景色挖洞"""
     cx, cy = bw * 0.30, bh * 0.02
     if stage == "munch":
         cy += math.sin(t * 5) * bh * 0.02

@@ -1,7 +1,7 @@
 # author: bdth
 # email: 2074055628@qq.com
-# 验证 agent 强化：回合内并发只读工具、取证工具按需端出、卡死回灌提示
-# 都用假 _complete / 假 dispatch 驱动真实主循环 不碰网络
+# 验证 agent 强化 回合内并发只读工具 取证工具按需端出 卡死回灌提示
+# 都用假 _complete 假 dispatch 驱动真实主循环 不碰网络
 
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ def _agent() -> Agent:
 
 
 def test_parallel_reads_run_concurrently_and_keep_order():
-    """一回合三个 read_file 应并发跑（峰值≥2、总时长远小于串行），结果按原序回灌"""
+    """一回合三个 read_file 应并发跑 峰值大于等于2 总时长远小于串行 结果按原序回灌"""
     ag = _agent()
     try:
         calls = [
@@ -48,8 +48,8 @@ def test_parallel_reads_run_concurrently_and_keep_order():
             _tool_call("c3", "read_file", '{"path": "c.txt"}'),
         ]
         steps = [
-            _msg("", calls, "tool_calls"),          # 第一步：吐三个并发安全工具
-            _msg("[happy]\n看完了", None, "stop"),   # 第二步：纯文本收尾
+            _msg("", calls, "tool_calls"),          # 第一步吐三个并发安全工具
+            _msg("[happy]\n看完了", None, "stop"),   # 第二步纯文本收尾
         ]
         seq = {"i": 0}
 
@@ -82,12 +82,12 @@ def test_parallel_reads_run_concurrently_and_keep_order():
             tools.dispatch = orig
 
         assert reply.strip().endswith("看完了")
-        # 并发证据：峰值≥2 是确定性证明(两个 dispatch 真同时在跑)
-        # 只量 dispatch 阶段跨度 与 run() 里记忆召回等开销解耦——串行需 3×0.4=1.2s 并发≈0.4s
+        # 并发证据 峰值≥2 是确定性证明 两个 dispatch 真同时在跑
+        # 只量 dispatch 阶段跨度 与 run 里记忆召回等开销解耦 串行需1.2s 并发约0.4s
         assert live["peak"] >= 2, f"未并发 峰值仅 {live['peak']}"
         span = max(e for _, e in spans) - min(s for s, _ in spans)
         assert span < 0.8, f"dispatch 跨度 {span:.2f}s 像是串行"
-        # 顺序：工具结果按 c1 c2 c3 原序回灌 不被完成顺序打乱
+        # 工具结果按 c1 c2 c3 原序回灌 不被完成顺序打乱
         tool_msgs = [m for m in ag._messages if m.get("role") == "tool"]
         got = [(m["tool_call_id"], m["content"]) for m in tool_msgs]
         assert got == [
@@ -136,42 +136,42 @@ def test_repeated_failure_triggers_nudge():
 
 
 def test_looks_failed_only_scans_first_line():
-    """失败检测只看首行——分页读/后台轮询正文里的 failed/error 不算失败"""
+    """失败检测只看首行 分页读或后台轮询正文里的 failed error 不算失败"""
     f = Agent._looks_failed
-    # 真失败：标记在首行
+    # 真失败标记在首行
     assert f("[tool read_file failed: FileNotFoundError]") is True
     assert f("[安全拦截：高危操作]") is True
     assert f("[tool click is missing required argument(s): x]") is True
-    # 假失败：分页读成功 正文里恰好有 error:/failed 不该误判
+    # 假失败 分页读成功 正文里恰好有 error failed 不该误判
     assert f("[chars 0–500 of 1200]\nlog line error: build failed here") is False
-    # 假失败：后台轮询仍在跑 正文流出报错词
+    # 假失败 后台轮询仍在跑 正文流出报错词
     assert f("[background shell #3: still running; 5s elapsed]\nERROR: 1 test failed") is False
     assert f("plain output mentioning failed") is False
 
 
 def test_strip_order_puts_named_param_first():
-    """非标参数 400：错误点名谁就先剥谁 不连坐剥掉其它有效参数"""
+    """非标参数 400 错误点名谁就先剥谁 不连坐剥掉其它有效参数"""
     base = lambda: [("extra_body", "_strip_extra_body"),
                     ("temperature", "_strip_temperature"),
                     ("stream_options", "_strip_stream_options"),
                     ("prompt_cache_key", "_strip_cache_key")]
-    # 只嫌 prompt_cache_key → 它排第一个先剥 别的不动
+    # 只嫌 prompt_cache_key 它排第一个先剥 别的不动
     assert Agent._strip_order(base(), "unknown parameter: prompt_cache_key")[0][0] == "prompt_cache_key"
-    # 点名 temperature → temperature 先剥
+    # 点名 temperature temperature 先剥
     assert Agent._strip_order(base(), "temperature not supported")[0][0] == "temperature"
-    # 没点名任何参数 → 维持默认序(extra_body 先)
+    # 没点名任何参数 维持默认序 extra_body 先
     assert Agent._strip_order(base(), "some opaque 400")[0][0] == "extra_body"
 
 
 def test_stuck_sig_is_canonical_over_key_order():
-    """键序/空白不同但语义相同的参数 应算同一签名"""
+    """键序或空白不同但语义相同的参数 应算同一签名"""
     c1 = _tool_call("a", "read_file", '{"path":"x","n":1}')
     c2 = _tool_call("b", "read_file", '{ "n": 1, "path": "x" }')
     assert Agent._stuck_sig(c1, {"path": "x", "n": 1}) == Agent._stuck_sig(c2, {"n": 1, "path": "x"})
 
 
 def test_paginated_read_does_not_trigger_stuck_nudge():
-    """重复读同一个大文件(分页成功、正文含 error:/failed)不该被误判成卡死"""
+    """重复读同一个大文件 分页成功正文含 error failed 不该被误判成卡死"""
     ag = _agent()
     try:
         rd = [_tool_call("c1", "read_file", '{"path": "big.log"}')]

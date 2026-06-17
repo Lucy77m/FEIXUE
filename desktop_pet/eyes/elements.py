@@ -12,8 +12,8 @@ from PIL import Image, ImageDraw, ImageFont
 
 from desktop_pet.eyes import capture, detect, uia
 
-# 元素编号表 + 缩略图缓存做线程本地:并行子agent/后台daemon 各自截图标注
-# 共享一个全局会让 act_element(编号) 解析到【另一个 agent 的】元素列表 -> 点错控件/点到别的窗口
+# 元素编号表和缩略图缓存做线程本地 并行子agent后台daemon各自截图标注
+# 共享全局会让 act_element 解析到另一个 agent 的元素列表 点错控件
 _tls = threading.local()
 _COLORS = {"uia": (80, 230, 140), "ocr": (90, 190, 255), "icon": (255, 180, 70)}
 _LABEL_INK = (16, 16, 22)
@@ -152,7 +152,7 @@ def screen_elements(region: str = "") -> tuple[bytes, str]:
 
     # region拼进指纹
     fp = region.encode("utf-8") + _fingerprint(img)
-    cached = getattr(_tls, "cache", None)  # (fp, ts, result)
+    cached = getattr(_tls, "cache", None)  # fp ts result
     if cached is not None and cached[0] == fp and time.monotonic() - cached[1] < _CACHE_TTL_S:
         return cached[2]
     from desktop_pet.hands import ghost

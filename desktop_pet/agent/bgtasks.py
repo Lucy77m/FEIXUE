@@ -17,8 +17,8 @@ class _BgRegistry:
         self._seq = 0
 
     def register(self, task: str, cancel: threading.Event) -> int:
-        # started 先留空——任务可能还卡在并发信号量上排队 真正开跑才盖时间戳
-        # (登记要早于信号量 这样排队期间也能被 stop;但别把排队时间算进"已跑"显得虚高)
+        # started 先留空 任务可能还卡在并发信号量上排队 真正开跑才盖时间戳
+        # 登记早于信号量 排队期间也能 stop 别把排队时间算进已跑
         with self._lock:
             self._seq += 1
             tid = self._seq
@@ -37,7 +37,7 @@ class _BgRegistry:
             self._tasks.pop(tid, None)
 
     def snapshot(self) -> list[tuple[int, str, float]]:
-        """返回任务快照 按id升序——还在排队(未开跑)的已跑时长记 0"""
+        """返回任务快照 按id升序 还在排队未开跑的已跑时长记 0"""
         with self._lock:
             now = datetime.now()
             return [

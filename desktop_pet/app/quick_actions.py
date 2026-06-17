@@ -23,7 +23,7 @@ class QuickActionsMixin:
     def _ask_selection(self) -> None:
         if not self._shown:
             self._power_on()
-        # 原剪贴板用闭包贯穿整条链 不放共享属性——划词提问和快捷润色交错触发时 共享 _saved_clip 会互相覆盖把原剪贴板弄丢
+        # 原剪贴板用闭包贯穿整条链不放共享属性 交错触发时共享 _saved_clip 会互相覆盖弄丢
         saved = self._app.clipboard().text()
         try:
             import pyautogui

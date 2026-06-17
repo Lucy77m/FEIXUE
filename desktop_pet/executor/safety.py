@@ -40,8 +40,8 @@ def check_blocked(text: str) -> str | None:
     for pattern, reason in _CATASTROPHIC:
         if pattern.search(text):
             return reason
-    # 删除动词+递归强制+裸根三者必须落在【同一条子命令】里才拦——按 ;|& 换行切开逐条判
-    # 否则 `cd C:\ ; rm -rf build` 会被来自不同子句的三者凑齐误拦(裸根其实来自 cd 子句 删的是 build)
+    # 删除动词加递归强制加裸根三者落在同一条子命令里才拦 按分隔符切开逐条判
+    # 否则跨子句凑齐三者会误拦
     for sub in re.split(r"[;|&\n]", text):
         if _DELETE_VERB.search(sub) and _RECURSE_OR_FORCE.search(sub) and _BARE_ROOT.search(sub):
             return "recursively deleting a drive root / system directory"
@@ -82,9 +82,7 @@ _RECURSE_FLAG = re.compile(r"(?:/s\b|-recurse\b|-r\b|-[fvdi]*r[fvdi]*\b)", re.I)
 
 
 def _deletes_only_temp(text: str) -> bool:
-    """所有删除动词的目标都落在临时目录里才True 拿不准一律False
-    agent下载清理重试是高频动作 删自己放进temp的东西每次都弹高危
-    会把用户训练成无脑点确认 那才是真正毁掉安全层的事"""
+    """所有删除动词的目标都落在临时目录里才True 拿不准一律False"""
     found = False
     for m in _DEL_ARGS.finditer(text):
         target = None
