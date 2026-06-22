@@ -23,6 +23,7 @@ dependencies = [
     "onnxruntime-directml>=1.24",
     "sherpa-onnx>=1.13.2",
     "sounddevice>=0.5.5",
+    "edge-tts>=6.1",
 ]
 
 [dependency-groups]

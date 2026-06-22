@@ -260,6 +260,8 @@ class LifecycleMixin:
         self._keepsake_shelf.retranslate()
         hearing.set_enabled(self._settings.hear_enabled)
         hearing.set_wake_enabled(self._settings.hear_enabled and self._settings.wake_enabled)
+        from desktop_pet import tts
+        tts.set_enabled(self._settings.tts_enabled)
         sampler.set_enabled(self._settings.clip_sampler or self._settings.clip_alchemy)
         self._playtime.apply_settings()
         try:

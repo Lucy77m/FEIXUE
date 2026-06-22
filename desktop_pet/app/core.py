@@ -127,6 +127,7 @@ class PetApp(QuickActionsMixin, VoiceMixin, AgentBridgeMixin,
         self._control_hint = ControlHint()
         self._keepsake_shelf = KeepsakeShelf()
         self._history_viewer = None  # lazy init in _open_history
+        self._memory_panel = None  # lazy init in _open_memory
         # 操作浮层延迟收起 连续操作不闪 单次操作也留够时间让你看见
         self._control_hide_timer = QTimer(self)
         self._control_hide_timer.setSingleShot(True)
@@ -197,6 +198,7 @@ class PetApp(QuickActionsMixin, VoiceMixin, AgentBridgeMixin,
             on_perform=self._on_manual_perform,
             on_keepsakes=self._open_keepsakes,
             on_history=self._open_history,
+            on_memory=self._open_memory,
             on_pet_scale=self._pet.set_pet_scale,
             get_pet_scale=lambda: self._pet.pet_scale,
         )
@@ -348,6 +350,15 @@ class PetApp(QuickActionsMixin, VoiceMixin, AgentBridgeMixin,
         self._history_viewer.popup(self._pet, screen)
 
     @Slot()
+    def _open_memory(self) -> None:
+        if self._memory_panel is None:
+            from desktop_pet.pet.memory_panel import MemoryPanel
+            self._memory_panel = MemoryPanel()
+        screen = (self._app.screenAt(self._pet.frameGeometry().center())
+                  or self._app.primaryScreen()).availableGeometry()
+        self._memory_panel.popup(self._pet, screen)
+
+    @Slot()
     def _open_workshop(self) -> None:
         self._workshop.open_library()
 
@@ -397,6 +408,8 @@ class PetApp(QuickActionsMixin, VoiceMixin, AgentBridgeMixin,
         stats.mark_first_seen()
         hearing.set_enabled(self._settings.hear_enabled)
         hearing.set_wake_enabled(self._settings.hear_enabled and self._settings.wake_enabled)
+        from desktop_pet import tts
+        tts.set_enabled(self._settings.tts_enabled)
         self._pet.express("neutral")
         self._thread.start()
         self._tray.show()

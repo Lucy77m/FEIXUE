@@ -135,6 +135,7 @@ class Settings:
     hear_enabled: bool = False     # 听觉总开关 按住热键说话
     wake_enabled: bool = False     # 唤醒词"墨池" 麦克风常开
     hotkey_talk: str = "alt+v"     # 按住说话
+    tts_enabled: bool = False      # 语音输出 edge-tts
 
     @classmethod
     def load(cls) -> Settings:

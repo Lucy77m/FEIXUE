@@ -292,11 +292,21 @@ class SpeechText(QWidget):
                 or self._phase_timer.isActive())
 
     def interrupt(self) -> None:
+        try:
+            from desktop_pet import tts
+            tts.stop()
+        except Exception:
+            pass
         self._stop()
         self._queue = []
         self.hide()
 
     def _stop(self) -> None:
+        try:
+            from desktop_pet import tts
+            tts.stop()
+        except Exception:
+            pass
         self._type_timer.stop()
         self._phase_timer.stop()
         self._phase = ""
@@ -309,6 +319,13 @@ class SpeechText(QWidget):
         self.raise_()
         self.talking.emit(True)
         self._type_timer.start(_TYPE_MS)
+        # TTS: 朗读当前句子
+        try:
+            from desktop_pet import tts
+            if tts.is_ready():
+                tts.speak(self._full)
+        except Exception:
+            pass
         self.update()
 
     def _reveal(self) -> None:

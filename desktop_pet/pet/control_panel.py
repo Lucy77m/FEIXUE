@@ -463,6 +463,10 @@ class ControlPanel(QDialog):
         self._hear_dl_timer.timeout.connect(self._refresh_hear_status)
         self._hear_dl_timer.start(600)
         self._refresh_hear_status()
+        # 语音朗读
+        self._cb_speak = QCheckBox(self._t("cb_speak"))
+        self._cb_speak.setChecked(settings.tts_enabled)
+        self._cb_speak.setCursor(Qt.CursorShape.PointingHandCursor)
         self._proactive_level = _Segmented([(value, self._t(label_key)) for value, label_key in i18n.PROACTIVE_LABEL_KEYS])
         self._proactive_level.setCurrentData(settings.proactive_level)
         self._hk_summon = QKeySequenceEdit(QKeySequence(settings.hotkey_summon))
@@ -840,6 +844,7 @@ class ControlPanel(QDialog):
         body.addWidget(self._build_hotkeys_block())
         body.addWidget(self._check_field(self._hear_cb, "help_hear"))
         body.addWidget(self._check_field(self._wake_cb, "help_wake"))
+        body.addWidget(self._check_field(self._cb_speak, "help_speak"))
         hear_row = QHBoxLayout()
         hear_row.setSpacing(8)
         hear_row.addWidget(self._hear_dl_label, 1)
@@ -1233,6 +1238,7 @@ class ControlPanel(QDialog):
         s.hotkey_talk = self._hk_talk.keySequence().toString().split(",")[0].strip() or s.hotkey_talk
         s.hear_enabled = self._hear_cb.isChecked()
         s.wake_enabled = self._wake_cb.isChecked()
+        s.tts_enabled = self._cb_speak.isChecked()
         try:
             s.save()
         except Exception:

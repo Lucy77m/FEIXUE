@@ -70,6 +70,7 @@ class Tray(QSystemTrayIcon):
         on_perform: Callable[[str], None] | None = None,
         on_keepsakes: Callable[[], None] | None = None,
         on_history: Callable[[], None] | None = None,
+        on_memory: Callable[[], None] | None = None,
         on_pet_scale: Callable[[int], None] | None = None,
         get_pet_scale: Callable[[], int] | None = None,
     ) -> None:
@@ -98,6 +99,7 @@ class Tray(QSystemTrayIcon):
                 self._perform_actions[name] = act
         self._act_history = self._add(menu, "tray_history", on_history)
         self._act_keepsakes = self._add(menu, "tray_keepsakes", on_keepsakes)
+        self._act_memory = self._add(menu, "tray_memory", on_memory)
         self._scale_menu: QMenu | None = None
         self._scale_actions: dict[int, QAction] = {}
         if on_pet_scale is not None:
@@ -167,6 +169,7 @@ class Tray(QSystemTrayIcon):
             (self._act_fishing, "tray_memory_fishing"),
             (self._act_workshop, "tray_workshop"),
             (self._act_keepsakes, "tray_keepsakes"),
+            (self._act_memory, "tray_memory"),
             (self._act_history, "tray_history"),
             (self._act_open, "tray_open_panel"),
             (self._act_quit, "tray_quit"),

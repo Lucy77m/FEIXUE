@@ -555,6 +555,20 @@ class MemoryStore:
             ).fetchall()
         return [str(r[0]) for r in rows]
 
+    def recent_experiences_detail(self, n: int = 30) -> list[dict]:
+        """Return recent experiences with metadata for the memory panel."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT content, ts, salience, source, recall_count, consolidated "
+                "FROM experiences ORDER BY id DESC LIMIT ?", (int(n),)
+            ).fetchall()
+        return [
+            {"content": str(r[0]), "ts": str(r[1]), "salience": float(r[2]),
+             "source": str(r[3]), "recall_count": int(r[4]),
+             "consolidated": bool(r[5])}
+            for r in rows
+        ]
+
     def recall_relevant(self, query: str, k: int = _INJECT) -> list[str]:
         """混合召回 向量语义和trigram字面两路各取候选 RRF融合 再叠衰减显著性和新近精排"""
         with self._lock:
