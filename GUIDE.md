@@ -31,7 +31,7 @@ uv run python main.py
 
 配置好后，绯雪 会从屏幕角落"入场"。点它（或按 `Ctrl + Alt + S`）打字聊天；托盘图标可随时重开面板。
 
-> 配置只存在本地 `data/settings.json`，不上传任何地方。数据目录可用环境变量 `STAR_DATA_DIR` 覆盖。
+> 配置只存在本地 `data/settings.json`，不上传任何地方。数据目录可用环境变量 `FEIXUE_DATA_DIR` 覆盖。
 
 ---
 
@@ -52,7 +52,9 @@ uv sync                                   # 装依赖（含 dev 组的 pyinstall
 uv run pyinstaller feixue.spec --noconfirm
 ```
 
-产物：**`dist\绯雪\FEIXUE.exe`** —— 分发时把**整个 `dist\绯雪\` 目录**一起拷给别人（exe 旁边那一堆是它的依赖）。
+产物：**`dist\FEIXUE\FEIXUE.exe`**、便携 ZIP 和安装程序。目录版分发时必须保留整个 `dist\FEIXUE\`。
+
+> 当前公开构建未使用代码签名证书，Windows SmartScreen 可能在首次启动时提示“未知发布者”。请从 GitHub Releases 下载并用 `SHA256SUMS.txt` 核对文件。
 
 ### 2.2 关键设计
 
@@ -60,16 +62,16 @@ uv run pyinstaller feixue.spec --noconfirm
 | --- | --- | --- |
 | 形态 | **onedir**（目录版） | 启动快；RapidOCR 模型较大，单文件每次解压会很慢 |
 | 控制台 | **无**（`console=False`） | 双击不弹黑框 |
-| 数据目录 | **`%APPDATA%\绯雪`** | 打包后 exe 旁是只读 / 无写权限的；配置、记忆、日志都写这里 |
+| 数据目录 | **`%APPDATA%\FEIXUE`** | 打包后 exe 旁是只读 / 无写权限的；配置、记忆、日志都写这里 |
 
-开发期（`uv run python main.py`）仍用项目内 `data\`，打包版用 `%APPDATA%\绯雪`，两者都可被 `STAR_DATA_DIR` 覆盖。
+开发期（`uv run python main.py`）仍用项目内 `data\`，打包版用 `%APPDATA%\FEIXUE`，两者都可被 `FEIXUE_DATA_DIR` 覆盖。
 
 ### 2.3 内置独立 Python（让 run_python 可用）
 
-打包后 `sys.executable` 是 `FEIXUE.exe` 而非 Python，直接拿它跑 `run_python` 会起 绯雪 自己。所以 `build.ps1` 额外下载**官方 embeddable Python + pip**，放到 `dist\绯雪\pyruntime\`；`run_python` / `install_package` 在打包版（仅 `frozen` 时）自动改用它，开发期不受影响。
+打包后 `sys.executable` 是 `FEIXUE.exe` 而非 Python，直接拿它跑 `run_python` 会起绯雪自己。所以 `build.ps1` 额外下载**官方 embeddable Python + pip**，放到 `dist\FEIXUE\pyruntime\`；`run_python` / `install_package` 在打包版（仅 `frozen` 时）自动改用它，开发期不受影响。
 
 - pyruntime 是**干净的**（只有标准库 + pip）。要用第三方库（requests / numpy 等）得先 `install_package` 现装到 pyruntime —— 开发版预装好，打包版按需装，属正常差异。
-- `build.ps1` 末尾会打印 `pip OK / 缺失`。缺失就重跑 `build.ps1`，或手动补：把 embeddable Python 解压到 `dist\绯雪\pyruntime\`、改 `._pth` 启用 `import site`、跑一次 `get-pip.py`。
+- `build.ps1` 末尾会打印 `pip OK / 缺失`。缺失就重跑 `build.ps1`，或手动补：把 embeddable Python 解压到 `dist\FEIXUE\pyruntime\`、改 `._pth` 启用 `import site`、跑一次 `get-pip.py`。
 
 ### 2.4 首次打包常见调整（重依赖应用通病）
 
@@ -119,7 +121,7 @@ uv run pyinstaller feixue.spec --noconfirm
 
 ## 5. 本地数据
 
-全部在 `data/`（开发期项目内，打包后移到 `%APPDATA%\绯雪`；可用 `STAR_DATA_DIR` 覆盖）：
+全部在 `data/`（开发期项目内，打包后移到 `%APPDATA%\FEIXUE`；可用 `FEIXUE_DATA_DIR` 覆盖）：
 
 | 文件 | 内容 |
 | --- | --- |

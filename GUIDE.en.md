@@ -31,7 +31,7 @@ On first launch the control panel pops up — just fill in your LLM configuratio
 
 Once configured, FEIXUE makes its "entrance" from a corner of the screen. Click it (or press `Ctrl + Alt + S`) to type and chat; the tray icon reopens the panel anytime.
 
-> Configuration is stored only in the local `data/settings.json` and never uploaded anywhere. The data directory can be overridden with the `STAR_DATA_DIR` environment variable.
+> Configuration is stored only in the local `data/settings.json` and never uploaded anywhere. Override the data directory with the `FEIXUE_DATA_DIR` environment variable.
 
 ---
 
@@ -52,7 +52,9 @@ uv sync                                   # Install deps (including the dev-grou
 uv run pyinstaller feixue.spec --noconfirm
 ```
 
-Output: **`dist\FEIXUE\FEIXUE.exe`** — to distribute, copy the **entire `dist\FEIXUE\` directory** to others (the pile of files next to the exe are its dependencies).
+Outputs include **`dist\FEIXUE\FEIXUE.exe`**, a portable ZIP, and an installer. Keep the entire `dist\FEIXUE\` directory together when distributing the onedir build.
+
+> Public builds are currently unsigned. Windows SmartScreen may show “Unknown publisher” on first launch. Download from GitHub Releases and verify files against `SHA256SUMS.txt`.
 
 ### 2.2 Key Decisions
 
@@ -62,7 +64,7 @@ Output: **`dist\FEIXUE\FEIXUE.exe`** — to distribute, copy the **entire `dist\
 | Console | **None** (`console=False`) | No black box pops up on double-click |
 | Data directory | **`%APPDATA%\FEIXUE`** | After packaging, the area next to the exe is read-only / has no write permission; config, memory, and logs all go here |
 
-In development (`uv run python main.py`) it still uses the in-project `data\`, while the packaged build uses `%APPDATA%\FEIXUE`; both can be overridden by `STAR_DATA_DIR`.
+In development (`uv run python main.py`) it uses the in-project `data\`; packaged builds use `%APPDATA%\FEIXUE`. Override either with `FEIXUE_DATA_DIR`.
 
 ### 2.3 Bundled Standalone Python (Making run_python Work)
 
@@ -119,7 +121,7 @@ FEIXUE **can execute arbitrary commands and code on your machine, control the mo
 
 ## 5. Local Data
 
-Everything lives in `data/` (in-project during development, moved to `%APPDATA%\FEIXUE` after packaging; overridable with `STAR_DATA_DIR`):
+Everything lives in `data/` (in-project during development, moved to `%APPDATA%\FEIXUE` after packaging; overridable with `FEIXUE_DATA_DIR`):
 
 | File | Content |
 | --- | --- |

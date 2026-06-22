@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Windows tests and build
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.21"
+          python-version: "3.11"
+          enable-cache: true
+
+      - name: Verify lockfile
+        run: uv lock --check
+
+      - name: Install dependencies
+        run: uv sync --locked --all-groups
+
+      - name: Compile Python sources
+        run: uv run python -m compileall -q desktop_pet tests
+
+      - name: Run tests
+        env:
+          PYTHONPATH: .
+          QT_QPA_PLATFORM: offscreen
+        run: uv run pytest -q
+
+      - name: Build Windows application
+        run: uv run pyinstaller feixue.spec --noconfirm --clean
+
+      - name: Verify packaged runtime
+        shell: pwsh
+        run: |
+          $required = @(
+            "dist/FEIXUE/FEIXUE.exe",
+            "dist/FEIXUE/_internal/desktop_pet/assets/skins/xiaofeixue/spritesheet.webp",
+            "dist/FEIXUE/_internal/desktop_pet/assets/skins/xiaofeixue/performances.webp",
+            "dist/FEIXUE/_internal/desktop_pet/assets/workshop/workshop_room.png"
+          )
+          foreach ($path in $required) {
+            if (-not (Test-Path $path)) { throw "Missing packaged file: $path" }
+          }
+          $archive = uv run pyi-archive_viewer -r -b dist/FEIXUE/FEIXUE.exe 2>&1 | Out-String
+          if ($archive -notmatch "edge_tts") { throw "edge_tts is missing from the packaged archive" }
+
+      - name: Upload build check artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FEIXUE-windows-build-check
+          path: dist/FEIXUE/
+          retention-days: 3

@@ -3,7 +3,7 @@
 #define MyAppName "绯雪 FEIXUE"
 ; 版本号由build.ps1传入 这里是手动编译的兜底
 #ifndef MyAppVersion
-  #define MyAppVersion "0.1.0"
+  #define MyAppVersion "0.3.0"
 #endif
 #define MyAppPublisher "FEIXUE"
 #define MyAppExeName "FEIXUE.exe"
@@ -22,7 +22,7 @@ DisableDirPage=no
 DisableProgramGroupPage=yes
 AllowNoIcons=yes
 OutputDir=dist
-OutputBaseFilename=FEIXUESetup
+OutputBaseFilename=FEIXUESetup-{#MyAppVersion}
 SetupIconFile=feixue.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 UninstallDisplayName={#MyAppName}

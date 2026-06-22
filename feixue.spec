@@ -38,6 +38,9 @@ binaries += collect_dynamic_libs("sherpa_onnx")
 datas += collect_data_files("sherpa_onnx")
 datas += collect_data_files("sounddevice")
 hiddenimports += ["sherpa_onnx", "sounddevice"]
+# edge-tts is imported lazily only when speech starts, so Analysis cannot discover it.
+hiddenimports += collect_submodules("edge_tts")
+datas += collect_data_files("edge_tts")
 
 # 易漏的隐藏依赖
 hiddenimports += ["win32timezone", "comtypes", "comtypes.client", "comtypes.stream"]

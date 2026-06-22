@@ -18,7 +18,7 @@
 
 FEIXUE is two things in one:
 
-- 🐾 **A desktop pet** — A code-drawn character (no sprite assets) that blinks, follows your cursor with its eyes, daydreams, holds an umbrella in the rain, fans itself when the CPU runs hot, and catches bugs when temp files pile up. Ignore it and it finds its own fun; leave and it dozes off; occasionally it pipes up on its own.
+- 🐾 **A desktop pet** — Xiaofeixue sprite animation is the default, with the classic Blob appearance still available. She idles, waves, performs, shelters from rain, reacts to machine state, entertains herself when left alone, and occasionally revisits memories you created together.
 - 🧠 **A local AI agent** — Connects to any OpenAI-compatible LLM. It can see your screen, move the mouse and keyboard, run commands, write code, read/write files, and search the web. Supports scheduled screen-watching, background tasks, parallel sub-agents, and reminders — turning "chat with AI" into "let AI do it for you."
 
 It has persistent **emotion and rapport** that evolve over time, developing a **self-portrait** through your interactions. It's the same companion every session, not a reset-able chat box.
@@ -38,6 +38,7 @@ It has persistent **emotion and rapport** that evolve over time, developing a **
 | Screen awareness | Screenshot, OCR, accessibility-tree precise clicking, mouse & keyboard control |
 | Web access | Search engines, page scraping, HTTP requests, pip install |
 | Long-term memory | Experience/preference/environment memory + knowledge base RAG + journal, auto-reflection |
+| Memory panel | Browse, search, and deliberately forget core memories, recent experiences, preferences, and environment facts |
 | Orchestration | MCP connectors, sub-agent fanout/pipeline, background task management |
 | Safety guardrails | Confirmation dialog before irreversible ops, hard block on catastrophic commands |
 
@@ -53,11 +54,14 @@ It has persistent **emotion and rapport** that evolve over time, developing a **
 | Rituals | Daily mood forecast, anniversary cake, bedtime farewell, pomodoro focus timer |
 | Feed & interact | Drop files: junk → recycle bin, docs → knowledge base, images → glance |
 | Footprints & play | Happy footprints (flowers/snow on holidays), ball catching, tickle giggles, grudge when tossed |
+| Desk-side world | Documents become physical books in the workshop; FEIXUE may revisit an old book and bring back a new thought |
+| Memory fishing & performances | A three-round memory-fishing game plus dedicated dance, fishing, and other sprite performances |
 
 ### ⌨️ Convenient
 
 - **Global hotkeys**: `Ctrl+Alt+S` summon input, `Ctrl+Alt+A` ask about selection, `Ctrl+Shift+Q` quick-rewrite selection
 - **Control panel**: API config, capability toggles, proactive frequency, multilingual (CN/EN/JP)
+- **Speech output**: optional interruptible Edge TTS, disabled by default
 
 ---
 
@@ -67,7 +71,7 @@ It has persistent **emotion and rapport** that evolve over time, developing a **
 git clone https://github.com/Lucy77m/FEIXUE.git
 cd FEIXUE
 uv sync
-python main.py
+uv run python main.py
 ```
 
 On first launch the control panel opens — fill in your API Key and model name on the Connect page.
@@ -78,7 +82,7 @@ Detailed install, packaging, and troubleshooting → [GUIDE.en.md](GUIDE.en.md)
 
 ## Tech stack
 
-Python 3.11+ · PySide6 (Qt) · OpenAI-compatible API · sherpa-onnx (local speech) · RapidOCR · SQLite + vector embeddings · MCP protocol · Win32 API (UIA / SendInput / Registry)
+Python 3.11+ · PySide6 (Qt) · OpenAI-compatible API · sherpa-onnx (local speech input) · Edge TTS (optional output) · RapidOCR · SQLite + vector embeddings · MCP protocol · Win32 API
 
 ---
 

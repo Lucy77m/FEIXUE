@@ -42,6 +42,7 @@ if ($built) {
 }
 
 $setupMade = $false
+$setupPath = "dist\FEIXUESetup-$ver.exe"
 if ($built -and (Test-Path "dist\FEIXUE\FEIXUE.exe")) {
     # 找ISCC.exe
     $iscc = $null
@@ -55,19 +56,34 @@ if ($built -and (Test-Path "dist\FEIXUE\FEIXUE.exe")) {
     if ($iscc) {
         Write-Host "[6/6] 制作安装程序（Inno Setup）..." -ForegroundColor Cyan
         & $iscc /Q "/DMyAppVersion=$ver" installer.iss
-        $setupMade = (Test-Path "dist\FEIXUESetup.exe")
+        $setupMade = (Test-Path $setupPath)
     } else {
         Write-Host "[6/6] 跳过安装程序：未检测到 Inno Setup。" -ForegroundColor Yellow
         Write-Host "      想要 setup 安装包，装一次再重跑本脚本：  winget install JRSoftware.InnoSetup" -ForegroundColor Yellow
     }
 }
 
+$portablePath = "dist\FEIXUE-v$ver-windows-x64.zip"
+if ($built -and (Test-Path "dist\FEIXUE\FEIXUE.exe")) {
+    Write-Host "[release] 制作便携压缩包与 SHA256..." -ForegroundColor Cyan
+    Compress-Archive -Path "dist\FEIXUE" -DestinationPath $portablePath -CompressionLevel Optimal -Force
+    $artifacts = @($portablePath)
+    if ($setupMade) { $artifacts += $setupPath }
+    $checksums = foreach ($artifact in $artifacts) {
+        $hash = (Get-FileHash -Algorithm SHA256 $artifact).Hash.ToLowerInvariant()
+        "$hash  $([IO.Path]::GetFileName($artifact))"
+    }
+    $checksums | Set-Content -Encoding ascii "dist\SHA256SUMS.txt"
+}
+
 Write-Host ""
 if ($built -and (Test-Path "dist\FEIXUE\FEIXUE.exe")) {
     Write-Host "✓ 目录版    → dist\FEIXUE\FEIXUE.exe（整个 dist\FEIXUE\ 目录一起分发）" -ForegroundColor Green
     if ($setupMade) {
-        Write-Host "✓ 安装程序  → dist\FEIXUESetup.exe（单文件，发这个给别人双击安装）" -ForegroundColor Green
+        Write-Host "✓ 安装程序  → $setupPath（单文件，发这个给别人双击安装）" -ForegroundColor Green
     }
+    Write-Host "✓ 便携压缩包 → $portablePath" -ForegroundColor Green
+    Write-Host "✓ 校验文件   → dist\SHA256SUMS.txt" -ForegroundColor Green
 } else {
     Write-Host "✗ 打包失败。最常见原因：正在运行的 FEIXUE.exe 锁住了 dist\ —— 先彻底关掉它再打。其余按 docs\打包说明.md 补 datas/hiddenimports" -ForegroundColor Red
 }

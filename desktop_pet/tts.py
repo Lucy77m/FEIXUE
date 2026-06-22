@@ -24,7 +24,8 @@ _VOICES: dict[str, str] = {
 
 _enabled = False
 _playing = False
-_stop_evt = threading.Event()
+_current_stop: threading.Event | None = None
+_current_proc: subprocess.Popen | None = None
 _lock = threading.Lock()
 
 
@@ -47,51 +48,72 @@ def speak(text: str, lang: str = "中文") -> None:
     """Speak *text* asynchronously.  Non-blocking — spawns a daemon thread."""
     if not _enabled or not text.strip():
         return
+    global _current_stop
     with _lock:
-        if _playing:
-            _stop_evt.set()
+        if _current_stop is not None:
+            _current_stop.set()
+        stop_evt = threading.Event()
+        _current_stop = stop_evt
     threading.Thread(
-        target=_speak_impl, args=(text, lang),
+        target=_speak_impl, args=(text, lang, stop_evt),
         daemon=True, name="feixue-tts",
     ).start()
 
 
 def stop() -> None:
     """Request immediate stop of in-progress speech."""
-    _stop_evt.set()
+    with _lock:
+        if _current_stop is not None:
+            _current_stop.set()
+        proc = _current_proc
+    if proc is not None and proc.poll() is None:
+        try:
+            proc.terminate()
+        except OSError:
+            pass
 
 
 # ------------------------------------------------------------------
 # Internal implementation
 # ------------------------------------------------------------------
 
-def _speak_impl(text: str, lang: str) -> None:
-    global _playing
-    _stop_evt.clear()
-    _playing = True
+def _speak_impl(text: str, lang: str, stop_evt: threading.Event) -> None:
+    global _playing, _current_stop
+    with _lock:
+        if _current_stop is not stop_evt:
+            return
+        _playing = True
     try:
         import asyncio
         voice = _VOICES.get(lang, _VOICES["中文"])
-        mp3_path = asyncio.run(_generate(text, voice))
-        if mp3_path and not _stop_evt.is_set():
-            _play_file(mp3_path)
+        mp3_path = asyncio.run(_generate(text, voice, stop_evt))
+        if mp3_path and not stop_evt.is_set():
+            _play_file(mp3_path, stop_evt)
+        elif mp3_path:
+            try:
+                os.unlink(mp3_path)
+            except OSError:
+                pass
     except Exception:
         logger.debug("tts: playback failed", exc_info=True)
     finally:
-        _playing = False
+        with _lock:
+            if _current_stop is stop_evt:
+                _current_stop = None
+                _playing = False
 
 
-async def _generate(text: str, voice: str) -> str | None:
+async def _generate(text: str, voice: str, stop_evt: threading.Event) -> str | None:
     """Generate MP3 to a temp file.  Returns the path or None."""
     import edge_tts
     communicate = edge_tts.Communicate(text, voice)
     audio = bytearray()
     async for chunk in communicate.stream():
-        if _stop_evt.is_set():
+        if stop_evt.is_set():
             return None
         if chunk["type"] == "audio":
             audio.extend(chunk["data"])
-    if not audio or _stop_evt.is_set():
+    if not audio or stop_evt.is_set():
         return None
     fd, path = tempfile.mkstemp(suffix=".mp3")
     try:
@@ -101,11 +123,11 @@ async def _generate(text: str, voice: str) -> str | None:
     return path
 
 
-def _play_file(path: str) -> None:
+def _play_file(path: str, stop_evt: threading.Event) -> None:
     """Play an MP3 file using the best available system player."""
     try:
         # Try PowerShell (always available on Windows 10+)
-        _stop_evt.wait(0.05)  # tiny yield
+        stop_evt.wait(0.05)  # tiny yield
         proc = subprocess.Popen(
             [
                 "powershell", "-NoProfile", "-Command",
@@ -118,31 +140,28 @@ def _play_file(path: str) -> None:
                         f"$p.Open([uri]'{path}'); "
                         "$p.Play(); "
                         "Start-Sleep -Milliseconds 200; "
-                        "while ($p.Position -lt $p.NaturalDuration.TimeSpan) {"
-                        "  if (Test-Path env:FEIXUE_TTS_STOP) { $p.Stop(); break }"
-                        "  Start-Sleep -Milliseconds 100"
-                        "}"
+                        "while ($p.Position -lt $p.NaturalDuration.TimeSpan) { Start-Sleep -Milliseconds 100 }"
                     )
                 ),
             ],
             creationflags=subprocess.CREATE_NO_WINDOW,
         )
-        # Poll for stop signal
+        global _current_proc
+        with _lock:
+            if _current_stop is stop_evt:
+                _current_proc = proc
         while proc.poll() is None:
-            if _stop_evt.wait(0.15):
-                os.environ["FEIXUE_TTS_STOP"] = "1"
+            if stop_evt.wait(0.15):
                 proc.terminate()
                 break
         proc.wait(timeout=3)
     except Exception:
         logger.debug("tts: PowerShell playback failed", exc_info=True)
     finally:
-        _cleanup_env()
+        with _lock:
+            if _current_proc is locals().get("proc"):
+                _current_proc = None
         try:
             os.unlink(path)
         except OSError:
             pass
-
-
-def _cleanup_env() -> None:
-    os.environ.pop("FEIXUE_TTS_STOP", None)
