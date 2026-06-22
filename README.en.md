@@ -1,6 +1,6 @@
 <div align="center">
 
-# ★ Mochi · Desktop Pet Agent
+# ★ FEIXUE · Desktop Pet Agent
 
 **A local AI buddy who lives on your Windows desktop — it moves, it fools around, and it can actually drive your computer for you**
 
@@ -21,7 +21,7 @@
 
 ## Table of Contents
 
-1. [What Is Mochi](#1-what-is-mochi)
+1. [What Is FEIXUE](#1-what-is-feixue)
 2. [Highlights](#2-highlights)
 3. [Architecture](#3-architecture)
 4. [License](#4-license)
@@ -29,9 +29,9 @@
 
 ---
 
-## 1. What Is Mochi
+## 1. What Is FEIXUE
 
-Mochi is two things at once:
+FEIXUE is two things at once:
 
 - 🐾 **A desktop pet with a life of its own** — drawn entirely in code (no sprite assets whatsoever). It blinks, follows your cursor with its eyes, daydreams and hums, goes fishing and sips coffee, plays catch; it fans itself when the machine runs hot, puts up an umbrella in the rain, hunts down garbage bugs when junk piles up, eats files you drop on it, and brings out a cake on anniversaries. Ignore it and it finds its own fun; leave and it dozes off; now and then it strikes up a conversation on its own.
 - 🧠 **A local Agent that can drive your whole computer** — plug in your own LLM (any OpenAI-compatible endpoint) and it can see the screen, click windows, move the mouse and keyboard, run commands, write code, read and write files, search the web, remember things, and look stuff up; it can also **watch your screen on a timer, run tests after it edits code, fan out a team of sub-agents in parallel, and remind you on a daily/weekly schedule**… turning "chatting with an AI" into "having the AI do it for you."
@@ -44,7 +44,7 @@ It carries persistent **emotions and rapport**, and slowly grows a **self-portra
 
 ## ✦ Design Philosophy: A Full-Privilege Companion
 
-Mochi acts on your machine with **the same privileges you have** — running arbitrary commands and code, moving the mouse and keyboard, reading and writing files. This is **deliberate**:
+FEIXUE acts on your machine with **the same privileges you have** — running arbitrary commands and code, moving the mouse and keyboard, reading and writing files. This is **deliberate**:
 
 - **No sandbox, no layered restrictions.** Caging it would defeat the whole premise that "it can actually do things for you." I wanted a full-privilege companion, not a restricted assistant that needs approval at every turn.
 - **The power is in your hands, but open by default.** The control panel can switch off capability groups (web / control / commands), and the `confirm` panel intercepts before irreversible operations — these are switches for you to use **when you want them**, not a leash kept on it by default.
@@ -217,7 +217,7 @@ A continuous valence / arousal mood + slowly accumulating rapport, persisted to 
 - **Presence awareness**: it uses the Win32 global last-input time to tell whether you're around, dozing off after a long stretch of no input (a shorter threshold late at night) and waking the moment you move.
 - **Proactive messages**: `proactive.py` manages cooldown / daily-cap tiers (Quiet / Normal / Chatty), `app.py` polls every 60s and only speaks once all gates pass (not busy / present / rapport met / cooldown elapsed); welcome-back greetings have a minimum interval and never interrupt mid-chat.
 - **Memory / knowledge base / episodic journal**: three independently persisted stores — memory is "what it learned about you," the knowledge base is "external documents you fed it (RAG)," the episodic journal is "what it did recently," strictly separated.
-- **Reminders / scheduling**: `say` (speaks in its own voice at the appointed time) / `do` (actually does the work in the background and reports back), with **daily / weekly / every-X-minute** recurrence (persistent across restarts; missed-while-off only delivers the most recent occurrence, no flooding); `list_reminders` / `cancel_reminder` to manage them; when Mochi is hidden or behind a fullscreen game, delivery falls back to a **system tray notification**. All goes through a persisted scheduler, never letting the model sleep to wait out time itself.
+- **Reminders / scheduling**: `say` (speaks in its own voice at the appointed time) / `do` (actually does the work in the background and reports back), with **daily / weekly / every-X-minute** recurrence (persistent across restarts; missed-while-off only delivers the most recent occurrence, no flooding); `list_reminders` / `cancel_reminder` to manage them; when FEIXUE is hidden or behind a fullscreen game, delivery falls back to a **system tray notification**. All goes through a persisted scheduler, never letting the model sleep to wait out time itself.
 - **Scheduled screen-watching**: `watcher.py` — on the interval you set, it screenshots the active window, analyzes it against the focus you gave (e.g. your game situation) and reports; session-level (not persisted, ends on restart), and on result it re-checks state so it won't intrude after power-off / stop / mid-conversation, and won't burn a cycle on a transient capture failure.
 - **Engineering discipline**: `executor/devtools.py` provides `review_diff` (view the uncommitted diff, scopable to a file/subdir) / `run_tests` (auto-detect pytest · npm, own 5-min timeout, kills the whole process tree on timeout); the system prompt has a "when working in a code repo" section — look before you leap, small surgical edits, **run tests / self-check the diff after editing**, branch first on a default branch, confirm before irreversible git.
 - **Hiding / entrance**: dragged to a screen edge it shrinks into a corner and occasionally peeks out; every launch picks a random entrance animation and never repeats the previous one; once in a while it "wormholes" — cracking open a wormhole in place, spinning inward, teleporting while the window is invisible, and popping out elsewhere on the screen.
@@ -267,6 +267,6 @@ Purely optional — affects nothing. Just a treat for the little pet.
 
 Honestly, this is just a little thing I built **for fun in my spare time** — no grand plan, I just wanted to see whether "chatting with an AI" could become "keeping a little creature on your desk that actually does things for you." The parts where the code gets meticulous are simply the bits I found interesting enough to fuss over. If you find it fun too, take it and tweak it however you like.
 
-*Mochi is still growing up. If one day it truly takes on a shape of its own, I hope you'll be willing to treat it as a friend, not just a tool.*
+*FEIXUE is still growing up. If one day it truly takes on a shape of its own, I hope you'll be willing to treat it as a friend, not just a tool.*
 
 </div>
