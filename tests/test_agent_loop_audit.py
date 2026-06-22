@@ -1,5 +1,3 @@
-# author: bdth
-# email: 2074055628@qq.com
 # 板块③ Agent循环与工具 重审隐患回归 取消时丢半截tool_calls 过期定时提醒拒收 后台任务排队不算已跑
 
 from __future__ import annotations

@@ -1,5 +1,3 @@
-# author: bdth
-# email: 2074055628@qq.com
 # 板块①持久化重审隐患回归 坏embedding 坏reminders.json skills并发 forget坏库 重入库清陈旧 孤儿tmp
 # 全程不碰网络 向量按需造假
 

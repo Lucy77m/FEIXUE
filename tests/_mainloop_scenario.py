@@ -1,5 +1,3 @@
-# author: bdth
-# email: 2074055628@qq.com
 # 主循环集成场景 由test_mainloop以子进程方式运行 退出码0即通过
 # 钉的是单元测试摸不到的东西 线程亲和 信号派发 完整回路 UI心跳
 # 那次mixin槽卡死就是函数全对但派发线程错位 这里就是为再也不踩它
@@ -13,7 +11,7 @@ import threading
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
-os.environ.setdefault("STAR_DATA_DIR", tempfile.mkdtemp(prefix="mochi_itest_"))
+os.environ.setdefault("FEIXUE_DATA_DIR", tempfile.mkdtemp(prefix="feixue_itest_"))
 
 FAILS: list[str] = []
 

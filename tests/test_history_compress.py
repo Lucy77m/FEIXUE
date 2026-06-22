@@ -1,5 +1,3 @@
-# author: bdth
-# email: 2074055628@qq.com
 # 历史压缩异步化测试 裁剪同步生效 摘要后台做 换话题作废在途 不碰网络
 
 from __future__ import annotations

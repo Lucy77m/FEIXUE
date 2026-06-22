@@ -1,5 +1,3 @@
-# author: bdth
-# email: 2074055628@qq.com
 # 验证 agent 强化 回合内并发只读工具 取证工具按需端出 卡死回灌提示
 # 都用假 _complete 假 dispatch 驱动真实主循环 不碰网络
 
@@ -11,7 +9,7 @@ import threading
 import time
 import types
 
-os.environ.setdefault("STAR_DATA_DIR", tempfile.mkdtemp(prefix="mochi_par_"))
+os.environ.setdefault("FEIXUE_DATA_DIR", tempfile.mkdtemp(prefix="feixue_par_"))
 
 from desktop_pet.agent import tools  # noqa: E402
 from desktop_pet.agent.loop import Agent  # noqa: E402

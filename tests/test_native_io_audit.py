@@ -1,5 +1,3 @@
-# author: bdth
-# email: 2074055628@qq.com
 # 板块⑦ 原生IO 重审隐患回归 _geom 和 _LAST 线程本地隔离 clipboard 恢复守卫 hotkeys 就绪事件
 
 from __future__ import annotations

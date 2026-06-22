@@ -1,5 +1,3 @@
-# author: bdth
-# email: 2074055628@qq.com
 # 板块⑤ 伴生行为重审隐患回归 somatic 跨线程迭代加锁 docs 关库中入库不写已关连接
 
 from __future__ import annotations

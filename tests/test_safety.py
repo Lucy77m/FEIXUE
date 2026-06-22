@@ -1,5 +1,3 @@
-# author: bdth
-# email: 2074055628@qq.com
 # 安全护栏回归测试 钉死 check_blocked 和 check_risky 的边界
 # 这层是去掉沙箱后唯一的兜底 改正则前后都跑一遍 红了就是写漏了
 

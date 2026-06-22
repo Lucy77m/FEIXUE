@@ -1,5 +1,3 @@
-# author: bdth
-# email: 2074055628@qq.com
 # 混合检索纯函数测试 查询构造的多语言和安全边界 RRF融合的名次合成
 
 from __future__ import annotations

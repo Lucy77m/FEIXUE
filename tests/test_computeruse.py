@@ -1,5 +1,3 @@
-# author: bdth
-# email: 2074055628@qq.com
 # computer-use 路径的逻辑层测试 坐标变换 幽灵点击 lparam 打包 点在元素框内判定 web 搜索降级链
 # 真鼠标 UIA 网络在 CI 测不到 这些纯逻辑能测
 
@@ -8,7 +6,7 @@ from __future__ import annotations
 import os
 import tempfile
 
-os.environ.setdefault("STAR_DATA_DIR", tempfile.mkdtemp(prefix="mochi_cu_"))
+os.environ.setdefault("FEIXUE_DATA_DIR", tempfile.mkdtemp(prefix="feixue_cu_"))
 
 import pytest  # noqa: E402
 

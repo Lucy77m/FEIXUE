@@ -1,5 +1,3 @@
-# author: bdth
-# email: 2074055628@qq.com
 # 夸骂识别 否定按小句扫 自指只看紧邻不误伤我觉得你棒
 
 from __future__ import annotations
@@ -7,7 +5,7 @@ from __future__ import annotations
 import os
 import tempfile
 
-os.environ.setdefault("STAR_DATA_DIR", tempfile.mkdtemp(prefix="mochi_emo_"))
+os.environ.setdefault("FEIXUE_DATA_DIR", tempfile.mkdtemp(prefix="feixue_emo_"))
 
 import pytest  # noqa: E402
 

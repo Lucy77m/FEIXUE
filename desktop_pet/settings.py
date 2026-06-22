@@ -70,7 +70,7 @@ def _default_data_dir() -> Path:
         return Path(override)
     if getattr(_sys, "frozen", False):
         base = _os.environ.get("APPDATA") or str(Path.home())
-        return Path(base) / "Mochi"
+        return Path(base) / "FEIXUE"
     return Path(__file__).resolve().parent.parent / "data"
 
 

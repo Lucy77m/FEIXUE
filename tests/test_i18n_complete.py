@@ -1,5 +1,3 @@
-# author: bdth
-# email: 2074055628@qq.com
 # i18n 键完整性 三种语言键集合必须一致 缺键会让面板显示 raw key
 
 from __future__ import annotations

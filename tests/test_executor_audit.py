@@ -1,5 +1,3 @@
-# author: bdth
-# email: 2074055628@qq.com
 # 执行器与安全回归 原子写不毁文件 BOM保留 安全拦截按子命令 net解码 后台shell上限
 
 from __future__ import annotations

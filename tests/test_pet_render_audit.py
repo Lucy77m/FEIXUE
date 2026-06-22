@@ -1,5 +1,3 @@
-# author: bdth
-# email: 2074055628@qq.com
 # 渲染核心回归 截图自家窗口集合的并发泄漏 活动时长上限不能误杀最长小品
 
 from __future__ import annotations

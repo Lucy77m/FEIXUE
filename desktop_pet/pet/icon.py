@@ -139,7 +139,7 @@ def feixue_icon() -> QIcon:
     return _ICON_CACHE
 
 
-def save_ico(path: str = "mochi.ico", sizes: tuple[int, ...] = (16, 24, 32, 48, 64, 128, 256)) -> str:
+def save_ico(path: str = "feixue.ico", sizes: tuple[int, ...] = (16, 24, 32, 48, 64, 128, 256)) -> str:
     """导出打包用的ico文件"""
     import io
 

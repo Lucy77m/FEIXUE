@@ -1,5 +1,3 @@
-# author: bdth
-# email: 2074055628@qq.com
 # API瞬时错误退避测试 限流5xx超时才重试 400和鉴权快速失败 取消能打断退避
 
 from __future__ import annotations
