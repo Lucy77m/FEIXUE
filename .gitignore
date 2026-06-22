@@ -1,0 +1,22 @@
+# python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+
+# 临时文件
+syntax_check.txt
+
+# 运行时数据 含key和记忆 不进库
+/data/
+
+/.claude/settings.local.json
+
+# 打包产物
+/build/
+/dist/
+
+# ui检测模型不进库 打包时单独获取
+/desktop_pet/eyes/models/*.onnx
+/_vendor_model/
+release.ps1
