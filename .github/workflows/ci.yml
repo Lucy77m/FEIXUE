@@ -16,10 +16,10 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v8
         with:
           version: "0.11.21"
           python-version: "3.11"
@@ -59,7 +59,7 @@ jobs:
           if ($archive -notmatch "edge_tts") { throw "edge_tts is missing from the packaged archive" }
 
       - name: Upload build check artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: FEIXUE-windows-build-check
           path: dist/FEIXUE/
