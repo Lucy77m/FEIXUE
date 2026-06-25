@@ -16,7 +16,7 @@ from desktop_pet.settings import DATA_DIR, atomic_write_text
 
 _PATH = DATA_DIR / "world.json"
 _VERSION = 1
-_SHELF_SLOTS = 15
+_SHELF_SLOTS = 20
 _LOCK = threading.RLock()
 
 
@@ -145,6 +145,13 @@ class WorldStore:
                      if item.zone == "shelf" and item.slot is not None and item.state == "shelved"]
             return [WorldObject(**asdict(item)) for item in sorted(books, key=lambda x: x.slot)]
 
+    def visible_objects(self) -> list[WorldObject]:
+        """书架上所有 kind 的可见对象"""
+        with self._lock:
+            items = [item for item in self._read()["objects"]
+                     if item.zone == "shelf" and item.slot is not None and item.state == "shelved"]
+            return [WorldObject(**asdict(item)) for item in sorted(items, key=lambda x: x.slot)]
+
     def archived(self) -> list[WorldObject]:
         with self._lock:
             return [WorldObject(**asdict(item)) for item in self._read()["objects"]
@@ -198,6 +205,7 @@ class WorldStore:
             item.zone, item.slot, item.placement = "shelf", int(slot), "manual"
             item.updated_at = _now()
             self._write(data)
+            self.resurface(1)
             return True
 
     def choose_revisit(self, context: str, now: datetime | None = None) -> WorldObject | None:
@@ -264,27 +272,105 @@ class WorldStore:
             known = {item.origin_keepsake_id for item in data["objects"] if item.origin_keepsake_id}
             added = 0
             for source in reversed(keepsakes.recent(64)):
-                if source.get("kind") != "book" or source.get("id") in known:
+                sid = source.get("id")
+                if not sid or sid in known:
                     continue
+                src_kind = str(source.get("kind", ""))
+                world_kind = "book" if src_kind == "book" else "keepsake"
                 at = str(source.get("at", "")) or _now()
                 data["objects"].append(WorldObject(
-                    id=uuid.uuid4().hex, kind="book", title=str(source.get("title", ""))[:120],
+                    id=uuid.uuid4().hex, kind=world_kind, title=str(source.get("title", ""))[:120],
                     summary=str(source.get("detail", ""))[:1200], source=str(source.get("source", ""))[:520],
                     project_key=self.project_key(str(source.get("source", ""))), state="shelved",
                     zone="shelf", slot=None, placement="auto",
-                    origin_keepsake_id=str(source.get("id", "")), created_at=at, updated_at=at,
+                    origin_keepsake_id=str(sid), created_at=at, updated_at=at,
                     last_revisited_at="", revisit_count=0,
                 ))
-                known.add(str(source.get("id", "")))
+                known.add(str(sid))
                 added += 1
             if added:
                 self._auto_arrange(data["objects"])
                 self._write(data)
             return added
 
+    def create_keepsake(self, keepsake: dict) -> WorldObject:
+        """把 keepsakes 系统的信物导入为 kind='keepsake' 的世界对象"""
+        now = _now()
+        item = WorldObject(
+            id=uuid.uuid4().hex, kind="keepsake",
+            title=str(keepsake.get("title", ""))[:120],
+            summary=str(keepsake.get("detail", ""))[:1200],
+            source=str(keepsake.get("source", ""))[:520],
+            project_key=self.project_key(str(keepsake.get("source", ""))),
+            state="shelved", zone="shelf", slot=None, placement="auto",
+            origin_keepsake_id=str(keepsake.get("id", "")),
+            created_at=str(keepsake.get("at", now)), updated_at=now,
+            last_revisited_at="", revisit_count=0,
+        )
+        with self._lock:
+            data = self._read()
+            data["objects"].append(item)
+            self._auto_arrange(data["objects"])
+            self._write(data)
+        return item
+
+    def create_dream(self, dream_text: str) -> WorldObject:
+        """把梦境持久化为 kind='dream' 的世界对象"""
+        now = _now()
+        text = (dream_text or "").strip()
+        item = WorldObject(
+            id=uuid.uuid4().hex, kind="dream",
+            title=(text[:40] + "…") if len(text) > 40 else text,
+            summary=text[:1200], source="", project_key="",
+            state="shelved", zone="shelf", slot=None, placement="auto",
+            origin_keepsake_id="", created_at=now, updated_at=now,
+            last_revisited_at="", revisit_count=0,
+        )
+        with self._lock:
+            data = self._read()
+            data["objects"].append(item)
+            self._auto_arrange(data["objects"])
+            self._write(data)
+        return item
+
+    def create_memento(self, title: str, detail: str) -> WorldObject:
+        """创建里程碑纪念品 kind='memento'"""
+        now = _now()
+        item = WorldObject(
+            id=uuid.uuid4().hex, kind="memento",
+            title=(title or "")[:120], summary=(detail or "")[:1200],
+            source="", project_key="",
+            state="shelved", zone="shelf", slot=None, placement="auto",
+            origin_keepsake_id="", created_at=now, updated_at=now,
+            last_revisited_at="", revisit_count=0,
+        )
+        with self._lock:
+            data = self._read()
+            data["objects"].append(item)
+            self._auto_arrange(data["objects"])
+            self._write(data)
+        return item
+
     def clear(self) -> None:
         with self._lock:
             self._write({"version": _VERSION, "objects": [], "meta": {}})
+
+    def resurface(self, count: int = 1) -> int:
+        """从归档中捞回最近更新的对象到书架"""
+        with self._lock:
+            data = self._read()
+            archived = sorted(
+                [o for o in data["objects"] if o.zone == "archived"],
+                key=lambda o: o.updated_at, reverse=True,
+            )
+            surfaced = 0
+            for item in archived[:count]:
+                item.placement = "auto"
+                surfaced += 1
+            if surfaced:
+                self._auto_arrange(data["objects"])
+                self._write(data)
+            return surfaced
 
     @staticmethod
     def _auto_arrange(objects: list[WorldObject]) -> None:

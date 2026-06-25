@@ -39,6 +39,12 @@ class Dreams(QObject):
     def set_dream(self, text: str) -> None:
         """worker 把做好的梦回传过来 攒着"""
         self._pending = (text or "").strip()
+        if self._pending:
+            try:
+                from desktop_pet.world import get_world
+                get_world().create_dream(self._pending)
+            except Exception:
+                pass
 
     def take_dream_hint(self) -> str:
         """回来打招呼时取一次梦的提示 取完即清 没梦给空串"""

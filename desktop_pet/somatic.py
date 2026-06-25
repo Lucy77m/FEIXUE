@@ -49,6 +49,12 @@ def context() -> str:
     return prompts.SOMATIC_HEADER + "\n" + "\n".join("- " + ln for ln in lines)
 
 
+def has_state(key: str) -> bool:
+    """某个持续状态是否存在"""
+    with _lock:
+        return key in _states
+
+
 def clear() -> None:
     with _lock:
         _events.clear()

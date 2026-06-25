@@ -64,6 +64,15 @@ class Rituals(QObject):
                 self._host._feed_pop(i18n.t("cake_day").format(days=days)),
             ))
             QTimer.singleShot(10 * 60 * 1000, self._cake_timeout)
+            # 里程碑纪念品
+            try:
+                from desktop_pet.world import get_world
+                get_world().create_memento(
+                    title=i18n.t("memento_day").format(days=days),
+                    detail=i18n.t("memento_detail").format(days=days),
+                )
+            except Exception:
+                pass
 
     def _cake_timeout(self) -> None:
         if getattr(self, "_cake_on", False):
@@ -130,3 +139,18 @@ class Rituals(QObject):
         emotion.apply("task_done")
         selector.set_emotion(*emotion.snapshot())
         self._host._feed_pop(i18n.t("focus_done").format(m=_FOCUS_MINUTES))
+        # 每 5 次番茄钟创建一个专注纪念品
+        try:
+            count = int(stats.get_note("focus_count") or 0) + 1
+        except (ValueError, TypeError):
+            count = 1
+        stats.set_note("focus_count", str(count))
+        if count % 5 == 0:
+            try:
+                from desktop_pet.world import get_world
+                get_world().create_memento(
+                    title=i18n.t("memento_focus").format(n=count),
+                    detail=i18n.t("memento_focus_detail").format(n=count),
+                )
+            except Exception:
+                pass

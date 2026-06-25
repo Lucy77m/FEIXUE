@@ -69,10 +69,10 @@ def test_auto_layout_groups_projects_and_preserves_manual_slots(tmp_path):
 
 def test_sixteenth_auto_book_is_archived(tmp_path):
     store = WorldStore(tmp_path / "world.json")
-    for index in range(16):
+    for index in range(21):
         _finish(store, f"{index}.md", str(tmp_path / "project" / f"{index}.md"))
 
-    assert len(store.visible_books()) == 15
+    assert len(store.visible_books()) == 20
     assert len(store.archived()) == 1
 
 

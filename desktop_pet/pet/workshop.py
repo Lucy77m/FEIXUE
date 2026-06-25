@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import time
 import hashlib
 from pathlib import Path
@@ -24,7 +25,6 @@ _BOOK_COLORS = ("#b9453f", "#3e8b82", "#d2a33e", "#6379a9", "#8c5f91", "#c66f3d"
 
 class WorkshopWindow(QWidget):
     book_requested = Signal(str)
-    archive_requested = Signal()
 
     def __init__(self, store: WorldStore | None = None) -> None:
         super().__init__()
@@ -40,15 +40,16 @@ class WorkshopWindow(QWidget):
         self._stage = "idle"
         self._label = ""
         self._stage_started = time.monotonic()
+        self._objects: list[WorldObject] = []
         self._books: list[WorldObject] = []
         self._book_rects: list[tuple[QRectF, str, str]] = []
-        self._slot_rects = [self._slot_rect(index) for index in range(15)]
-        self._drawer_rect = QRectF(610, 456, 230, 52)
+        self._slot_rects = [self._slot_rect(index) for index in range(20)]
         self._drag_book_id = ""
         self._drag_start = QPointF()
         self._drag_pos = QPointF()
         self._carrying_book = False
         self._close_rect = QRectF(self.width() - 42, 14, 28, 28)
+        self._weather_kind = ""
         self.refresh_books()
 
     @property
@@ -56,7 +57,8 @@ class WorkshopWindow(QWidget):
         return self._stage
 
     def refresh_books(self) -> None:
-        self._books = self._store.visible_books()
+        self._objects = self._store.visible_objects()
+        self._books = [o for o in self._objects if o.kind == "book"]
         self.update()
 
     def open_library(self, screen) -> None:
@@ -105,6 +107,13 @@ class WorkshopWindow(QWidget):
         elif self.isVisible():
             self._timer.start(33)
         self.update()
+
+    def set_weather_kind(self, kind: str) -> None:
+        """由 companion 调用 设置窗外天气"""
+        if kind != self._weather_kind:
+            self._weather_kind = kind
+            if self.isVisible():
+                self.update()
 
     def hideEvent(self, event) -> None:
         self._timer.stop()
@@ -163,7 +172,11 @@ class WorkshopWindow(QWidget):
             painter.drawPixmap(self.rect(), self._background)
         else:
             painter.fillRect(self.rect(), QColor("#25282b"))
+        self._paint_window_weather(painter)
         self._paint_books(painter)
+        self._paint_keepsakes(painter)
+        self._paint_dreams(painter)
+        self._paint_mementos(painter)
         self._paint_portal(painter)
         self._paint_document(painter)
         self._paint_character(painter)
@@ -176,6 +189,58 @@ class WorkshopWindow(QWidget):
             return
         target = self._sprite_rect()
         painter.drawPixmap(target, pixmap, QRectF(pixmap.rect()))
+
+    def _paint_window_weather(self, painter: QPainter) -> None:
+        """在窗户区域叠加记忆天气微缩视觉"""
+        if not self._weather_kind or self._weather_kind == "clear":
+            return
+        # 窗户区域：背景图左上角
+        wx, wy, ww, wh = 40, 35, 155, 115
+        painter.save()
+        painter.setClipRect(QRectF(wx, wy, ww, wh))
+        t = self._clock
+        if self._weather_kind == "rain":
+            painter.setPen(QPen(QColor(136, 153, 187, 100), 1.5))
+            for i in range(6):
+                x = wx + 20 + i * 22 + math.sin(t * 2 + i) * 3
+                y = wy + (t * 40 + i * 18) % wh
+                painter.drawLine(QPointF(x, y), QPointF(x + 2, y + 10))
+        elif self._weather_kind == "fog":
+            painter.setPen(Qt.PenStyle.NoPen)
+            for i in range(3):
+                alpha = int(30 + 20 * math.sin(t * 0.8 + i * 2))
+                painter.setBrush(QColor(180, 180, 170, alpha))
+                cx = wx + 40 + i * 40 + math.sin(t * 0.3 + i) * 10
+                cy = wy + 50 + math.cos(t * 0.5 + i) * 8
+                painter.drawEllipse(QPointF(cx, cy), 25, 12)
+        elif self._weather_kind == "stars":
+            painter.setPen(Qt.PenStyle.NoPen)
+            for i in range(5):
+                alpha = int(100 + 80 * math.sin(t * 2 + i * 1.3))
+                painter.setBrush(QColor(255, 196, 82, max(0, alpha)))
+                sx = wx + 25 + (i * 31) % ww
+                sy = wy + 20 + (i * 17) % (wh - 30)
+                r = 2 + math.sin(t * 3 + i) * 0.8
+                painter.drawEllipse(QPointF(sx, sy), r, r)
+        elif self._weather_kind == "warm":
+            painter.setPen(Qt.PenStyle.NoBrush)
+            painter.setPen(QPen(QColor(240, 160, 128, 60), 1))
+            painter.setBrush(QColor(240, 160, 128, 25))
+            painter.drawEllipse(QPointF(wx + ww / 2, wy + wh / 2), 40, 30)
+        elif self._weather_kind == "static":
+            painter.setPen(QPen(QColor(200, 200, 200, 70), 1))
+            for i in range(4):
+                x = wx + 30 + i * 28 + random.uniform(-5, 5)
+                y = wy + 40 + random.uniform(-10, 10)
+                painter.drawLine(QPointF(x, y), QPointF(x + 8, y + random.uniform(-3, 3)))
+        elif self._weather_kind == "gentle":
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(136, 196, 160, 40))
+            for i in range(3):
+                cx = wx + 50 + i * 30 + math.sin(t * 0.4 + i) * 5
+                cy = wy + 60 + math.cos(t * 0.3 + i) * 5
+                painter.drawEllipse(QPointF(cx, cy), 6, 6)
+        painter.restore()
 
     def _paint_document(self, painter: QPainter) -> None:
         if self._stage not in {"arriving", "reading", "working", "revisiting", "returning", "failed"}:
@@ -213,7 +278,7 @@ class WorkshopWindow(QWidget):
     @staticmethod
     def _slot_rect(index: int) -> QRectF:
         row, col = divmod(index, 5)
-        baselines = (247, 348, 450)
+        baselines = (230, 318, 406, 494)
         return QRectF(613 + col * 39, baselines[row] - 48, 31, 48)
 
     @staticmethod
@@ -238,7 +303,9 @@ class WorkshopWindow(QWidget):
 
     def _paint_books(self, painter: QPainter) -> None:
         self._book_rects.clear()
-        for item in self._books:
+        for item in self._objects:
+            if item.kind != "book":
+                continue
             if item.slot is None or not 0 <= item.slot < len(self._slot_rects):
                 continue
             rect = self._slot_rects[item.slot]
@@ -249,13 +316,73 @@ class WorkshopWindow(QWidget):
             item = next((book for book in self._books if book.id == self._drag_book_id), None)
             if item is not None:
                 self._draw_book(painter, QRectF(self._drag_pos.x() - 18, self._drag_pos.y() - 26, 36, 52), item, True)
-        archived = len(self._store.archived())
-        if archived:
-            painter.setPen(QPen(QColor("#e7d39b"), 1))
-            painter.setBrush(QColor(24, 25, 27, 175))
-            painter.drawRoundedRect(QRectF(730, 474, 82, 25), 4, 4)
-            painter.drawText(QRectF(730, 474, 82, 25), Qt.AlignmentFlag.AlignCenter,
-                             i18n.t("workshop_archive_count").format(n=archived))
+
+    # ── 信物绘制 ──────────────────────────────────────────
+
+    _KEEPSAKE_COLORS = {
+        "file": "#7eb8da", "image": "#da7eb8", "url": "#b8da7e",
+        "text": "#dab87e", "default": "#c4a0e0",
+    }
+
+    def _paint_keepsakes(self, painter: QPainter) -> None:
+        for item in self._objects:
+            if item.kind != "keepsake" or item.slot is None:
+                continue
+            if not 0 <= item.slot < len(self._slot_rects):
+                continue
+            rect = self._slot_rects[item.slot]
+            cx, cy = rect.center().x(), rect.center().y()
+            color = QColor(self._KEEPSAKE_COLORS.get(
+                (item.source.split(":")[0] if item.source else ""), self._KEEPSAKE_COLORS["default"]))
+            painter.setPen(QPen(QColor("#d4a840"), 1.5))
+            painter.setBrush(color)
+            painter.drawEllipse(QPointF(cx, cy), 9, 9)
+            painter.setPen(QPen(QColor("#f0d58e"), 1))
+            painter.drawLine(int(cx - 3), int(cy), int(cx + 3), int(cy))
+            painter.drawLine(int(cx), int(cy - 3), int(cx), int(cy + 3))
+            self._book_rects.append((rect, item.id, item.title))
+
+    # ── 梦境碎片绘制 ──────────────────────────────────────
+
+    def _paint_dreams(self, painter: QPainter) -> None:
+        for item in self._objects:
+            if item.kind != "dream" or item.slot is None:
+                continue
+            if not 0 <= item.slot < len(self._slot_rects):
+                continue
+            rect = self._slot_rects[item.slot]
+            cx, cy = rect.center().x(), rect.center().y()
+            alpha_f = (math.sin(self._clock * 1.5 + item.slot * 0.7) + 1) * 0.5
+            alpha = int(40 + 110 * alpha_f)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(180, 170, 210, alpha))
+            for dx, dy, r in [(-4, -3, 4), (3, -5, 3), (0, 1, 5), (-6, 2, 3)]:
+                painter.drawEllipse(QPointF(cx + dx, cy + dy), r, r)
+            self._book_rects.append((rect, item.id, item.title))
+
+    # ── 里程碑纪念品绘制 ──────────────────────────────────
+
+    def _paint_mementos(self, painter: QPainter) -> None:
+        for item in self._objects:
+            if item.kind != "memento" or item.slot is None:
+                continue
+            if not 0 <= item.slot < len(self._slot_rects):
+                continue
+            rect = self._slot_rects[item.slot]
+            cx, cy = rect.center().x(), rect.center().y()
+            painter.setPen(QPen(QColor("#d4a040"), 2))
+            painter.setBrush(QColor("#f5e6b8"))
+            painter.drawEllipse(QPointF(cx, cy), 10, 10)
+            painter.setPen(QPen(QColor("#8b6914"), 1.5))
+            painter.drawEllipse(QPointF(cx, cy), 6, 6)
+            painter.setPen(QPen(QColor("#d4a040"), 1))
+            for i in range(4):
+                ang = i * math.tau / 4
+                painter.drawLine(
+                    QPointF(cx + math.cos(ang) * 3, cy + math.sin(ang) * 3),
+                    QPointF(cx + math.cos(ang) * 8, cy + math.sin(ang) * 8),
+                )
+            self._book_rects.append((rect, item.id, item.title))
 
     def _paint_status(self, painter: QPainter) -> None:
         if self._stage == "idle" and not self._label:
@@ -295,10 +422,22 @@ class WorkshopWindow(QWidget):
             self.update()
             event.accept()
             return
-        title = next((title for rect, _item_id, title in self._book_rects
-                      if rect.contains(event.position())), "")
-        if self._drawer_rect.contains(event.position()):
-            title = i18n.t("workshop_archive_hint")
+        title = ""
+        hit_id = ""
+        for rect, item_id, item_title in self._book_rects:
+            if rect.contains(event.position()):
+                title = item_title
+                hit_id = item_id
+                break
+        if hit_id:
+            obj = self._store.get(hit_id)
+            if obj is not None:
+                if obj.kind == "keepsake":
+                    title = i18n.t("workshop_keepsake_tip").format(title=title)
+                elif obj.kind == "dream":
+                    title = i18n.t("workshop_dream_tip")
+                elif obj.kind == "memento":
+                    title = i18n.t("workshop_memento_tip").format(title=title)
         self.setToolTip(title or (i18n.t("workshop_close_hint") if self._close_rect.contains(event.position()) else ""))
         super().mouseMoveEvent(event)
 
@@ -308,10 +447,6 @@ class WorkshopWindow(QWidget):
             return
         if self._close_rect.contains(event.position()):
             self.hide()
-            event.accept()
-            return
-        if self._drawer_rect.contains(event.position()):
-            self.archive_requested.emit()
             event.accept()
             return
         for rect, item_id, _title in self._book_rects:

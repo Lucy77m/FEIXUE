@@ -36,6 +36,14 @@ _TERMINAL_IDLE_S = 90.0
 _IDLE_S = 4 * 60.0
 _AWAY_S = 20 * 60.0
 _DRIFT_DWELL_S = 20 * 60.0
+_WEATHER_MOOD_COOLDOWN = 8 * 60.0  # 天气氛围行为 8 分钟冷却
+
+_WEATHER_MOOD_ACTIONS: dict[str, tuple[str, ...]] = {
+    "rain":  ("sigh", "read", "tea"),
+    "fog":   ("ponder", "read"),
+    "stars": ("stars", "tea"),
+    "static": ("wobble",),
+}
 
 _CUE_ACTIONS = {
     "terminal_idle": ("coffee", "rubik"),
@@ -84,6 +92,7 @@ class Boredom(QObject):
         self._cursor_near_since = 0.0
         self._last_cursor_react = 0.0
         self._last_cursor_shy = -_CURSOR_SHY_COOLDOWN_S
+        self._last_weather_mood = -_WEATHER_MOOD_COOLDOWN
         self._recent_cues: deque[str] = deque(maxlen=3)
 
     def start(self) -> None:
@@ -133,6 +142,9 @@ class Boredom(QObject):
             if now < self._next_life_at:
                 return
             if self._maybe_window_perch():
+                self._schedule_next(now)
+                return
+            if self._maybe_weather_mood(now):
                 self._schedule_next(now)
                 return
             if self._maybe_desk_habit(cat, now - self._since, idle, hour):
@@ -230,6 +242,36 @@ class Boredom(QObject):
             logger.debug("boredom: window perch failed", exc_info=True)
             return False
 
+    def _maybe_weather_mood(self, now: float) -> bool:
+        """天气氛围持续行为 rain/stars/fog 时偶尔触发对应反应"""
+        if now - self._last_weather_mood < _WEATHER_MOOD_COOLDOWN:
+            return False
+        mw = getattr(self._host, "_memory_weather", None)
+        if mw is None:
+            return False
+        weather = mw.current_weather()
+        actions = _WEATHER_MOOD_ACTIONS.get(weather)
+        if not actions:
+            return False
+        # 概率 35% 避免太频繁
+        if random.random() > 0.35:
+            return False
+        action = random.choice(actions)
+        # react 和 perform 都走 _feed_perform（perform 名直接进活动系统）
+        # react 名在 activities 里没有  走 _feed_react
+        from desktop_pet.pet.activities import _ACTIVITIES
+        if action in _ACTIVITIES:
+            feeder = getattr(self._host, "_feed_perform", None)
+            if callable(feeder):
+                feeder(action)
+        else:
+            feeder = getattr(self._host, "_feed_react", None)
+            if callable(feeder):
+                feeder(action)
+        self._last_weather_mood = now
+        self._remember_cue("weather_mood")
+        return True
+
     def _maybe_desk_habit(self, cat: str, dwell: float, idle: float, hour: int | None = None) -> bool:
         hour = datetime.now().hour if hour is None else hour
         cue = self._choose_life_cue(cat, dwell, idle, hour)
@@ -267,10 +309,27 @@ class Boredom(QObject):
 
     def _actions_for(self, cue: str, hour: int) -> tuple[str, ...]:
         if 6 <= hour < 9 and cue in _MORNING_ACTIONS:
-            return _MORNING_ACTIONS[cue]
-        if (hour >= 23 or hour < 6) and cue in _NIGHT_ACTIONS:
-            return _NIGHT_ACTIONS[cue]
-        return _CUE_ACTIONS.get(cue, _CUE_ACTIONS["plain_idle"])
+            actions = list(_MORNING_ACTIONS[cue])
+        elif (hour >= 23 or hour < 6) and cue in _NIGHT_ACTIONS:
+            actions = list(_NIGHT_ACTIONS[cue])
+        else:
+            actions = list(_CUE_ACTIONS.get(cue, _CUE_ACTIONS["plain_idle"]))
+        # 记忆天气微调：雨天/雾天倾向安静行为
+        mw = getattr(self._host, "_memory_weather", None)
+        if mw is not None:
+            weather = mw.current_weather()
+            if weather == "rain":
+                if "bubbles" in actions:
+                    actions.remove("bubbles")
+                if "tea" not in actions:
+                    actions.append("tea")
+            elif weather == "fog":
+                for noisy in ("paperplane", "bubbles", "popcorn"):
+                    if noisy in actions:
+                        actions.remove(noisy)
+                if "read" not in actions:
+                    actions.append("read")
+        return tuple(actions) if actions else ("tea",)
 
     def _remember_cue(self, cue: str) -> None:
         self._recent_cues.append(cue)

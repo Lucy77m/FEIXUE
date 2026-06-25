@@ -21,7 +21,6 @@ class WorkshopCtrl(QObject):
         from desktop_pet.eyes import capture
         capture.register_own_window(int(self._window.winId()))
         self._window.book_requested.connect(self._open_book)
-        self._window.archive_requested.connect(self._open_archive)
         self._active = False
         self._mode = ""
         self._session = 0
@@ -34,6 +33,10 @@ class WorkshopCtrl(QObject):
         self._used_ai = False
         self._revisit_reply = ""
         self._pending_revisit_id = ""
+        # 窗外天气同步
+        self._weather_timer = QTimer(self)
+        self._weather_timer.timeout.connect(self._sync_weather)
+        self._weather_timer.start(5000)
 
     def is_active(self) -> bool:
         return self._active
@@ -195,6 +198,7 @@ class WorkshopCtrl(QObject):
             message = self._revisit_reply or self._local_revisit(self._store.get(item_id))
         else:
             message = i18n.t("workshop_returned" if ok else "workshop_failed")
+        self._store.resurface(1)
         self._active = False
         self._mode = ""
         self._world_id = ""
@@ -258,15 +262,35 @@ class WorkshopCtrl(QObject):
     @Slot(str)
     def _open_book(self, world_id: str) -> None:
         item = self._store.get(world_id)
-        if item is None or not item.origin_keepsake_id or keepsakes.get(item.origin_keepsake_id) is None:
+        if item is None:
+            return
+        # 梦境 → 用 SpeechText 朗读
+        if item.kind == "dream":
+            self._window.hide()
+            self._speak_text(item.summary)
+            return
+        # 里程碑 → 用 SpeechText 朗读
+        if item.kind == "memento":
+            self._window.hide()
+            self._speak_text(item.summary or item.title)
+            return
+        # 信物/书 → 原有逻辑
+        if not item.origin_keepsake_id or keepsakes.get(item.origin_keepsake_id) is None:
             return
         self._window.hide()
         self._host._open_keepsake(item.origin_keepsake_id)
 
-    @Slot()
-    def _open_archive(self) -> None:
-        self._window.hide()
-        self._host._open_keepsake("")
+    def _speak_text(self, text: str) -> None:
+        """关掉工坊 让宠物用 SpeechText 说出内容"""
+        if not text.strip():
+            return
+        sentences = [s.strip() for s in text.replace("\n", "。").split("。") if s.strip()]
+        if not sentences:
+            sentences = [text[:100]]
+        pet = self._host._pet
+        if pet.isVisible():
+            self._host._speech.place_below(pet)
+            self._host._speech.speak(sentences)
 
     def _current(self, session: int) -> bool:
         return self._active and session == self._session
@@ -277,6 +301,12 @@ class WorkshopCtrl(QObject):
             return i18n.t("workshop_revisit_fallback")
         summary = " ".join(item.summary.split())[:150] or i18n.t("workshop_revisit_empty")
         return i18n.t("workshop_revisit_local").format(title=item.title, summary=summary)
+
+    def _sync_weather(self) -> None:
+        """把记忆天气同步到工坊窗户"""
+        mw = getattr(self._host, "_memory_weather", None)
+        if mw is not None and self._window.isVisible():
+            self._window.set_weather_kind(mw.current_weather())
 
     def _screen(self):
         return (self._host._app.screenAt(self._host._pet.frameGeometry().center())

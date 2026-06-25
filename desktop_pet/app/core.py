@@ -25,6 +25,8 @@ from desktop_pet.companions.feeding_ctrl import FeedingCtrl
 from desktop_pet.companions.memory_fishing import MemoryFishingCtrl
 from desktop_pet.companions.playtime import Playtime
 from desktop_pet.companions.rituals import Rituals
+from desktop_pet.companions.memory_weather import MemoryWeather
+from desktop_pet.companions.project_tracker import ProjectTracker
 from desktop_pet.companions.screen_reactions import ScreenReactions
 from desktop_pet.companions.sensors import Sensors
 from desktop_pet.companions.watchers import Watchers
@@ -180,6 +182,8 @@ class PetApp(QuickActionsMixin, VoiceMixin, AgentBridgeMixin,
         self._fishing = MemoryFishingCtrl(self)
         self._world_director = WorldDirector(self)
         self._screen_reactions = ScreenReactions(self)
+        self._memory_weather = MemoryWeather(self)
+        self._project_tracker = ProjectTracker(self)
         emotion.set_stage_callback(self._on_bond_stage_unlocked)
         self._keepsake_shelf.resume_requested.connect(self._resume_keepsake)
 
@@ -427,6 +431,8 @@ class PetApp(QuickActionsMixin, VoiceMixin, AgentBridgeMixin,
         self._boredom.start()
         self._world_director.start()
         self._screen_reactions.start()
+        self._memory_weather.start()
+        self._project_tracker.start()
         self._hotkeys.start()
         from desktop_pet.executor import vision
         vision.prewarm()

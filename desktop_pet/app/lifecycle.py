@@ -321,7 +321,8 @@ class LifecycleMixin:
         emotion.set_stage_callback(None)
         for c in (self._sensors, self._playtime, self._watchers, self._rituals,
                   self._feeding, self._wellbeing, self._dreams, self._boredom,
-                  self._workflow, self._fishing, self._workshop, self._world_director):
+                  self._workflow, self._fishing, self._workshop, self._world_director,
+                  self._memory_weather, self._project_tracker):
             try:
                 c.stop()
             except Exception:
