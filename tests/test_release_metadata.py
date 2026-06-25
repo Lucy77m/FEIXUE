@@ -15,7 +15,7 @@ def test_release_versions_are_consistent():
     installer = (ROOT / "installer.iss").read_text(encoding="utf-8")
     fallback = re.search(r'#define MyAppVersion "([^"]+)"', installer)
 
-    assert __version__ == "0.3.0"
+    assert __version__ == "0.4.0"
     assert project["project"]["version"] == __version__
     assert fallback is not None and fallback.group(1) == __version__
 

@@ -172,6 +172,7 @@ class WorkshopWindow(QWidget):
             painter.drawPixmap(self.rect(), self._background)
         else:
             painter.fillRect(self.rect(), QColor("#25282b"))
+        self._paint_daynight_tint(painter)
         if self._weather_kind and self._weather_kind != "clear":
             self._paint_weather_tint(painter)
         self._paint_window_weather(painter)
@@ -192,6 +193,27 @@ class WorkshopWindow(QWidget):
         target = self._sprite_rect()
         painter.drawPixmap(target, pixmap, QRectF(pixmap.rect()))
 
+    # ── 日夜色温 ──────────────────────────────────────────
+
+    @staticmethod
+    def _daynight_tint() -> QColor | None:
+        from datetime import datetime
+        h = datetime.now().hour
+        if 6 <= h < 9:
+            return QColor(120, 90, 40, 10)       # 早晨暖黄
+        if 9 <= h < 17:
+            return None                            # 白天无叠加
+        if 17 <= h < 19:
+            return QColor(140, 70, 30, 12)        # 黄昏暖橙
+        if 19 <= h < 23:
+            return QColor(20, 25, 50, 18)         # 夜晚深蓝
+        return QColor(10, 12, 30, 25)              # 深夜偏暗
+
+    def _paint_daynight_tint(self, painter: QPainter) -> None:
+        tint = self._daynight_tint()
+        if tint is not None:
+            painter.fillRect(self.rect(), tint)
+
     _WEATHER_TINTS = {
         "rain": QColor(60, 70, 100, 12),
         "fog": QColor(140, 135, 120, 10),
@@ -207,8 +229,18 @@ class WorkshopWindow(QWidget):
             painter.fillRect(self.rect(), tint)
 
     def _paint_window_weather(self, painter: QPainter) -> None:
-        """在窗户区域叠加记忆天气微缩视觉"""
+        """在窗户区域叠加记忆天气微缩视觉 + 夜晚月亮"""
+        wx, wy, ww, wh = 40, 35, 155, 115
+        # 无天气时 夜晚画月亮
         if not self._weather_kind or self._weather_kind == "clear":
+            from datetime import datetime
+            h = datetime.now().hour
+            if h >= 19 or h < 6:
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(QColor(230, 225, 200, 60))
+                painter.drawEllipse(QPointF(wx + ww - 30, wy + 25), 12, 12)
+                painter.setBrush(QColor(30, 30, 50))
+                painter.drawEllipse(QPointF(wx + ww - 25, wy + 22), 10, 10)
             return
         # 窗户区域：背景图左上角
         wx, wy, ww, wh = 40, 35, 155, 115
