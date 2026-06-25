@@ -33,6 +33,8 @@ Once configured, FEIXUE makes its "entrance" from a corner of the screen. Click 
 
 > Configuration is stored only in the local `data/settings.json` and never uploaded anywhere. Override the data directory with the `FEIXUE_DATA_DIR` environment variable.
 
+v0.4 adds Memory Weather, expanded workshop shelf objects, and richer dreams. The local project-awareness signal is only used for ambience such as Memory Weather; it does not persist full foreground window titles.
+
 ---
 
 ## 2. Packaging & Distribution (Windows · PyInstaller)

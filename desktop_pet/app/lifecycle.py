@@ -172,6 +172,8 @@ class LifecycleMixin:
         self._cancelling = False
         self._bring_online()
         self._world_director.start()
+        self._memory_weather.start()
+        self._project_tracker.start()
         emotion.apply("returned")
         selector.set_emotion(*emotion.snapshot())
         self._just_returned = True
@@ -202,6 +204,8 @@ class LifecycleMixin:
         self._fishing.stop()
         self._workshop.stop()
         self._world_director.stop()
+        self._memory_weather.stop()
+        self._project_tracker.stop()
         radar.reset()
         self._pet.setVisible(False)
 

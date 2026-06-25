@@ -50,7 +50,16 @@ class MemoryWeather(QObject):
             self._timer.stop()
         except Exception:
             pass
+        self._current = "clear"
         self._overlay.hide_layer()
+        hide_immediate = getattr(self._overlay, "_hide_immediate", None)
+        if callable(hide_immediate):
+            hide_immediate()
+        somatic.set_state("mweather", None)
+        try:
+            self._host._pet.set_mood_weather("")
+        except Exception:
+            pass
 
     def current_weather(self) -> str:
         """当前天气种类 供外部读取"""

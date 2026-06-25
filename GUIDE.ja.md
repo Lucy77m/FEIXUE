@@ -33,6 +33,8 @@ uv run python main.py
 
 > 設定はローカルの `data/settings.json` にのみ保存され、どこにもアップロードされません。データディレクトリは環境変数 `FEIXUE_DATA_DIR` で上書きできます。
 
+v0.4 では Memory Weather、小屋オブジェクト拡張、夢の断片が追加されました。プロジェクト感知は Memory Weather などのローカルな雰囲気信号だけに使い、前面ウィンドウの完全なタイトルは永続化しません。
+
 ---
 
 ## 2. パッケージ配布（Windows · PyInstaller）

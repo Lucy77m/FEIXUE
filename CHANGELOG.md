@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.4.1 - 2026-06-26
+
+### 中文
+
+- 修复 0.4.0 GitHub Release 缺少下载资产的问题，补发便携 ZIP、安装包和 SHA256 校验文件。
+- 修复关机/隐藏桌宠后记忆天气和项目感知仍可能继续运行或残留浮层的问题。
+- 降噪项目感知：仅作为本地桌面氛围信号，不再写入 journal 或注入具体窗口标题上下文。
+- 修复梦境碎片图案使用进程随机 hash 导致跨重启不稳定的问题。
+
+### English
+
+- Fixed the v0.4.0 release packaging gap by publishing portable ZIP, installer, and SHA256 checksum assets.
+- Fixed Memory Weather and Project Tracker lifecycle cleanup when FEIXUE is powered off or hidden.
+- Quieted Project Awareness: it now stays a local ambience signal and no longer writes journal entries or injects concrete window-title context.
+- Fixed dream-fragment motif selection so the same dream keeps a stable visual motif across restarts.
+
 ## 0.4.0 - 2026-06-26
 
 ### 中文

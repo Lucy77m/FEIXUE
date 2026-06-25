@@ -57,6 +57,8 @@ It has persistent **emotion and rapport** that evolve over time, developing a **
 | Desk-side world | Documents become physical books in the workshop; FEIXUE may revisit an old book and bring back a new thought |
 | Memory fishing & performances | A three-round memory-fishing game plus dedicated dance, fishing, and other sprite performances |
 
+v0.4 adds Memory Weather, expanded workshop shelf objects, richer dream fragments, and a quieter local project-awareness signal. Project awareness is used only for local ambience and does not persist full foreground window titles.
+
 ### ⌨️ Convenient
 
 - **Global hotkeys**: `Ctrl+Alt+S` summon input, `Ctrl+Alt+A` ask about selection, `Ctrl+Shift+Q` quick-rewrite selection

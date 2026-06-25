@@ -409,7 +409,8 @@ class WorkshopWindow(QWidget):
 
     @staticmethod
     def _dream_motif_idx(item: WorldObject) -> int:
-        return hash(item.summary) % len(WorkshopWindow._DREAM_MOTIFS)
+        digest = hashlib.sha1((item.summary or item.title).encode("utf-8")).digest()[0]
+        return digest % len(WorkshopWindow._DREAM_MOTIFS)
 
     def _paint_dreams(self, painter: QPainter) -> None:
         for item in self._objects:

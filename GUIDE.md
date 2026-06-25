@@ -33,6 +33,8 @@ uv run python main.py
 
 > 配置只存在本地 `data/settings.json`，不上传任何地方。数据目录可用环境变量 `FEIXUE_DATA_DIR` 覆盖。
 
+v0.4 系列新增记忆天气、小屋物件扩展和梦境碎片。项目感知只用于记忆天气等本地氛围信号，不持久化完整前台窗口标题。
+
 ---
 
 ## 2. 打包分发（Windows · PyInstaller）

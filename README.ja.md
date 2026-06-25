@@ -12,6 +12,8 @@
 
 🔗 [github.com/Lucy77m/FEIXUE](https://github.com/Lucy77m/FEIXUE)
 
+> v0.4 では Memory Weather、小屋オブジェクト拡張、夢の断片が追加されました。プロジェクト感知はローカルな雰囲気づくりだけに使い、前面ウィンドウの完全なタイトルは永続化しません。
+
 ---
 
 ## どんなもの？

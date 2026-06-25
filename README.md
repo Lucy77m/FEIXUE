@@ -12,6 +12,8 @@
 
 🔗 [github.com/Lucy77m/FEIXUE](https://github.com/Lucy77m/FEIXUE)
 
+> v0.4 系列新增记忆天气、小屋物件扩展和梦境碎片。项目感知只用于本地桌面氛围，不持久化完整前台窗口标题。
+
 ---
 
 ## 它是什么
