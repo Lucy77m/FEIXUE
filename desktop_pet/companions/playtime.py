@@ -23,7 +23,10 @@ _AWAY_S = 150.0
 _BUG_SCAN_MS = 45 * 60 * 1000
 _BUG_TEMP_BYTES = 500 * 1024 * 1024  # temp堆到这么大就生虫
 _CONTEXT_STABLE_S = 12.0
-_CONTEXT_COOLDOWN_S = 120.0
+_CONTEXT_COOLDOWN_S = 600.0
+_PERCH_MIN_S = 45.0
+_PERCH_MAX_S = 120.0
+_PERCH_POP_CHANCE = 0.20
 
 
 class Playtime(QObject):
@@ -49,6 +52,8 @@ class Playtime(QObject):
         self._perch_timer = QTimer(self)
         self._perch_timer.timeout.connect(self._check_perch)
         self._perch_last = 0.0
+        self._perch_started = 0.0
+        self._perch_until = 0.0
         self._perch_kind = ""
         self._perch_offset = QPoint()
         self._context_candidate = 0
@@ -237,37 +242,21 @@ class Playtime(QObject):
 
     def _start_context_perch(self, hwnd: int, rect: tuple[int, int, int, int], kind: str) -> bool:
         left, top, right, _bottom = rect
-        center = QPoint((left + right) // 2, top + 20)
-        screen = self._host._app.screenAt(center) or self._host._app.primaryScreen()
-        avail = screen.availableGeometry()
-        pet_w, pet_h = self._host._pet.width(), self._host._pet.height()
-        x = left + int((right - left) * 0.28) - pet_w // 2
-        if top - int(pet_h * 0.72) >= avail.top():
-            y = top - int(pet_h * 0.72)
-        else:
-            x = right - pet_w - 18
-            y = top + 28
-        x = max(avail.left(), min(x, avail.right() - pet_w + 1))
-        y = max(avail.top(), min(y, avail.bottom() - pet_h + 1))
+        if not self._host._pet.start_window_perch(rect, kind):
+            return False
         self._perch_last = time.time()
+        self._perch_started = self._perch_last
+        self._perch_until = self._perch_started + random.uniform(_PERCH_MIN_S, _PERCH_MAX_S)
         self._perch_hwnd = hwnd
         self._perch_kind = kind
         self._perch_rect = rect
-        self._perch_offset = QPoint(x - left, y - top)
-        self._host._pet.move(x, y)
-        self._host._pet.moved.emit()
-        reactions = {
-            "code": "read", "terminal": "read", "document": "read",
-            "media": "purr", "browser": "peek", "generic": "perk_up",
-        }
-        action = reactions.get(kind, "perk_up")
-        if action in {"read", "review"}:
-            self._host._pet.perform(action)
-        else:
-            self._host._pet.react(action)
-        self._host._feed_pop(i18n.t(f"context_perch_{kind}"))
+        pos = self._host._pet.frameGeometry().topLeft()
+        self._perch_offset = QPoint(pos.x() - left, pos.y() - top)
+        if random.random() < _PERCH_POP_CHANCE:
+            self._host._feed_pop(i18n.t(f"context_perch_{kind}"))
+        if random.random() < 0.25:
+            self._host._pet.leave_life_trace("dot", 1)
         self._perch_timer.start(700)
-        QTimer.singleShot(300_000, self._perch_done)
         return True
 
     def _check_perch(self) -> None:
@@ -275,13 +264,19 @@ class Playtime(QObject):
         if not self._perch_hwnd:
             self._perch_timer.stop()
             return
+        if self._host._engaged() or not self._host._pet.isVisible() or self._host._pet.is_asleep:
+            self._perch_done("busy")
+            return
+        if time.time() >= self._perch_until:
+            self._perch_done("settled")
+            return
         try:
             import win32gui
             if not win32gui.IsWindowVisible(self._perch_hwnd) or win32gui.IsIconic(self._perch_hwnd):
-                self._perch_done()
+                self._perch_done("hidden")
                 return
             if win32gui.GetForegroundWindow() != self._perch_hwnd:
-                self._perch_done()
+                self._perch_done("lost")
                 return
             left, top, right, bottom = win32gui.GetWindowRect(self._perch_hwnd)
             old_left, old_top, _old_right, _old_bottom = self._perch_rect
@@ -297,23 +292,30 @@ class Playtime(QObject):
                 return
             self._perch_rect = (left, top, right, bottom)
         except Exception:
-            self._perch_done()
+            self._perch_done("lost")
 
     def _perch_fall(self) -> None:
         """窗台塌了 摔下去气鼓鼓"""
         self._perch_hwnd = 0
         self._perch_timer.stop()
+        self._perch_started = 0.0
+        self._perch_until = 0.0
         self._host._pet._start_toss(random.uniform(-120, 120), 60.0)
         QTimer.singleShot(1400, lambda: self._host._feed_react("puff_up"))
         QTimer.singleShot(1700, lambda: self._host._feed_pop(i18n.t("perch_fall")))
 
-    def _perch_done(self) -> None:
+    def _perch_done(self, reason: str = "settled") -> None:
         if not self._perch_hwnd:
             return
+        duration = max(0.0, time.time() - self._perch_started) if self._perch_started else 0.0
         self._perch_hwnd = 0
         self._perch_kind = ""
+        self._perch_started = 0.0
+        self._perch_until = 0.0
         self._perch_timer.stop()
-        self._host._feed_react("stretch")
+        if reason == "settled" and random.random() < 0.45:
+            self._host._pet.leave_life_trace("dot", random.randint(1, 2))
+        self._host._pet.end_window_perch(reason, duration)
 
     @property
     def context_kind(self) -> str:

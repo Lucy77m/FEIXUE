@@ -25,7 +25,15 @@ _TUCK, _LURK, _OUT, _HOLD, _IN, _SHOW = "tuck", "lurk", "out", "hold", "in", "sh
 
 
 class Hideout:
-    def __init__(self, edge: str, screen: QRect, drop: QPoint, win_w: int, win_h: int) -> None:
+    def __init__(
+        self,
+        edge: str,
+        screen: QRect,
+        drop: QPoint,
+        win_w: int,
+        win_h: int,
+        initial_wait: float | None = None,
+    ) -> None:
         self.edge = edge
         self._from = QPoint(drop)
         self._hidden, self._peek, self._shown, self._open_dir = self._anchors(edge, screen, drop, win_w, win_h)
@@ -37,6 +45,7 @@ class Hideout:
         self._scanned = False
         self._held_out = False
         self._pending_glance: float | None = None
+        self._initial_wait = initial_wait
 
     @staticmethod
     def edge_for(screen: QRect, geo: QRect) -> str | None:
@@ -146,7 +155,11 @@ class Hideout:
         """回潜伏并重摇下次探头等待时间"""
         self._phase = _LURK
         self._t = 0.0
-        self._wait = random.uniform(*_LURK_GAP)
+        if self._initial_wait is not None:
+            self._wait = max(0.0, self._initial_wait)
+            self._initial_wait = None
+        else:
+            self._wait = random.uniform(*_LURK_GAP)
 
     @staticmethod
     def _lerp(a: QPoint, b: QPoint, t: float) -> QPoint:

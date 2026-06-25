@@ -94,6 +94,7 @@ class PetWindow(QWidget):
         self._sprite_walk_dir = 0
         self._last_attention = 0.0
         self._work_item: dict | None = None
+        self._life_traces = None
 
         self._blob = BlobPet(pet_skin)
         self._last = time.perf_counter()
@@ -110,6 +111,8 @@ class PetWindow(QWidget):
         self._entrance_t = 0.0
         self._rest_pos = QPoint()
         self._hideout: Hideout | None = None
+        self._hideout_until: float | None = None
+        self._hideout_return: QPoint | None = None
         self._wormhole: Wormhole | None = None
         self._wormhole_t = 0.0
         self._portal: PortalTransit | None = None
@@ -195,6 +198,118 @@ class PetWindow(QWidget):
     def bind_speaking(self, fn) -> None:
         """注入是否正在说话的查询函数"""
         self._is_speaking = fn
+
+    @property
+    def is_life_busy(self) -> bool:
+        return (
+            self._entrance is not None
+            or self._hideout is not None
+            or self._wormhole is not None
+            or self._portal is not None
+            or self._is_dragging
+            or self._toss_timer.isActive()
+            or self._blob.in_activity
+            or self._blob.is_reacting
+            or self._is_speaking()
+            or self._work_item is not None
+            or self.windowOpacity() < 1.0
+        )
+
+    def life_notice_cursor(self, pos: QPoint, lingered: bool = False, shy: bool = False) -> bool:
+        if self.is_life_busy or self._blob.is_asleep or not self.isVisible():
+            return False
+        self._track_cursor(pos)
+        if shy:
+            self._blob.react("purr")
+        elif lingered:
+            self._blob.react("perk_up")
+        return True
+
+    def leave_life_trace(self, kind: str = "dot", count: int = 1) -> bool:
+        if not self.isVisible():
+            return False
+        if self._life_traces is None:
+            from desktop_pet.pet.footprints import FootprintLayer
+            self._life_traces = FootprintLayer()
+        try:
+            foot = self.below_blob()
+            total = max(1, min(int(count), 3))
+            for _ in range(total):
+                self._life_traces.add(
+                    foot.x() + random.randint(-18, 18),
+                    foot.y() + random.randint(-10, 10),
+                    random.uniform(-0.4, 0.4),
+                    kind,
+                    random.uniform(4.0, 6.0),
+                )
+            return True
+        except Exception:
+            return False
+
+    def start_edge_peek(self, edge: str = "", duration: float = 5.5) -> bool:
+        if self.is_life_busy or self._blob.is_asleep or not self.isVisible():
+            return False
+        screen = self.screen()
+        if screen is None:
+            return False
+        avail = screen.availableGeometry()
+        chosen = edge if edge in {"left", "right", "top"} else Hideout.edge_for(avail, self.frameGeometry())
+        if chosen is None:
+            return False
+        self._cancel_sprite_walk()
+        self._hideout_return = QPoint(self.frameGeometry().topLeft())
+        self._hideout_until = time.perf_counter() + max(1.5, float(duration))
+        self._hideout = Hideout(
+            chosen, avail, self.frameGeometry().topLeft(), self.width(), self.height(),
+            initial_wait=0.15,
+        )
+        self._blob.set_hidden(True)
+        self.update()
+        return True
+
+    def start_window_perch(self, rect: tuple[int, int, int, int], kind: str) -> bool:
+        if self.is_life_busy or self._blob.is_asleep or not self.isVisible():
+            return False
+        left, top, right, _bottom = rect
+        if right - left < 420:
+            return False
+        from PySide6.QtWidgets import QApplication
+        center = QPoint((left + right) // 2, top + 20)
+        screen = QApplication.screenAt(center) or self.screen() or QApplication.primaryScreen()
+        if screen is None:
+            return False
+        avail = screen.availableGeometry()
+        pet_w, pet_h = self.width(), self.height()
+        x = left + int((right - left) * 0.28) - pet_w // 2
+        if top - int(pet_h * 0.72) >= avail.top():
+            y = top - int(pet_h * 0.72)
+        else:
+            x = right - pet_w - 18
+            y = top + 28
+        x = max(avail.left(), min(x, avail.right() - pet_w + 1))
+        y = max(avail.top(), min(y, avail.bottom() - pet_h + 1))
+        self._cancel_sprite_walk()
+        self._end_hide()
+        self.move(x, y)
+        self.moved.emit()
+        action = {
+            "code": "read", "terminal": "read", "document": "read",
+            "media": "purr", "browser": "peek", "generic": "perk_up",
+        }.get(kind, "perk_up")
+        if action in {"read", "review"}:
+            self.perform(action)
+        else:
+            self.react(action)
+        return True
+
+    def end_window_perch(self, reason: str = "", duration: float = 0.0) -> None:
+        if not self.is_life_busy and not self._blob.is_asleep:
+            if reason in {"lost", "hidden"} or duration < 20.0:
+                self._blob.look_at(random.choice((-0.55, 0.55)))
+            elif duration >= 75.0:
+                self._blob.react(random.choice(("stretch", "nod")))
+            else:
+                self._blob.react(random.choice(("nod", "peek")))
 
     def set_state(self, state: str) -> None:
         if state == "speaking":
@@ -514,6 +629,8 @@ class PetWindow(QWidget):
             repaint_needed = True
             if glance is not None:
                 self._blob.look_at(glance)
+            if self._hideout_until is not None and now >= self._hideout_until and not self._is_speaking():
+                self._end_hide(restore=True)
         elif self.windowOpacity() < 1.0:
             # 自愈 没有入场或虫洞在跑 窗口就该满不透明
             # 防动画被打断留下 opacity 小于1 让桌宠凭空消失
@@ -780,13 +897,20 @@ class PetWindow(QWidget):
         edge = Hideout.edge_for(avail, self.frameGeometry())
         if edge is not None:
             self._hideout = Hideout(edge, avail, self.frameGeometry().topLeft(), self.width(), self.height())
+            self._hideout_until = None
+            self._hideout_return = None
             self._blob.set_hidden(True)
             self.hid.emit()
 
-    def _end_hide(self) -> None:
+    def _end_hide(self, restore: bool = False) -> None:
         if self._hideout is not None:
             self._hideout = None
             self._blob.set_hidden(False)
+        if restore and self._hideout_return is not None:
+            self.move(self._hideout_return)
+            self.moved.emit()
+        self._hideout_until = None
+        self._hideout_return = None
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         # 松手四分支 甩出去抛飞 拖完落地弹并试贴边 藏着就戳露头 否则算点击

@@ -1,4 +1,5 @@
 import os
+import time
 from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -16,6 +17,7 @@ from desktop_pet import keepsakes
 from desktop_pet.companions.playtime import Playtime
 from desktop_pet.companions.workflow import WorkflowCtrl
 from desktop_pet.pet.chat import attachment_payload
+from desktop_pet.pet.footprints import FootprintLayer
 from desktop_pet.pet.keepsake_shelf import KeepsakeShelf
 from desktop_pet.pet.window import PetWindow
 
@@ -258,6 +260,44 @@ def test_pet_work_item_renders_with_sprite():
     )
 
 
+def test_pet_edge_peek_is_temporary_and_restores_position():
+    pet = PetWindow("xiaofeixue")
+    pet.show()
+    original = pet.frameGeometry().topLeft()
+
+    assert pet.start_edge_peek("right", 1.5)
+    assert pet.is_life_busy
+
+    pet._hideout_until = time.perf_counter() - 0.1
+    pet._tick()
+
+    assert not pet.is_life_busy
+    assert pet.frameGeometry().topLeft() == original
+
+
+def test_pet_life_trace_uses_short_lived_overlay():
+    pet = PetWindow("xiaofeixue")
+    pet.show()
+
+    assert pet.leave_life_trace("star", 3)
+    assert pet._life_traces is not None
+    assert len(pet._life_traces._steps) == 3
+    assert all(step[3] == "star" and 4.0 <= step[6] <= 6.0 for step in pet._life_traces._steps)
+
+
+def test_footprint_layer_supports_star_dot_and_crops():
+    layer = FootprintLayer()
+    layer.setGeometry(0, 0, 200, 200)
+    layer.show()
+
+    for i in range(30):
+        layer.add(i, i, 0.0, "star" if i % 2 else "dot", 5.0)
+
+    assert len(layer._steps) == 24
+    assert {"star", "dot"} <= {step[3] for step in layer._steps}
+    layer.close()
+
+
 def test_pet_drop_routes_normal_files_to_workflow_and_shift_to_feeding(tmp_path):
     path = tmp_path / "notes.txt"
     path.write_text("hello", encoding="utf-8")
@@ -285,7 +325,12 @@ def test_pet_drop_routes_normal_files_to_workflow_and_shift_to_feeding(tmp_path)
     assert Path(fed[0][0]) == path
 
 
-def test_context_perch_positions_pet_and_records_mode():
+def test_context_perch_positions_pet_and_records_mode(monkeypatch):
+    import desktop_pet.companions.playtime as playtime_mod
+
+    monkeypatch.setattr(playtime_mod.random, "random", lambda: 0.99)
+    monkeypatch.setattr(playtime_mod.random, "uniform", lambda _a, _b: 60.0)
+
     class Host:
         def __init__(self):
             self._app = QApplication.instance()
@@ -311,9 +356,12 @@ def test_context_perch_positions_pet_and_records_mode():
     assert playtime._start_context_perch(123, (100, 320, 1000, 820), "code")
     assert playtime.context_kind == "code"
     assert playtime._perch_hwnd == 123
+    assert playtime._perch_until - playtime._perch_started == 60.0
     assert host._pet.frameGeometry().top() < 320
-    assert host.messages
-    playtime._perch_done()
+    assert host.messages == []
+    playtime._perch_done("settled")
+    assert playtime._perch_hwnd == 0
+    assert playtime._perch_until == 0.0
 
 
 def test_classify_window_edge_cases():
