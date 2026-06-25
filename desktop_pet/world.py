@@ -321,7 +321,7 @@ class WorldStore:
         item = WorldObject(
             id=uuid.uuid4().hex, kind="dream",
             title=(text[:40] + "…") if len(text) > 40 else text,
-            summary=text[:1200], source="", project_key="",
+            summary=text[:1200], source="", project_key="dream",
             state="shelved", zone="shelf", slot=None, placement="auto",
             origin_keepsake_id="", created_at=now, updated_at=now,
             last_revisited_at="", revisit_count=0,

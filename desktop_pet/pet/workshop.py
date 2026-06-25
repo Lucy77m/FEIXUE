@@ -360,6 +360,25 @@ class WorkshopWindow(QWidget):
 
     # ── 梦境碎片绘制 ──────────────────────────────────────
 
+    _DREAM_MOTIFS = [
+        ("moon",    QColor(200, 210, 240), "crescent"),
+        ("lantern", QColor(240, 200, 120), "circle_dot"),
+        ("boat",    QColor(160, 200, 220), "triangle"),
+        ("mirror",  QColor(200, 200, 220), "diamond"),
+        ("rain",    QColor(140, 160, 200), "drops"),
+        ("book",    QColor(180, 160, 140), "rect"),
+        ("candle",  QColor(240, 180, 100), "flame"),
+        ("feather", QColor(200, 210, 200), "leaf"),
+        ("star",    QColor(240, 220, 140), "star4"),
+        ("fog",     QColor(180, 180, 190), "cloud"),
+        ("clock",   QColor(190, 190, 200), "circle_line"),
+        ("flower",  QColor(220, 180, 200), "petal"),
+    ]
+
+    @staticmethod
+    def _dream_motif_idx(item: WorldObject) -> int:
+        return hash(item.summary) % len(WorkshopWindow._DREAM_MOTIFS)
+
     def _paint_dreams(self, painter: QPainter) -> None:
         for item in self._objects:
             if item.kind != "dream" or item.slot is None:
@@ -370,11 +389,69 @@ class WorkshopWindow(QWidget):
             cx, cy = rect.center().x(), rect.center().y()
             alpha_f = (math.sin(self._clock * 1.5 + item.slot * 0.7) + 1) * 0.5
             alpha = int(40 + 110 * alpha_f)
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor(180, 170, 210, alpha))
-            for dx, dy, r in [(-4, -3, 4), (3, -5, 3), (0, 1, 5), (-6, 2, 3)]:
-                painter.drawEllipse(QPointF(cx + dx, cy + dy), r, r)
+            _, base_color, glyph = self._DREAM_MOTIFS[self._dream_motif_idx(item)]
+            color = QColor(base_color)
+            color.setAlpha(alpha)
+            self._draw_dream_glyph(painter, cx, cy, glyph, 7.0, color)
             self._book_rects.append((rect, item.id, item.title))
+
+    @staticmethod
+    def _draw_dream_glyph(painter: QPainter, cx: float, cy: float,
+                          glyph: str, size: float, color: QColor) -> None:
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(color)
+        if glyph == "crescent":
+            painter.drawEllipse(QPointF(cx - 1, cy), size, size)
+            painter.setBrush(QColor(0, 0, 0, 0))
+            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Clear)
+            painter.drawEllipse(QPointF(cx + 3, cy - 1), size * 0.85, size * 0.85)
+            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
+        elif glyph == "circle_dot":
+            painter.drawEllipse(QPointF(cx, cy), size, size)
+            painter.setBrush(QColor(color.red(), color.green(), color.blue(), min(255, color.alpha() + 60)))
+            painter.drawEllipse(QPointF(cx, cy), size * 0.3, size * 0.3)
+        elif glyph == "triangle":
+            from PySide6.QtGui import QPolygonF
+            pts = [QPointF(cx, cy - size), QPointF(cx - size * 0.8, cy + size * 0.6),
+                   QPointF(cx + size * 0.8, cy + size * 0.6)]
+            painter.drawPolygon(QPolygonF(pts))
+        elif glyph == "diamond":
+            from PySide6.QtGui import QPolygonF
+            pts = [QPointF(cx, cy - size), QPointF(cx + size * 0.6, cy),
+                   QPointF(cx, cy + size), QPointF(cx - size * 0.6, cy)]
+            painter.drawPolygon(QPolygonF(pts))
+        elif glyph == "drops":
+            for dx, dy in [(-3, -2), (2, 1), (-1, 4)]:
+                painter.drawEllipse(QPointF(cx + dx, cy + dy), 2.5, 3.5)
+        elif glyph == "rect":
+            from PySide6.QtCore import QRectF as R
+            painter.drawRoundedRect(R(cx - size * 0.6, cy - size * 0.8, size * 1.2, size * 1.6), 2, 2)
+        elif glyph == "flame":
+            from PySide6.QtGui import QPolygonF
+            pts = [QPointF(cx, cy - size), QPointF(cx - size * 0.5, cy + size * 0.5),
+                   QPointF(cx + size * 0.5, cy + size * 0.5)]
+            painter.drawPolygon(QPolygonF(pts))
+        elif glyph == "leaf":
+            painter.drawEllipse(QPointF(cx, cy), size * 0.4, size)
+        elif glyph == "star4":
+            _draw_star4(painter, cx, cy, size)
+        elif glyph == "cloud":
+            for dx, dy, r in [(-3, -2, 3), (2, -3, 2.5), (0, 1, 3.5), (-4, 2, 2)]:
+                painter.drawEllipse(QPointF(cx + dx, cy + dy), r, r)
+        elif glyph == "circle_line":
+            painter.setPen(QPen(color, 1.5))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawEllipse(QPointF(cx, cy), size, size)
+            pen = QPen(color, 1)
+            painter.setPen(pen)
+            painter.drawLine(QPointF(cx, cy - size * 0.5), QPointF(cx, cy))
+            painter.drawLine(QPointF(cx, cy), QPointF(cx + size * 0.4, cy - size * 0.2))
+        elif glyph == "petal":
+            for i in range(4):
+                ang = i * math.tau / 4
+                dx = math.cos(ang) * size * 0.5
+                dy = math.sin(ang) * size * 0.5
+                painter.drawEllipse(QPointF(cx + dx, cy + dy), 2.5, 4)
 
     # ── 里程碑纪念品绘制 ──────────────────────────────────
 
@@ -451,7 +528,9 @@ class WorkshopWindow(QWidget):
                 if obj.kind == "keepsake":
                     title = i18n.t("workshop_keepsake_tip").format(title=title)
                 elif obj.kind == "dream":
-                    title = i18n.t("workshop_dream_tip")
+                    idx = self._dream_motif_idx(obj)
+                    motif_name = self._DREAM_MOTIFS[idx][0]
+                    title = f"{i18n.t('workshop_dream_tip')} · {motif_name}"
                 elif obj.kind == "memento":
                     title = i18n.t("workshop_memento_tip").format(title=title)
         self.setToolTip(title or (i18n.t("workshop_close_hint") if self._close_rect.contains(event.position()) else ""))

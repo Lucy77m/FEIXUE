@@ -169,6 +169,7 @@ STRINGS: dict[str, str] = {
         "workshop_dream_tip": "夢のかけら",
         "workshop_memento_tip": "マイルストーン：{title}",
         "proj_journal": "{name} に取り組んでいて、もう {m} 分経ちました",
+        "dream_recall_prefix": "夢を見た……",
         "dl_done": "ダウンロード完了：{name}、整理や開封は言ってね",
         "meeting_on": "会議中？静かにしてるね~",
         "meeting_off": "会議おわった？おかえり~",

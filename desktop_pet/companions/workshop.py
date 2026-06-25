@@ -264,10 +264,11 @@ class WorkshopCtrl(QObject):
         item = self._store.get(world_id)
         if item is None:
             return
-        # 梦境 → 用 SpeechText 朗读
+        # 梦境 → 用 SpeechText 朗读 加前缀
         if item.kind == "dream":
             self._window.hide()
-            self._speak_text(item.summary)
+            preface = i18n.t("dream_recall_prefix")
+            self._speak_text(preface + item.summary)
             return
         # 里程碑 → 用 SpeechText 朗读
         if item.kind == "memento":

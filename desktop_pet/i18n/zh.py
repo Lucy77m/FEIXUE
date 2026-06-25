@@ -169,6 +169,7 @@ STRINGS: dict[str, str] = {
         "workshop_dream_tip": "梦的碎片",
         "workshop_memento_tip": "里程碑：{title}",
         "proj_journal": "一直在做 {name}，已经 {m} 分钟了",
+        "dream_recall_prefix": "做了个梦……",
         "dl_done": "下载好了：{name}，要我归档或打开就说一声",
         "meeting_on": "在开会呀？我安静待着，不出声~",
         "meeting_off": "会开完啦？欢迎回来~",
