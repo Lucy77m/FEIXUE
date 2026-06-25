@@ -87,6 +87,8 @@ class BlobPet(ThinkMixin, ReactFxMixin, FaceMixin):
         self.on_activity_done = None  # 小品演完的回调 上层挂
         self._weather = ""  # rain snow melt
         self._weather_e = 0.0
+        self._mweather = ""       # 记忆天气种类
+        self._mweather_e = 0.0    # 记忆天气能量
         self._calm_e = 1.0  # 非演出的渐变量 装饰让位演出
         self._settle = 0.0
         self._hold = 0.0
@@ -186,6 +188,10 @@ class BlobPet(ThinkMixin, ReactFxMixin, FaceMixin):
             self._weather = kind
         else:
             self._weather = ""
+
+    def set_mood_weather(self, kind: str) -> None:
+        """记忆天气 身体持续状态"""
+        self._mweather = kind
 
     def set_expression(self, name: str) -> None:
         if name in _EXPRESSIONS:
@@ -460,6 +466,10 @@ class BlobPet(ThinkMixin, ReactFxMixin, FaceMixin):
             self._weather_e = min(1.0, self._weather_e + dt * 1.2)
         else:
             self._weather_e = max(0.0, self._weather_e - dt * 1.0)
+        if self._mweather:
+            self._mweather_e = min(1.0, self._mweather_e + dt * 0.8)
+        else:
+            self._mweather_e = max(0.0, self._mweather_e - dt * 0.6)
         if self._hold > 0.0 and not self._busy and self._activity is None:
             self._hold -= dt
             if self._hold <= 0.0:
@@ -792,6 +802,26 @@ class BlobPet(ThinkMixin, ReactFxMixin, FaceMixin):
             sym *= 1 - 0.14 * k
             sxm *= 1 + 0.10 * k
             oy += bh * 0.07 * k
+        # 记忆天气身体氛围
+        mw = self._mweather_e * calm
+        if mw > 0.01:
+            if self._mweather == "rain":
+                oy += bh * 0.025 * mw
+                sxm *= 1 - 0.03 * mw
+                rot += math.sin(self._t * 0.6) * 1.2 * mw
+            elif self._mweather == "fog":
+                rot += math.sin(self._t * 0.4) * 2.0 * mw
+            elif self._mweather == "stars":
+                rot -= 2.0 * mw
+                oy -= bh * 0.015 * mw
+            elif self._mweather == "warm":
+                oy -= bh * 0.01 * mw
+                sym *= 1 + 0.02 * mw
+            elif self._mweather == "static":
+                ox += math.sin(self._t * 12) * bw * 0.005 * mw
+            elif self._mweather == "gentle":
+                sym *= 1 + 0.015 * mw
+                sxm *= 1 - 0.01 * mw
 
         head_y = cy + oy
         painter.save()

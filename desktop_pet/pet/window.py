@@ -400,6 +400,9 @@ class PetWindow(QWidget):
     def set_weather(self, kind: str) -> None:
         self._blob.set_weather(kind)
 
+    def set_mood_weather(self, kind: str) -> None:
+        self._blob.set_mood_weather(kind)
+
     @property
     def is_reacting(self) -> bool:
         return self._blob.is_reacting

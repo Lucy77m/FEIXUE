@@ -82,6 +82,7 @@ class _Particle:
     lifetime: float = 4.0
     shape: str = "dot"
     color: QColor = field(default_factory=lambda: QColor(255, 255, 255))
+    draining: bool = False   # True = 天气已变 正在淡出 不再补
 
 
 # ── 粒子层 ───────────────────────────────────────────────
@@ -111,16 +112,21 @@ class WeatherOverlay(QWidget):
     # ── 公开接口 ──────────────────────────────────────────
 
     def set_weather(self, kind: str, pet_center: QPoint) -> None:
-        """切换天气种类"""
+        """切换天气种类 旧粒子渐出 新粒子渐入"""
         if kind == self._kind and self._particles:
             self._origin = pet_center
             return
         self._kind = kind
         self._profile = _PROFILES.get(kind, _PROFILES["clear"])
         self._origin = pet_center
-        self._particles.clear()
+        # 旧粒子标记 draining 让它们自然淡出
+        for p in self._particles:
+            if not p.draining:
+                p.draining = True
+                p.lifetime = min(p.lifetime, p.age + 1.0)
         if kind == "clear":
-            self.hide_layer()
+            if not self._particles:
+                self._hide_immediate()
             return
         self._spawn_initial()
         self.show_layer()
@@ -149,6 +155,15 @@ class WeatherOverlay(QWidget):
             self._timer.start(80)
 
     def hide_layer(self) -> None:
+        """优雅淡出 — 标记 draining 等 _tick 发现全部死光再关"""
+        for p in self._particles:
+            p.draining = True
+            p.lifetime = min(p.lifetime, p.age + 1.0)
+        self._kind = "clear"
+        self._profile = _PROFILES["clear"]
+
+    def _hide_immediate(self) -> None:
+        """无粒子时直接隐藏"""
         self._timer.stop()
         self._particles.clear()
         self.hide()
@@ -218,15 +233,16 @@ class WeatherOverlay(QWidget):
             alive.append(p)
         self._particles = alive
 
-        # 补粒子
+        # 只给非 draining 的天气补粒子
+        non_draining = sum(1 for p in self._particles if not p.draining)
         lo, hi = prof.count
         target = random.randint(lo, hi) if hi > lo else lo
-        while len(self._particles) < target:
+        while non_draining < target:
             self._particles.append(self._make_particle())
+            non_draining += 1
 
         if not self._particles and self._kind == "clear":
-            self._timer.stop()
-            self.hide()
+            self._hide_immediate()
             return
         self.update()
 

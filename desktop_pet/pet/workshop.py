@@ -172,6 +172,8 @@ class WorkshopWindow(QWidget):
             painter.drawPixmap(self.rect(), self._background)
         else:
             painter.fillRect(self.rect(), QColor("#25282b"))
+        if self._weather_kind and self._weather_kind != "clear":
+            self._paint_weather_tint(painter)
         self._paint_window_weather(painter)
         self._paint_books(painter)
         self._paint_keepsakes(painter)
@@ -189,6 +191,20 @@ class WorkshopWindow(QWidget):
             return
         target = self._sprite_rect()
         painter.drawPixmap(target, pixmap, QRectF(pixmap.rect()))
+
+    _WEATHER_TINTS = {
+        "rain": QColor(60, 70, 100, 12),
+        "fog": QColor(140, 135, 120, 10),
+        "stars": QColor(30, 25, 60, 15),
+        "warm": QColor(120, 80, 50, 8),
+        "static": QColor(100, 100, 100, 8),
+        "gentle": QColor(60, 100, 75, 8),
+    }
+
+    def _paint_weather_tint(self, painter: QPainter) -> None:
+        tint = self._WEATHER_TINTS.get(self._weather_kind)
+        if tint is not None:
+            painter.fillRect(self.rect(), tint)
 
     def _paint_window_weather(self, painter: QPainter) -> None:
         """在窗户区域叠加记忆天气微缩视觉"""

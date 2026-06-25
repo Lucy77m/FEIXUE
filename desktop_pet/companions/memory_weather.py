@@ -132,6 +132,11 @@ class MemoryWeather(QObject):
             self._overlay.set_weather(kind, center)
         # 写入 somatic 供 LLM 上下文
         somatic.set_state("mweather", f"memory weather: {kind}")
+        # 同步到宠物身体
+        try:
+            self._host._pet.set_mood_weather(kind if kind != "clear" else "")
+        except Exception:
+            pass
         # 天气种类真正变了才触发行为和气泡
         if kind != old:
             self._trigger_behavior(kind)
